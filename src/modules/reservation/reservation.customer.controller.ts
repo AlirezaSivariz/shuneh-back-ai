@@ -1,0 +1,39 @@
+import { Request, Response } from 'express';
+import * as service from './reservation.customer.service';
+import { sendSuccess } from '../../utils/response';
+
+export async function create(req: Request, res: Response): Promise<void> {
+  const reservation = await service.createReservation(req.user!.id, req.body);
+  sendSuccess(res, { reservation }, 201);
+}
+
+export async function list(req: Request, res: Response): Promise<void> {
+  const filter = req.query.filter as 'upcoming' | 'past' | undefined;
+  const reservations = await service.listCustomerReservations(req.user!.id, filter);
+  sendSuccess(res, { reservations });
+}
+
+export async function detail(req: Request, res: Response): Promise<void> {
+  const reservation = await service.getReservation(req.user!.id, req.params.id);
+  sendSuccess(res, { reservation });
+}
+
+export async function cancel(req: Request, res: Response): Promise<void> {
+  const reservation = await service.cancelReservation(req.user!.id, req.params.id);
+  sendSuccess(res, { reservation });
+}
+
+export async function stylistList(req: Request, res: Response): Promise<void> {
+  const filter = req.query.filter as 'upcoming' | 'past' | undefined;
+  const reservations = await service.listStylistReservations(req.user!.id, filter);
+  sendSuccess(res, { reservations });
+}
+
+export async function stylistCancel(req: Request, res: Response): Promise<void> {
+  const reservation = await service.cancelByStylist(
+    req.user!.id,
+    req.params.id,
+    req.body?.reason,
+  );
+  sendSuccess(res, { reservation });
+}

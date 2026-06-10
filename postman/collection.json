@@ -1,0 +1,816 @@
+{
+  "info": {
+    "name": "Salon Reservation - Full API (Phase 1 + Owner + Auto-complete)",
+    "_postman_id": "c2d3e4f5-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "description": "Complete, up-to-date collection for all implemented endpoints. Run top-to-bottom for the full scenario: stylist onboarding (otp -> verify -> role -> personal -> services -> workplace -> working hours -> media) -> owner (invite accept -> approve stylist) -> customer (role -> reservations). Folders marked '(Phase 2 - not implemented)' describe planned endpoints that are NOT yet in the backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [{ "key": "baseUrl", "value": "http://localhost:4000" }],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "OTP-only authentication. Issues access + revocable refresh tokens.",
+      "item": [
+        {
+          "name": "OTP Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.devCode) {",
+                  "  pm.environment.set('otpCode', res.data.devCode);",
+                  "  console.log('otpCode =', res.data.devCode);",
+                  "}",
+                  "pm.test('2xx', () => pm.expect(pm.response.code).to.be.below(300));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{phone}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/request", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "request"] },
+            "description": "Create/store an OTP. In dev the fixed code is returned as data.devCode and saved to {{otpCode}}."
+          }
+        },
+        {
+          "name": "OTP Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.tokens) {",
+                  "  pm.environment.set('accessToken', res.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', res.data.tokens.refreshToken);",
+                  "}",
+                  "if (res && res.data && res.data.user) {",
+                  "  pm.environment.set('userId', res.data.user.id);",
+                  "}",
+                  "pm.test('tokens saved', () => pm.expect(res.data.tokens.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{phone}}\",\n  \"code\": \"{{otpCode}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+            "description": "Verify OTP, create user if new, return { user, tokens }. Saves accessToken, refreshToken, userId."
+          }
+        },
+        {
+          "name": "Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.tokens) {",
+                  "  pm.environment.set('accessToken', res.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', res.data.tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "description": "Rotate refresh token -> new token pair. Saves both."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] },
+            "description": "Revoke the given refresh token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Onboarding",
+      "description": "Role selection + resumable onboarding state.",
+      "item": [
+        {
+          "name": "Set Role (stylist)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.success) {",
+                  "  pm.environment.set('stylistId', pm.environment.get('userId'));",
+                  "  console.log('stylistId =', pm.environment.get('userId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"roles\": [\"stylist\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/onboarding/role", "host": ["{{baseUrl}}"], "path": ["onboarding", "role"] },
+            "description": "Add roles (idempotent). Adding 'stylist' starts onboarding. Saves stylistId = current userId."
+          }
+        },
+        {
+          "name": "Get Onboarding State",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/onboarding/state", "host": ["{{baseUrl}}"], "path": ["onboarding", "state"] },
+            "description": "Current step + everything captured so far (resume point)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Me",
+      "description": "Personal info (onboarding step 1).",
+      "item": [
+        {
+          "name": "Update Personal Info",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"firstName\": \"Sara\",\n  \"lastName\": \"Ahmadi\",\n  \"nationalCode\": \"0084575948\",\n  \"birthDate\": \"1995-04-12\"\n}" },
+            "url": { "raw": "{{baseUrl}}/me/personal", "host": ["{{baseUrl}}"], "path": ["me", "personal"] },
+            "description": "Set name, validated national code, birth date. Advances to 'services'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Services",
+      "description": "Catalogue + stylist service selection (step 2).",
+      "item": [
+        {
+          "name": "List Categories & Services",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.categories) {",
+                  "  for (const cat of res.data.categories) {",
+                  "    if (cat.services && cat.services.length) {",
+                  "      pm.environment.set('categoryId', cat.id);",
+                  "      pm.environment.set('serviceId', cat.services[0].id);",
+                  "      console.log('serviceId =', cat.services[0].id);",
+                  "      break;",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/services", "host": ["{{baseUrl}}"], "path": ["services"] },
+            "description": "Public catalogue: categories with nested services. Saves categoryId + serviceId."
+          }
+        },
+        {
+          "name": "Set Stylist Services",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    { \"serviceId\": \"{{serviceId}}\", \"price\": 250000, \"durationMin\": 45 }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/services", "host": ["{{baseUrl}}"], "path": ["stylist", "services"] },
+            "description": "Select offered services (price/duration optional = inherit defaults). Advances to 'workplace'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stylist Workplace",
+      "description": "Step 3. Primary happy path: Set Workplace Type -> Create Own Salon. The other requests are alternatives / owner-flow setup.",
+      "item": [
+        {
+          "name": "Set Workplace Type",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"salon\"\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/workplace", "host": ["{{baseUrl}}"], "path": ["stylist", "workplace"] },
+            "description": "Choose 'freelance' or 'salon'."
+          }
+        },
+        {
+          "name": "Create Own Salon (primary)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.salon && res.data.salon._id) {",
+                  "  pm.environment.set('salonId', res.data.salon._id);",
+                  "  console.log('salonId =', res.data.salon._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Sara Beauty Studio\",\n  \"description\": \"Hair & nails\",\n  \"address\": \"Tehran, Mirdamad Blvd, No. 8\",\n  \"lng\": 51.4180,\n  \"lat\": 35.7600,\n  \"openingHours\": [\n    { \"dayOfWeek\": 6, \"intervals\": [{ \"start\": \"09:00\", \"end\": \"21:00\" }] },\n    { \"dayOfWeek\": 0, \"intervals\": [{ \"start\": \"09:00\", \"end\": \"21:00\" }] }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/salons", "host": ["{{baseUrl}}"], "path": ["salons"] },
+            "description": "Stylist creates a salon they own (active) + auto active membership. Saves salonId. Used by Working Hours."
+          }
+        },
+        {
+          "name": "Search Salons (alternative)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.salons && res.data.salons.length) {",
+                  "  console.log('found salon', res.data.salons[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/salons/search?name=&lng=51.4180&lat=35.7600&radius=5000",
+              "host": ["{{baseUrl}}"],
+              "path": ["salons", "search"],
+              "query": [
+                { "key": "name", "value": "" },
+                { "key": "lng", "value": "51.4180" },
+                { "key": "lat", "value": "35.7600" },
+                { "key": "radius", "value": "5000" }
+              ]
+            },
+            "description": "Geo (2dsphere) + name search for salons."
+          }
+        },
+        {
+          "name": "Join Existing Salon (alternative)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"salonId\": \"{{salonId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/salons", "host": ["{{baseUrl}}"], "path": ["stylist", "salons"] },
+            "description": "Join an existing salon -> membership 'pending' (owner approves). NOTE: returns 409 if already linked (e.g. your own salon)."
+          }
+        },
+        {
+          "name": "Create Salon Invite (owner-flow setup)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data) {",
+                  "  if (res.data.salon && res.data.salon.id) pm.environment.set('inviteSalonId', res.data.salon.id);",
+                  "  if (res.data.invite && res.data.invite.token) {",
+                  "    pm.environment.set('inviteToken', res.data.invite.token);",
+                  "    console.log('inviteToken =', res.data.invite.token);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"targetPhone\": \"{{ownerPhone}}\",\n  \"salonDraft\": {\n    \"name\": \"Downtown Salon\",\n    \"description\": \"Owned by someone else\",\n    \"address\": \"Tehran, Enghelab St, No. 5\",\n    \"lng\": 51.3890,\n    \"lat\": 35.7010,\n    \"openingHours\": [\n      { \"dayOfWeek\": 6, \"intervals\": [{ \"start\": \"10:00\", \"end\": \"20:00\" }] }\n    ]\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/salons/invite", "host": ["{{baseUrl}}"], "path": ["salons", "invite"] },
+            "description": "Register a salon for its real owner -> pending salon + pending membership + invite SMS (stub). Saves inviteSalonId + inviteToken. Required before the Owner flow."
+          }
+        },
+        {
+          "name": "Set Freelance Workplace (alternative)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"address\": \"Tehran, Valiasr St, No. 120\",\n  \"lng\": 51.4055,\n  \"lat\": 35.7219\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/workplace/freelance", "host": ["{{baseUrl}}"], "path": ["stylist", "workplace", "freelance"] },
+            "description": "Freelance branch: save address + location. Completes the workplace step."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stylist Salons",
+      "description": "Salons the stylist is linked to, with status (supports multi-salon).",
+      "item": [
+        {
+          "name": "List My Salons",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/stylist/salons", "host": ["{{baseUrl}}"], "path": ["stylist", "salons"] },
+            "description": "GET /stylist/salons -> [{ membershipId, status, salon }] (active + pending)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Working Hours",
+      "description": "Step 4. Weekly availability. Salon-bound intervals require an ACTIVE membership and must fit the salon's opening hours; no same-day overlaps.",
+      "item": [
+        {
+          "name": "Set Working Hours",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.schedule) {",
+                  "  for (const d of res.data.schedule) {",
+                  "    if (d.entries && d.entries.length) {",
+                  "      pm.environment.set('workingHourId', d.entries[0].id);",
+                  "      console.log('workingHourId =', d.entries[0].id);",
+                  "      break;",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"entries\": [\n    { \"salonId\": \"{{salonId}}\", \"dayOfWeek\": 6, \"start\": \"10:00\", \"end\": \"14:00\" },\n    { \"salonId\": \"{{salonId}}\", \"dayOfWeek\": 6, \"start\": \"15:00\", \"end\": \"19:00\" },\n    { \"salonId\": null, \"dayOfWeek\": 0, \"start\": \"09:00\", \"end\": \"12:00\" }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/working-hours", "host": ["{{baseUrl}}"], "path": ["stylist", "working-hours"] },
+            "description": "Atomic full-replace of weekly hours. Saves workingHourId of the first entry. Advances to 'media'."
+          }
+        },
+        {
+          "name": "Get Weekly Schedule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/stylist/working-hours", "host": ["{{baseUrl}}"], "path": ["stylist", "working-hours"] },
+            "description": "Weekly schedule grouped by dayOfWeek with salon info per interval."
+          }
+        },
+        {
+          "name": "Update One Interval",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"start\": \"10:30\",\n  \"end\": \"13:30\"\n}" },
+            "url": { "raw": "{{baseUrl}}/stylist/working-hours/{{workingHourId}}", "host": ["{{baseUrl}}"], "path": ["stylist", "working-hours", "{{workingHourId}}"] },
+            "description": "Edit a single interval (re-runs all validations against the other entries)."
+          }
+        },
+        {
+          "name": "Delete One Interval",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/stylist/working-hours/{{workingHourId}}", "host": ["{{baseUrl}}"], "path": ["stylist", "working-hours", "{{workingHourId}}"] },
+            "description": "Delete a single interval."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Media",
+      "description": "Step 5. Profile photo + portfolio (multipart). Completes onboarding.",
+      "item": [
+        {
+          "name": "Upload Stylist Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "profilePhoto", "type": "file", "src": [], "description": "Single profile photo (jpeg/png/webp, <=5MB)" },
+                { "key": "portfolio", "type": "file", "src": [], "description": "Portfolio image; add this key multiple times (up to 10)" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/stylist/media", "host": ["{{baseUrl}}"], "path": ["stylist", "media"] },
+            "description": "Select files in Body tab. On success: onboardingStep='completed', profile activated."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invite (Owner)",
+      "description": "Owner claims the invited salon. Run the Owner login first (it switches the active tokens to the owner's). ownerPhone MUST equal the targetPhone used in 'Create Salon Invite'.",
+      "item": [
+        {
+          "name": "Owner: OTP Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.devCode) pm.environment.set('otpCode', res.data.devCode);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{ownerPhone}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/request", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "request"] },
+            "description": "Request OTP for the owner's phone."
+          }
+        },
+        {
+          "name": "Owner: OTP Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.tokens) {",
+                  "  pm.environment.set('accessToken', res.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', res.data.tokens.refreshToken);",
+                  "}",
+                  "console.log('Now logged in as OWNER');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{ownerPhone}}\",\n  \"code\": \"{{otpCode}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+            "description": "Log in as the owner (switches active tokens to the owner)."
+          }
+        },
+        {
+          "name": "Get Invite (public)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/invite/{{inviteToken}}", "host": ["{{baseUrl}}"], "path": ["invite", "{{inviteToken}}"] },
+            "description": "Public view of the invite, the pending salon draft and the requesting stylist."
+          }
+        },
+        {
+          "name": "Accept Invite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Downtown Salon\",\n  \"description\": \"Confirmed by owner\",\n  \"address\": \"Tehran, Enghelab St, No. 5\",\n  \"lng\": 51.3890,\n  \"lat\": 35.7010,\n  \"openingHours\": [\n    { \"dayOfWeek\": 6, \"intervals\": [{ \"start\": \"10:00\", \"end\": \"20:00\" }] }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/invite/{{inviteToken}}/accept", "host": ["{{baseUrl}}"], "path": ["invite", "{{inviteToken}}", "accept"] },
+            "description": "Owner (phone must match targetPhone) confirms/edits the salon. Grants 'owner' role, activates the salon, completes the invite."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Owner",
+      "description": "Salon management from the owner's perspective. Requires owner tokens (run 'Invite (Owner)' first).",
+      "item": [
+        {
+          "name": "List My Salons",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/owner/salons", "host": ["{{baseUrl}}"], "path": ["owner", "salons"] },
+            "description": "All salons owned by this owner."
+          }
+        },
+        {
+          "name": "List Pending Stylists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.stylists && res.data.stylists.length) {",
+                  "  pm.environment.set('stylistId', res.data.stylists[0].stylistId);",
+                  "  console.log('stylistId =', res.data.stylists[0].stylistId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/salons/{{inviteSalonId}}/stylists?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["salons", "{{inviteSalonId}}", "stylists"],
+              "query": [{ "key": "status", "value": "pending" }]
+            },
+            "description": "Pending stylist requests for the salon (owner-only), with stylist + their services/working hours. Saves stylistId."
+          }
+        },
+        {
+          "name": "Approve Stylist",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/salons/{{inviteSalonId}}/stylists/{{stylistId}}/approve", "host": ["{{baseUrl}}"], "path": ["salons", "{{inviteSalonId}}", "stylists", "{{stylistId}}", "approve"] },
+            "description": "Approve a stylist's membership -> active (only the salon owner)."
+          }
+        },
+        {
+          "name": "Reject Stylist (alternative)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/salons/{{inviteSalonId}}/stylists/{{stylistId}}/reject", "host": ["{{baseUrl}}"], "path": ["salons", "{{inviteSalonId}}", "stylists", "{{stylistId}}", "reject"] },
+            "description": "Reject a stylist's membership -> rejected (only the salon owner)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stylists (Public/Customer)  [Phase 2 - not implemented]",
+      "description": "PLANNED endpoints for customer-facing stylist discovery. These are NOT yet in the backend and will return 404 until Phase 2 is implemented. Shapes are proposals.",
+      "item": [
+        {
+          "name": "Search Stylists [planned]",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stylists/search?serviceId={{serviceId}}&lng=51.4180&lat=35.7600&radius=5000&name=",
+              "host": ["{{baseUrl}}"],
+              "path": ["stylists", "search"],
+              "query": [
+                { "key": "serviceId", "value": "{{serviceId}}" },
+                { "key": "lng", "value": "51.4180" },
+                { "key": "lat", "value": "35.7600" },
+                { "key": "radius", "value": "5000" },
+                { "key": "name", "value": "" }
+              ]
+            },
+            "description": "[Phase 2 / not implemented] Search active stylists by service + location."
+          }
+        },
+        {
+          "name": "Stylist Profile [planned]",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/stylists/{{stylistId}}", "host": ["{{baseUrl}}"], "path": ["stylists", "{{stylistId}}"] },
+            "description": "[Phase 2 / not implemented] Public stylist profile (services, portfolio, salons)."
+          }
+        },
+        {
+          "name": "Stylist Availability [planned]",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stylists/{{stylistId}}/availability?date=2026-06-13&serviceIds={{serviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["stylists", "{{stylistId}}", "availability"],
+              "query": [
+                { "key": "date", "value": "2026-06-13" },
+                { "key": "serviceIds", "value": "{{serviceId}}" }
+              ]
+            },
+            "description": "[Phase 2 / not implemented] Free slots for a date given the requested services."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservations (Customer)  [mostly Phase 2]",
+      "description": "Customer login + role are implemented; reservation CRUD is PLANNED (Phase 2, not yet in backend).",
+      "item": [
+        {
+          "name": "Customer: OTP Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.devCode) pm.environment.set('otpCode', res.data.devCode);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{customerPhone}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/request", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "request"] },
+            "description": "Request OTP for the customer's phone."
+          }
+        },
+        {
+          "name": "Customer: OTP Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.tokens) {",
+                  "  pm.environment.set('accessToken', res.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', res.data.tokens.refreshToken);",
+                  "}",
+                  "if (res && res.data && res.data.user) pm.environment.set('customerId', res.data.user.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{customerPhone}}\",\n  \"code\": \"{{otpCode}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+            "description": "Log in as the customer. Saves tokens + customerId."
+          }
+        },
+        {
+          "name": "Customer: Set Role",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"roles\": [\"customer\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/onboarding/role", "host": ["{{baseUrl}}"], "path": ["onboarding", "role"] },
+            "description": "Add the 'customer' role (idempotent). IMPLEMENTED."
+          }
+        },
+        {
+          "name": "Create Reservation [planned]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res && res.data && res.data.reservation && res.data.reservation.id) {",
+                  "  pm.environment.set('reservationId', res.data.reservation.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"stylistId\": \"{{stylistId}}\",\n  \"salonId\": \"{{salonId}}\",\n  \"serviceId\": \"{{serviceId}}\",\n  \"date\": \"2026-06-13\",\n  \"startTime\": \"10:30\"\n}" },
+            "url": { "raw": "{{baseUrl}}/reservations", "host": ["{{baseUrl}}"], "path": ["reservations"] },
+            "description": "[Phase 2 / not implemented] Create a reservation. Would save reservationId."
+          }
+        },
+        {
+          "name": "List Reservations - upcoming [planned]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reservations?filter=upcoming",
+              "host": ["{{baseUrl}}"],
+              "path": ["reservations"],
+              "query": [{ "key": "filter", "value": "upcoming" }]
+            },
+            "description": "[Phase 2 / not implemented] Customer's upcoming reservations."
+          }
+        },
+        {
+          "name": "List Reservations - past [planned]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reservations?filter=past",
+              "host": ["{{baseUrl}}"],
+              "path": ["reservations"],
+              "query": [{ "key": "filter", "value": "past" }]
+            },
+            "description": "[Phase 2 / not implemented] Customer's past reservations."
+          }
+        },
+        {
+          "name": "Reservation Details [planned]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/reservations/{{reservationId}}", "host": ["{{baseUrl}}"], "path": ["reservations", "{{reservationId}}"] },
+            "description": "[Phase 2 / not implemented] Single reservation details."
+          }
+        },
+        {
+          "name": "Cancel Reservation [planned]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/reservations/{{reservationId}}/cancel", "host": ["{{baseUrl}}"], "path": ["reservations", "{{reservationId}}", "cancel"] },
+            "description": "[Phase 2 / not implemented] Cancel a reservation."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stylist Reservations  [Phase 2 - not implemented]",
+      "description": "PLANNED. Stylist's own reservations list is not yet in the backend.",
+      "item": [
+        {
+          "name": "List Stylist Reservations [planned]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stylist/reservations?filter=upcoming",
+              "host": ["{{baseUrl}}"],
+              "path": ["stylist", "reservations"],
+              "query": [{ "key": "filter", "value": "upcoming" }]
+            },
+            "description": "[Phase 2 / not implemented] Reservations booked with this stylist."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Internal / Admin",
+      "description": "Operational triggers + health.",
+      "item": [
+        {
+          "name": "Complete Due Reservations",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "x-internal-key", "value": "{{internalApiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/internal/reservations/complete-due", "host": ["{{baseUrl}}"], "path": ["internal", "reservations", "complete-due"] },
+            "description": "Manually run the reservation auto-complete pass (the same logic the cron job calls). The x-internal-key header is required only if INTERNAL_API_KEY is set on the server; in dev with no key it is open."
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Health check."
+          }
+        }
+      ]
+    }
+  ]
+}

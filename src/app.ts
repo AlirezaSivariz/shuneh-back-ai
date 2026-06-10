@@ -1,0 +1,67 @@
+import path from "path";
+import express, { Application, Request, Response } from "express";
+import cors from "cors";
+import morgan from "morgan";
+// import "./types/express"; // load Request augmentation
+
+import { config } from "./config/env";
+import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
+import { sendSuccess } from "./utils/response";
+
+import authRoutes from "./modules/auth/auth.routes";
+import {
+  onboardingRouter,
+  meRouter,
+} from "./modules/onboarding/onboarding.routes";
+import serviceRoutes from "./modules/service/service.routes";
+import stylistRoutes from "./modules/stylist/stylist.routes";
+import stylistsPublicRoutes from "./modules/stylist/public.routes";
+import mediaRoutes from "./modules/media/media.routes";
+import salonRoutes from "./modules/salon/salon.routes";
+import { ownerRouter } from "./modules/salon/owner.routes";
+import inviteRoutes from "./modules/invite/invite.routes";
+import { adminRouter } from "./modules/admin/admin.routes";
+import {
+  internalRouter,
+  reservationRouter,
+} from "./modules/reservation/reservation.routes";
+
+export function createApp(): Application {
+  const app = express();
+
+  app.use(cors());
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  if (config.isDev) app.use(morgan("dev"));
+
+  // Static serving of uploaded files.
+  app.use("/uploads", express.static(path.resolve(config.uploadDir)));
+
+  // Health check.
+  app.get("/health", (_req: Request, res: Response) => {
+    sendSuccess(res, { status: "ok", env: config.nodeEnv });
+  });
+
+  // Feature routes.
+  app.use("/auth", authRoutes);
+  app.use("/onboarding", onboardingRouter);
+  app.use("/me", meRouter);
+  app.use("/services", serviceRoutes);
+  // Mount the more specific /stylist/media before /stylist so it matches first.
+  app.use("/stylist/media", mediaRoutes);
+  app.use("/stylist", stylistRoutes);
+  // Public customer-facing stylist discovery (plural path).
+  app.use("/stylists", stylistsPublicRoutes);
+  app.use("/salons", salonRoutes);
+  app.use("/owner", ownerRouter);
+  app.use("/invite", inviteRoutes);
+  app.use("/reservations", reservationRouter);
+  app.use("/admin", adminRouter);
+  app.use("/internal", internalRouter);
+
+  // 404 + central error handler (must be last).
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}

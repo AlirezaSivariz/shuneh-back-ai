@@ -1,0 +1,481 @@
+import { Types } from 'mongoose';
+import { Service, IService } from '../../models/Service';
+import { StylistService } from '../../models/StylistService';
+import { Salon, ISalon } from '../../models/Salon';
+import { StylistSalon } from '../../models/StylistSalon';
+import { WorkingHour } from '../../models/WorkingHour';
+import { WorkplaceType } from '../../models/StylistProfile';
+import { AppError } from '../../utils/AppError';
+import { toGeoPoint } from '../../utils/geo';
+import { Interval, isOrdered, overlaps, contains } from '../../utils/time';
+import {
+  ensureStylistProfile,
+  advanceStep,
+  getStylistProfile,
+} from '../onboarding/onboarding.service';
+
+interface ServiceItem {
+  serviceId: string;
+  price?: number | null;
+  durationMin?: number | null;
+}
+
+/**
+ * Step 2 — set the services a stylist offers. Upserts each StylistService and
+ * removes ones no longer selected (full replace of the stylist's service set).
+ */
+export async function setServices(stylistId: string, items: ServiceItem[]) {
+  const serviceIds = items.map((i) => i.serviceId);
+
+  // Make sure every referenced service exists.
+  const found = await Service.find({ _id: { $in: serviceIds } }).select('_id');
+  if (found.length !== new Set(serviceIds).size) {
+    throw AppError.badRequest('One or more services do not exist', 'SERVICE_NOT_FOUND');
+  }
+
+  // Upsert selected services.
+  for (const item of items) {
+    await StylistService.updateOne(
+      { stylistId, serviceId: item.serviceId },
+      {
+        $set: {
+          price: item.price ?? null,
+          durationMin: item.durationMin ?? null,
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  // Remove de-selected services.
+  await StylistService.deleteMany({
+    stylistId,
+    serviceId: { $nin: serviceIds },
+  });
+
+  const profile = await ensureStylistProfile(stylistId);
+  await advanceStep(profile, 'services');
+
+  return StylistService.find({ stylistId }).populate('serviceId');
+}
+
+/** Step 3 — choose workplace type (freelance | salon). */
+export async function setWorkplaceType(stylistId: string, type: WorkplaceType) {
+  const profile = await ensureStylistProfile(stylistId);
+  profile.workplaceType = type;
+  await profile.save();
+  return profile;
+}
+
+/** Step 3a — freelance address & location. Completes the workplace step. */
+export async function setFreelance(
+  stylistId: string,
+  data: { address: string; lng: number; lat: number },
+) {
+  const profile = await ensureStylistProfile(stylistId);
+  profile.workplaceType = 'freelance';
+  profile.freelance = {
+    address: data.address,
+    location: toGeoPoint(data.lng, data.lat),
+  };
+  await profile.save();
+  await advanceStep(profile, 'workplace');
+  return profile;
+}
+
+/** Step 3b — join an existing salon (membership pending owner approval). */
+export async function joinSalon(stylistId: string, salonId: string) {
+  const salon = await Salon.findById(salonId);
+  if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+
+  const existing = await StylistSalon.findOne({ stylistId, salonId });
+  if (existing) {
+    throw AppError.conflict('Already linked to this salon', 'ALREADY_LINKED');
+  }
+
+  const link = await StylistSalon.create({
+    stylistId: new Types.ObjectId(stylistId),
+    salonId: new Types.ObjectId(salonId),
+    status: 'pending',
+  });
+
+  const profile = await ensureStylistProfile(stylistId);
+  profile.workplaceType = 'salon';
+  await profile.save();
+  await advanceStep(profile, 'workplace');
+
+  return link;
+}
+
+/**
+ * List every salon the stylist is linked to, with the membership status
+ * (active / pending) and the salon details. Supports working in many salons.
+ */
+export async function listStylistSalons(stylistId: string) {
+  const links = await StylistSalon.find({ stylistId })
+    .populate<{ salonId: ISalon }>('salonId')
+    .sort({ createdAt: 1 });
+
+  return links.map((link) => {
+    const salon = link.salonId as unknown as ISalon | null;
+    return {
+      membershipId: String(link._id),
+      status: link.status,
+      salon: salon
+        ? {
+            id: String(salon._id),
+            name: salon.name,
+            address: salon.address,
+            status: salon.status,
+            openingHours: salon.openingHours,
+          }
+        : null,
+    };
+  });
+}
+
+// ───────────────────────── Working hours ─────────────────────────
+
+interface WorkingHourEntry {
+  salonId: string | null;
+  dayOfWeek: number;
+  start: string;
+  end: string;
+}
+
+/** Assert a single interval is well-formed (HH:mm already enforced by Zod). */
+function assertOrdered(entry: { start: string; end: string }) {
+  if (!isOrdered({ start: entry.start, end: entry.end })) {
+    throw AppError.badRequest(
+      `Interval ${entry.start}-${entry.end} is invalid (start must be before end)`,
+      'INVALID_INTERVAL',
+    );
+  }
+}
+
+/**
+ * Resolve the distinct salonIds and ensure each is a USABLE membership of the
+ * stylist (active OR pending — a pending stylist may still work and be booked;
+ * only rejected memberships are forbidden).
+ * Returns a map salonId -> Salon for downstream opening-hours checks.
+ */
+async function ensureUsableSalons(
+  stylistId: string,
+  salonIds: string[],
+): Promise<Map<string, ISalon>> {
+  if (salonIds.length === 0) return new Map();
+
+  const links = await StylistSalon.find({ stylistId, salonId: { $in: salonIds } });
+  const linkBySalon = new Map(links.map((l) => [String(l.salonId), l]));
+
+  for (const id of salonIds) {
+    const link = linkBySalon.get(id);
+    if (!link) {
+      throw AppError.forbidden(
+        `You are not linked to salon ${id}`,
+        'SALON_NOT_LINKED',
+      );
+    }
+    // Active and pending memberships may define working hours / be booked;
+    // only rejected memberships are forbidden.
+    if (link.status === 'rejected') {
+      throw AppError.badRequest(
+        `Your membership in salon ${id} was rejected`,
+        'SALON_REJECTED',
+      );
+    }
+  }
+
+  const salons = await Salon.find({ _id: { $in: salonIds } });
+  return new Map(salons.map((s) => [String(s._id), s]));
+}
+
+/** Assert a salon-bound entry fits entirely inside the salon's opening hours. */
+function assertInsideOpeningHours(salon: ISalon, entry: WorkingHourEntry) {
+  const dayHours = salon.openingHours.find((h) => h.dayOfWeek === entry.dayOfWeek);
+  const fits =
+    dayHours?.intervals.some((iv) =>
+      contains({ start: iv.start, end: iv.end }, { start: entry.start, end: entry.end }),
+    ) ?? false;
+
+  if (!fits) {
+    throw AppError.badRequest(
+      `Working hours ${entry.start}-${entry.end} on day ${entry.dayOfWeek} are outside the salon's opening hours`,
+      'OUTSIDE_OPENING_HOURS',
+    );
+  }
+}
+
+/**
+ * Assert that, per day of week, no two intervals overlap. Adjacent intervals
+ * that merely touch (e.g. 09:00-12:00 and 12:00-15:00) are allowed. The check
+ * is salon-agnostic: a stylist cannot be in two places at the same instant.
+ */
+function assertNoOverlaps(entries: { dayOfWeek: number; start: string; end: string }[]) {
+  const byDay = new Map<number, Interval[]>();
+  for (const e of entries) {
+    const list = byDay.get(e.dayOfWeek) ?? [];
+    const candidate: Interval = { start: e.start, end: e.end };
+    for (const existing of list) {
+      if (overlaps(existing, candidate)) {
+        throw AppError.conflict(
+          `Overlapping working hours on day ${e.dayOfWeek}: ${existing.start}-${existing.end} conflicts with ${candidate.start}-${candidate.end}`,
+          'WORKING_HOURS_OVERLAP',
+        );
+      }
+    }
+    list.push(candidate);
+    byDay.set(e.dayOfWeek, list);
+  }
+}
+
+/**
+ * Validate one entry in isolation: ordering + active salon + opening hours.
+ * (Cross-entry overlap is validated separately against the full set.)
+ */
+async function validateEntry(stylistId: string, entry: WorkingHourEntry) {
+  assertOrdered(entry);
+  if (entry.salonId) {
+    const salonMap = await ensureUsableSalons(stylistId, [entry.salonId]);
+    const salon = salonMap.get(entry.salonId);
+    if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+    assertInsideOpeningHours(salon, entry);
+  }
+}
+
+/**
+ * Step 4 — set the stylist's working hours (full replace, atomic).
+ * Every entry is validated before any write; if a single entry is invalid the
+ * whole request is rejected and existing hours are left untouched.
+ */
+export async function setWorkingHours(stylistId: string, entries: WorkingHourEntry[]) {
+  // 1) Per-entry ordering.
+  for (const e of entries) assertOrdered(e);
+
+  // 2) Salon linkage must be ACTIVE, and intervals inside opening hours.
+  const salonIds = [...new Set(entries.map((e) => e.salonId).filter(Boolean))] as string[];
+  const salonMap = await ensureUsableSalons(stylistId, salonIds);
+  for (const e of entries) {
+    if (!e.salonId) continue;
+    const salon = salonMap.get(e.salonId);
+    if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+    assertInsideOpeningHours(salon, e);
+  }
+
+  // 3) No overlapping intervals on the same day (even across different salons).
+  assertNoOverlaps(entries);
+
+  // 4) All valid → replace atomically (delete + insert).
+  await WorkingHour.deleteMany({ stylistId });
+  if (entries.length > 0) {
+    await WorkingHour.insertMany(
+      entries.map((e) => ({
+        stylistId: new Types.ObjectId(stylistId),
+        salonId: e.salonId ? new Types.ObjectId(e.salonId) : null,
+        dayOfWeek: e.dayOfWeek,
+        start: e.start,
+        end: e.end,
+      })),
+    );
+  }
+
+  const profile = await ensureStylistProfile(stylistId);
+  await advanceStep(profile, 'workingHours');
+
+  return getWorkingHours(stylistId);
+}
+
+/**
+ * Return the stylist's weekly schedule grouped by day of week, with each
+ * interval's salon info attached (null for freelance intervals).
+ */
+export async function getWorkingHours(stylistId: string) {
+  const hours = await WorkingHour.find({ stylistId })
+    .populate<{ salonId: ISalon | null }>('salonId')
+    .sort({ dayOfWeek: 1, start: 1 });
+
+  const days = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek,
+    entries: [] as Array<{
+      id: string;
+      start: string;
+      end: string;
+      salon: { id: string; name: string } | null;
+    }>,
+  }));
+
+  for (const h of hours) {
+    const salon = h.salonId as unknown as ISalon | null;
+    days[h.dayOfWeek].entries.push({
+      id: String(h._id),
+      start: h.start,
+      end: h.end,
+      salon: salon ? { id: String(salon._id), name: salon.name } : null,
+    });
+  }
+
+  return { schedule: days };
+}
+
+interface WorkingHourPatch {
+  salonId?: string | null;
+  dayOfWeek?: number;
+  start?: string;
+  end?: string;
+}
+
+/** Update a single working-hours interval, re-running all validations. */
+export async function updateWorkingHour(
+  stylistId: string,
+  workingHourId: string,
+  patch: WorkingHourPatch,
+) {
+  const current = await WorkingHour.findOne({ _id: workingHourId, stylistId });
+  if (!current) {
+    throw AppError.notFound('Working-hours entry not found', 'WORKING_HOUR_NOT_FOUND');
+  }
+
+  // Merge patch onto the existing entry.
+  const merged: WorkingHourEntry = {
+    salonId:
+      patch.salonId !== undefined
+        ? patch.salonId
+        : current.salonId
+          ? String(current.salonId)
+          : null,
+    dayOfWeek: patch.dayOfWeek ?? current.dayOfWeek,
+    start: patch.start ?? current.start,
+    end: patch.end ?? current.end,
+  };
+
+  // Validate the merged entry on its own.
+  await validateEntry(stylistId, merged);
+
+  // Overlap check against all OTHER entries of this stylist.
+  const others = await WorkingHour.find({ stylistId, _id: { $ne: workingHourId } });
+  assertNoOverlaps([
+    ...others.map((o) => ({ dayOfWeek: o.dayOfWeek, start: o.start, end: o.end })),
+    merged,
+  ]);
+
+  current.salonId = merged.salonId ? new Types.ObjectId(merged.salonId) : null;
+  current.dayOfWeek = merged.dayOfWeek;
+  current.start = merged.start;
+  current.end = merged.end;
+  await current.save();
+
+  return getWorkingHours(stylistId);
+}
+
+/** Delete a single working-hours interval. */
+export async function deleteWorkingHour(stylistId: string, workingHourId: string) {
+  const result = await WorkingHour.deleteOne({ _id: workingHourId, stylistId });
+  if (result.deletedCount === 0) {
+    throw AppError.notFound('Working-hours entry not found', 'WORKING_HOUR_NOT_FOUND');
+  }
+  return getWorkingHours(stylistId);
+}
+
+// ───────────────────── Service management (post-onboarding) ─────────────────────
+
+/**
+ * List the stylist's current services with their EFFECTIVE price/duration
+ * (per-stylist override, falling back to the service default) plus the raw
+ * overrides so the edit UI can distinguish "custom" from "default".
+ */
+export async function listStylistServices(stylistId: string) {
+  const links = await StylistService.find({ stylistId })
+    .populate<{ serviceId: IService }>('serviceId')
+    .sort({ createdAt: 1 });
+
+  const services = links
+    .map((link) => {
+      const svc = link.serviceId as unknown as IService | null;
+      if (!svc) return null;
+      return {
+        id: String(link._id),
+        serviceId: String(svc._id),
+        name: svc.name,
+        categoryId: String(svc.categoryId),
+        price: link.price ?? svc.defaultPrice, // effective
+        durationMin: link.durationMin ?? svc.durationMin, // effective
+        customPrice: link.price,
+        customDurationMin: link.durationMin,
+        defaultPrice: svc.defaultPrice,
+        defaultDurationMin: svc.durationMin,
+      };
+    })
+    .filter(Boolean);
+
+  return { services };
+}
+
+/**
+ * Full replace of the stylist's service set (post-onboarding management).
+ * Same validation as onboarding but does NOT touch onboardingStep.
+ */
+export async function replaceStylistServices(stylistId: string, items: ServiceItem[]) {
+  const serviceIds = items.map((i) => i.serviceId);
+  if (serviceIds.length > 0) {
+    const found = await Service.find({ _id: { $in: serviceIds } }).select('_id');
+    if (found.length !== new Set(serviceIds).size) {
+      throw AppError.badRequest('One or more services do not exist', 'SERVICE_NOT_FOUND');
+    }
+  }
+
+  for (const item of items) {
+    await StylistService.updateOne(
+      { stylistId, serviceId: item.serviceId },
+      { $set: { price: item.price ?? null, durationMin: item.durationMin ?? null } },
+      { upsert: true },
+    );
+  }
+  await StylistService.deleteMany({ stylistId, serviceId: { $nin: serviceIds } });
+
+  return listStylistServices(stylistId);
+}
+
+/** Add (or upsert) a single service to the stylist's offering. */
+export async function addStylistService(
+  stylistId: string,
+  serviceId: string,
+  data: { price?: number | null; durationMin?: number | null },
+) {
+  const svc = await Service.findById(serviceId).select('_id');
+  if (!svc) throw AppError.notFound('Service not found', 'SERVICE_NOT_FOUND');
+
+  await StylistService.updateOne(
+    { stylistId, serviceId },
+    { $set: { price: data.price ?? null, durationMin: data.durationMin ?? null } },
+    { upsert: true },
+  );
+  return listStylistServices(stylistId);
+}
+
+/** Edit the custom price/duration of one of the stylist's services. */
+export async function updateStylistService(
+  stylistId: string,
+  serviceId: string,
+  data: { price?: number | null; durationMin?: number | null },
+) {
+  const link = await StylistService.findOne({ stylistId, serviceId });
+  if (!link) {
+    throw AppError.notFound('This service is not in your offering', 'STYLIST_SERVICE_NOT_FOUND');
+  }
+  if (data.price !== undefined) link.price = data.price;
+  if (data.durationMin !== undefined) link.durationMin = data.durationMin;
+  await link.save();
+  return listStylistServices(stylistId);
+}
+
+/** Remove a single service from the stylist's offering. */
+export async function removeStylistService(stylistId: string, serviceId: string) {
+  const result = await StylistService.deleteOne({ stylistId, serviceId });
+  if (result.deletedCount === 0) {
+    throw AppError.notFound('This service is not in your offering', 'STYLIST_SERVICE_NOT_FOUND');
+  }
+  return listStylistServices(stylistId);
+}
+
+/** Read the stylist profile (used by the media step and others). */
+export { getStylistProfile };
