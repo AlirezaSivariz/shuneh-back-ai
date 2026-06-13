@@ -10,6 +10,12 @@ import {
 } from '../reservation/reservation.validators';
 import * as reportsController from '../reports/reports.controller';
 import { reportRangeSchema } from '../reports/reports.validators';
+import * as discountController from '../discount/discount.controller';
+import {
+  createDiscountCodeSchema,
+  updateDiscountCodeSchema,
+  discountCodeIdParamsSchema,
+} from '../discount/discount.validators';
 import {
   setServicesSchema,
   replaceServicesSchema,
@@ -113,7 +119,30 @@ router.patch(
   asyncHandler(reservationController.stylistCancel),
 );
 
-// Stylist earnings/activity report.
+// Stylist earnings/activity report + analytics (services ranking + weekday).
 router.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.stylistReport));
+router.get(
+  '/reports/analytics',
+  validate(reportRangeSchema),
+  asyncHandler(reportsController.stylistAnalytics),
+);
+
+// Discount codes (CRUD over the stylist's own codes).
+router.post(
+  '/discount-codes',
+  validate(createDiscountCodeSchema),
+  asyncHandler(discountController.create),
+);
+router.get('/discount-codes', asyncHandler(discountController.list));
+router.patch(
+  '/discount-codes/:id',
+  validate(updateDiscountCodeSchema),
+  asyncHandler(discountController.update),
+);
+router.delete(
+  '/discount-codes/:id',
+  validate(discountCodeIdParamsSchema),
+  asyncHandler(discountController.remove),
+);
 
 export default router;

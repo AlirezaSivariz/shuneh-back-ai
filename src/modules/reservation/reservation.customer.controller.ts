@@ -1,10 +1,23 @@
 import { Request, Response } from 'express';
 import * as service from './reservation.customer.service';
+import * as discountService from '../discount/discount.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function create(req: Request, res: Response): Promise<void> {
   const reservation = await service.createReservation(req.user!.id, req.body);
   sendSuccess(res, { reservation }, 201);
+}
+
+/** Preview/validate a discount code for a prospective booking (no writes). */
+export async function validateDiscount(req: Request, res: Response): Promise<void> {
+  const { stylistId, code, serviceIds, date, startTime } = req.body;
+  const result = await discountService.previewDiscount(stylistId, {
+    code,
+    serviceIds,
+    date,
+    startTime,
+  });
+  sendSuccess(res, result);
 }
 
 export async function list(req: Request, res: Response): Promise<void> {

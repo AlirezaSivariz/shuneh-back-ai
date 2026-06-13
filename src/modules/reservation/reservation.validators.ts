@@ -13,6 +13,8 @@ export const createReservationSchema = {
       serviceIds: z.array(objectId).min(1).optional(),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
       startTime: z.string().refine(isValidHHmm, 'startTime must be HH:mm'),
+      // Optional discount code, re-validated and applied server-side.
+      discountCode: z.string().trim().min(1).max(32).optional(),
     })
     .transform((b) => ({
       ...b,

@@ -133,6 +133,86 @@ export async function getStylistReport(stylistId: string, from: string, to: stri
   };
 }
 
+// ─────────────────────────── Stylist analytics ───────────────────────────
+
+/**
+ * Analytics for a stylist: most-booked services (ranked by booking count, with
+ * revenue and share-of-total) and a weekday breakdown (which days are busiest).
+ *
+ * Computed over COMPLETED reservations in the range (realized business), so the
+ * counts/revenue stay consistent. The date filter is on `reservation.date`; the
+ * weekday is derived in Iran time — because `date` stores the Iran calendar day
+ * in its UTC components, `$dayOfWeek` with timezone 'UTC' yields the Iran
+ * weekday (Mongo 1=Sun…7=Sat → JS 0=Sun…6=Sat via `- 1`).
+ *
+ * Service ranking is per-ITEM (a multi-service booking counts once per service,
+ * via $unwind on items), as requested.
+ */
+export async function getStylistAnalytics(stylistId: string, from: string, to: string) {
+  const match = {
+    stylistId: new Types.ObjectId(stylistId),
+    date: dayRange(from, to),
+    status: 'completed' as ReservationStatus,
+  };
+
+  const [agg] = await Reservation.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        byService: [
+          ...itemsStage,
+          {
+            $group: {
+              _id: '$_items.serviceId',
+              count: { $sum: 1 },
+              revenue: { $sum: { $ifNull: ['$_items.price', 0] } },
+            },
+          },
+          { $sort: { count: -1, revenue: -1 } },
+        ],
+        byDayOfWeek: [
+          {
+            $group: {
+              _id: { $subtract: [{ $dayOfWeek: { date: '$date', timezone: 'UTC' } }, 1] },
+              count: { $sum: 1 },
+              revenue: { $sum: { $ifNull: ['$price', 0] } },
+            },
+          },
+        ],
+        reservationCount: [{ $count: 'n' }],
+      },
+    },
+  ]);
+
+  const serviceRows: { _id: Types.ObjectId; count: number; revenue: number }[] = agg?.byService ?? [];
+  const totalServiceCount = serviceRows.reduce((s, r) => s + r.count, 0);
+  const named = await withServiceNames(serviceRows);
+  const byService = named.map((r) => ({
+    serviceId: r.serviceId,
+    serviceName: r.name,
+    count: r.count,
+    revenue: r.revenue,
+    // One decimal place; shares sum to ~100%.
+    sharePercent: totalServiceCount > 0 ? Math.round((r.count / totalServiceCount) * 1000) / 10 : 0,
+  }));
+
+  const dayRows: { _id: number; count: number; revenue: number }[] = agg?.byDayOfWeek ?? [];
+  const dayMap = new Map(dayRows.map((r) => [r._id, r]));
+  const byDayOfWeek = Array.from({ length: 7 }, (_, dayOfWeek) => {
+    const row = dayMap.get(dayOfWeek);
+    return { dayOfWeek, count: row?.count ?? 0, revenue: row?.revenue ?? 0 };
+  });
+
+  const reservations: number = agg?.reservationCount?.[0]?.n ?? 0;
+
+  return {
+    range: { from, to },
+    totals: { reservations, services: totalServiceCount },
+    byService,
+    byDayOfWeek,
+  };
+}
+
 // ───────────────────────────── Customer report ─────────────────────────────
 
 export async function getCustomerReport(customerId: string, from: string, to: string) {

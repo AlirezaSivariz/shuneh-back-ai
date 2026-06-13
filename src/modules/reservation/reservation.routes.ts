@@ -15,6 +15,7 @@ import {
   createReviewSchema,
   reservationIdParamsSchema as reviewReservationIdParams,
 } from '../review/review.validators';
+import { validateDiscountSchema } from '../discount/discount.validators';
 
 // Routes under /internal — operational/testing triggers.
 export const internalRouter = Router();
@@ -31,6 +32,12 @@ export const reservationRouter = Router();
 reservationRouter.use(authenticate, authorize('customer'));
 
 reservationRouter.post('/', validate(createReservationSchema), asyncHandler(customer.create));
+// Preview/validate a discount code before booking (literal path before '/:id').
+reservationRouter.post(
+  '/validate-discount',
+  validate(validateDiscountSchema),
+  asyncHandler(customer.validateDiscount),
+);
 reservationRouter.get('/', validate(listReservationsSchema), asyncHandler(customer.list));
 reservationRouter.get('/:id', validate(reservationIdParamsSchema), asyncHandler(customer.detail));
 reservationRouter.post(

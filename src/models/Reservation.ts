@@ -36,8 +36,20 @@ export interface IReservation extends Document {
   /** Absolute UTC instants derived from date + start/endTime in Iran time. */
   startAt: Date;
   endAt: Date;
-  /** Total snapshot price of the booking (sum of items[].price). */
+  /** Total snapshot price of the booking (GROSS — sum of items[].price). */
   price?: number;
+  /**
+   * Discount snapshot (set only when a discount code was applied at booking).
+   * `originalPrice` mirrors the gross `price`; `finalPrice` is what the customer
+   * pays after `discountAmount`. `price` stays gross so existing reports are
+   * unaffected; `finalPrice` carries the net charged amount.
+   */
+  discountCode?: string | null;
+  discountType?: 'percentage' | 'fixed' | null;
+  discountValue?: number | null;
+  discountAmount?: number | null;
+  originalPrice?: number | null;
+  finalPrice?: number | null;
   status: ReservationStatus;
   completedAt?: Date;
   /** Who cancelled (set when status becomes 'cancelled'). */
@@ -73,6 +85,12 @@ const reservationSchema = new Schema<IReservation>(
     startAt: { type: Date, required: true },
     endAt: { type: Date, required: true },
     price: { type: Number, min: 0 },
+    discountCode: { type: String, default: null },
+    discountType: { type: String, enum: ['percentage', 'fixed', null], default: null },
+    discountValue: { type: Number, default: null, min: 0 },
+    discountAmount: { type: Number, default: null, min: 0 },
+    originalPrice: { type: Number, default: null, min: 0 },
+    finalPrice: { type: Number, default: null, min: 0 },
     status: {
       type: String,
       enum: RESERVATION_STATUSES,

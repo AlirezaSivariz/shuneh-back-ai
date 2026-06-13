@@ -19,6 +19,7 @@ import { iranWallClockToUtc } from '../../utils/timezone';
 import { storageProvider } from '../../utils/storage';
 import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
+import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -28,6 +29,7 @@ interface CreateInput {
   serviceIds: string[];
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
+  discountCode?: string;
 }
 
 function endTimeFrom(startTime: string, durationMin: number): string {
@@ -115,6 +117,30 @@ export async function createReservation(customerId: string, input: CreateInput) 
     throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
   }
 
+  // Optional discount code — re-validated server-side against the freshly
+  // computed prices and the appointment's day/time. `price` stays GROSS; the
+  // discount is captured in the snapshot fields (originalPrice/finalPrice).
+  let discountSnapshot: Record<string, unknown> = {};
+  let codeIdToConsume: Types.ObjectId | null = null;
+  if (input.discountCode) {
+    const resolved = await resolveDiscountForBooking(
+      stylistId,
+      input.discountCode,
+      items,
+      date,
+      startTime,
+    );
+    codeIdToConsume = resolved.code._id;
+    discountSnapshot = {
+      discountCode: resolved.code.code,
+      discountType: resolved.code.type,
+      discountValue: resolved.code.value,
+      discountAmount: resolved.discountAmount,
+      originalPrice: resolved.originalPrice,
+      finalPrice: resolved.finalPrice,
+    };
+  }
+
   const reservation = await Reservation.create({
     customerId: new Types.ObjectId(customerId),
     stylistId: new Types.ObjectId(stylistId),
@@ -126,8 +152,21 @@ export async function createReservation(customerId: string, input: CreateInput) 
     startTime,
     endTime,
     price: totalPrice,
+    ...discountSnapshot,
     status: 'confirmed', // auto-confirm
   });
+
+  // Atomically consume usage AFTER the reservation exists, so the usage limit
+  // can't be exceeded by concurrent bookings. If the cap was hit in the
+  // meantime, undo the reservation and surface a clear error.
+  if (codeIdToConsume) {
+    try {
+      await consumeDiscount(codeIdToConsume);
+    } catch (err) {
+      await reservation.deleteOne().catch(() => {});
+      throw err;
+    }
+  }
 
   return serializeReservation(reservation);
 }
@@ -273,6 +312,16 @@ async function serializeReservation(r: IReservation, viewer: 'customer' | 'styli
     startAt: r.startAt,
     endAt: r.endAt,
     price: r.price ?? null,
+    discount: r.discountCode
+      ? {
+          code: r.discountCode,
+          type: r.discountType ?? null,
+          value: r.discountValue ?? null,
+          amount: r.discountAmount ?? 0,
+          originalPrice: r.originalPrice ?? r.price ?? null,
+          finalPrice: r.finalPrice ?? r.price ?? null,
+        }
+      : null,
     services: services.map((s) => ({ id: String(s._id), name: s.name, durationMin: s.durationMin })),
     stylist: stylist
       ? {
