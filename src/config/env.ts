@@ -35,6 +35,8 @@ export interface AppConfig {
   isDev: boolean;
   port: number;
   baseUrl: string;
+  /** Public base URL of the frontend (used to build invite links). */
+  webBaseUrl: string;
   mongoUri: string;
   jwt: {
     accessSecret: string;
@@ -59,6 +61,7 @@ export const config: AppConfig = {
   isDev: nodeEnv !== 'production',
   port: asNumber('PORT', 4000),
   baseUrl: required('BASE_URL', 'http://localhost:4000'),
+  webBaseUrl: required('WEB_BASE_URL', 'http://localhost:3000'),
   mongoUri: required('MONGO_URI', 'mongodb://127.0.0.1:27017/salon_reservation'),
   jwt: {
     accessSecret: required('JWT_ACCESS_SECRET', 'dev_access_secret'),

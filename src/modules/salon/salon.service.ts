@@ -6,11 +6,13 @@ import { SalonInvite } from '../../models/SalonInvite';
 import { User } from '../../models/User';
 import { StylistService } from '../../models/StylistService';
 import { WorkingHour } from '../../models/WorkingHour';
+import { Reservation } from '../../models/Reservation';
 import { AppError } from '../../utils/AppError';
 import { toGeoPoint } from '../../utils/geo';
 import { assertValidOpeningHours, OpeningHoursInput } from '../../utils/openingHours';
 import { smsProvider } from '../../utils/sms';
 import { config } from '../../config/env';
+import { ensureStylistProfile, advanceStep } from '../onboarding/onboarding.service';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -67,7 +69,7 @@ export async function createOwnSalon(
     lat: number;
     openingHours: OpeningHoursInput[];
   },
-): Promise<ISalon> {
+): Promise<{ salon: ISalon; onboardingStep: string }> {
   const salon = await Salon.create({
     name: data.name,
     description: data.description,
@@ -86,7 +88,13 @@ export async function createOwnSalon(
     { upsert: true },
   );
 
-  return salon;
+  // Advance the stylist's onboarding past the workplace step (like joinSalon).
+  const profile = await ensureStylistProfile(userId);
+  profile.workplaceType = 'salon';
+  await profile.save();
+  await advanceStep(profile, 'workplace');
+
+  return { salon, onboardingStep: profile.onboardingStep };
 }
 
 /**
@@ -114,6 +122,8 @@ export async function createSalonInvite(
     createdBy: new Types.ObjectId(userId),
   });
 
+  // nanoid is a cryptographically-secure random generator (crypto.randomBytes
+  // under the hood); 32 chars → unguessable token.
   const token = nanoid(32);
   const invite = await SalonInvite.create({
     token,
@@ -132,13 +142,24 @@ export async function createSalonInvite(
     { upsert: true },
   );
 
-  const link = `${config.baseUrl}/invite/${token}`;
-  await smsProvider.send(
-    data.targetPhone,
-    `You have been invited to register your salon. Open: ${link}`,
-  );
+  // Advance onboarding past the workplace step even though the salon/membership
+  // is pending — the stylist must not be blocked waiting for owner approval.
+  const profile = await ensureStylistProfile(userId);
+  profile.workplaceType = 'salon';
+  await profile.save();
+  await advanceStep(profile, 'workplace');
 
-  return { salon, invite, link };
+  // The invite link points to the FRONTEND page (/invite/:token), not the API.
+  const inviteUrl = `${config.webBaseUrl}/invite/${token}`;
+  // Non-blocking SMS to the salon owner (stub provider just logs).
+  void smsProvider
+    .send(
+      data.targetPhone,
+      `از شما دعوت شده تا سالن خود را در شونه ثبت کنید. لینک دعوت: ${inviteUrl}`,
+    )
+    .catch(() => {});
+
+  return { salon, invite, inviteUrl, onboardingStep: profile.onboardingStep };
 }
 
 /** Salons owned by a given owner. */
@@ -224,7 +245,12 @@ export async function approveStylist(salonId: string, stylistId: string) {
   return link;
 }
 
-/** Owner rejects a stylist's request (status -> rejected). */
+/**
+ * Owner rejects a stylist's request (status -> rejected).
+ * Returns the membership plus a count of the stylist's FUTURE active
+ * reservations at this salon, as a warning (auto-cancellation is NOT performed
+ * here — that is intentionally left for a later decision).
+ */
 export async function rejectStylist(salonId: string, stylistId: string) {
   const link = await StylistSalon.findOne({ salonId, stylistId });
   if (!link) {
@@ -236,5 +262,46 @@ export async function rejectStylist(salonId: string, stylistId: string) {
 
   link.status = 'rejected';
   await link.save();
-  return link;
+
+  // Warn about upcoming reservations affected (not cancelled automatically).
+  const affectedUpcomingReservations = await Reservation.countDocuments({
+    salonId,
+    stylistId,
+    status: { $in: ['pending', 'confirmed'] },
+    startAt: { $gte: new Date() },
+  });
+
+  return { link, affectedUpcomingReservations };
+}
+
+/**
+ * Owner edits one of their salons (name / description / address / location /
+ * opening hours). Same opening-hours validation as creation.
+ */
+export async function updateSalon(
+  salonId: string,
+  data: {
+    name?: string;
+    description?: string;
+    address?: string;
+    lng?: number;
+    lat?: number;
+    openingHours?: OpeningHoursInput[];
+  },
+): Promise<ISalon> {
+  const salon = await Salon.findById(salonId);
+  if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
+
+  if (data.name !== undefined) salon.name = data.name;
+  if (data.description !== undefined) salon.description = data.description;
+  if (data.address !== undefined) salon.address = data.address;
+  if (data.lng !== undefined && data.lat !== undefined) {
+    salon.location = toGeoPoint(data.lng, data.lat);
+  }
+  if (data.openingHours !== undefined) {
+    salon.openingHours = validateOpeningHours(data.openingHours);
+  }
+
+  await salon.save();
+  return salon;
 }

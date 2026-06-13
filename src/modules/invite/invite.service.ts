@@ -5,6 +5,7 @@ import { User, IUser } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toGeoPoint } from '../../utils/geo';
 import { assertValidOpeningHours } from '../../utils/openingHours';
+import { maskPhone } from '../../utils/phone';
 
 /**
  * Public lookup of an invite + its pending salon + the requesting stylist.
@@ -35,7 +36,8 @@ export async function getInvite(token: string) {
   return {
     token: invite.token,
     status: invite.status,
-    targetPhone: invite.targetPhone,
+    // Masked for public display (the full number is never exposed here).
+    targetPhone: maskPhone(invite.targetPhone),
     expiresAt: invite.expiresAt,
     salonDraft: invite.salonDraft ?? null,
     requestedBy: requester

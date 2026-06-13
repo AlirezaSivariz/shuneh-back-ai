@@ -57,3 +57,27 @@ export const salonStylistsSchema = {
     status: z.enum(['pending', 'active', 'rejected']).optional(),
   }),
 };
+
+const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid salonId');
+
+export const updateSalonSchema = {
+  params: z.object({ salonId: objectId }),
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      description: z.string().trim().max(1000).optional(),
+      address: z.string().trim().min(1).optional(),
+      lng: z.number().min(-180).max(180).optional(),
+      lat: z.number().min(-90).max(90).optional(),
+      openingHours: openingHoursSchema.optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update')
+    .refine(
+      (b) => (b.lng === undefined) === (b.lat === undefined),
+      'lng and lat must be provided together',
+    ),
+};
+
+export const salonIdParamsSchema = {
+  params: z.object({ salonId: objectId }),
+};
