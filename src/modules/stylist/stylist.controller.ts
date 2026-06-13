@@ -34,6 +34,23 @@ export async function removeService(req: Request, res: Response): Promise<void> 
   sendSuccess(res, result);
 }
 
+// ── Custom (stylist-private) services ──
+
+export async function createCustomService(req: Request, res: Response): Promise<void> {
+  const result = await service.createCustomService(req.user!.id, req.body);
+  sendSuccess(res, result, 201);
+}
+
+export async function updateCustomService(req: Request, res: Response): Promise<void> {
+  const result = await service.updateCustomService(req.user!.id, req.params.serviceId, req.body);
+  sendSuccess(res, result);
+}
+
+export async function deleteCustomService(req: Request, res: Response): Promise<void> {
+  const result = await service.deleteCustomService(req.user!.id, req.params.serviceId);
+  sendSuccess(res, result);
+}
+
 export async function setWorkplaceType(req: Request, res: Response): Promise<void> {
   const profile = await service.setWorkplaceType(req.user!.id, req.body.type);
   sendSuccess(res, { workplaceType: profile.workplaceType, onboardingStep: profile.onboardingStep });

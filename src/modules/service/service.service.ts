@@ -6,7 +6,8 @@ import { Service } from '../../models/Service';
  */
 export async function listCategoriesWithServices() {
   const categories = await ServiceCategory.find().sort({ order: 1, name: 1 }).lean();
-  const services = await Service.find().sort({ name: 1 }).lean();
+  // Custom (stylist-private) services are NEVER part of the public catalogue.
+  const services = await Service.find({ isCustom: { $ne: true } }).sort({ name: 1 }).lean();
 
   const byCategory = new Map<string, typeof services>();
   for (const svc of services) {

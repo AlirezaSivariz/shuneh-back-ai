@@ -8,6 +8,7 @@ import {
 import { StylistService } from '../../models/StylistService';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
+import { Salon } from '../../models/Salon';
 import { AppError } from '../../utils/AppError';
 
 /** Ensure a (draft) StylistProfile exists for a stylist user. */
@@ -103,6 +104,49 @@ export async function getOnboardingState(userId: string) {
     services,
     salons: salonLinks,
     workingHours,
+  };
+}
+
+/** The stylist's per-role onboarding state (null if not a stylist yet). */
+export async function getStylistRoleState(userId: string) {
+  const profile = await StylistProfile.findOne({ userId })
+    .select('onboardingStep status')
+    .lean();
+  return profile ? { onboardingStep: profile.onboardingStep, status: profile.status } : null;
+}
+
+/**
+ * Lightweight multi-role state for the frontend to build navigation: which
+ * roles the user has and the readiness/onboarding state of each. Roles are
+ * additive and coexist (a user can be owner + stylist + customer at once).
+ */
+export async function getUserState(userId: string) {
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
+
+  const hasPersonalInfo = !!user.firstName && !!user.nationalCode;
+  const [stylist, salonsCount] = await Promise.all([
+    getStylistRoleState(userId),
+    user.roles.includes('owner') ? Salon.countDocuments({ ownerId: userId }) : Promise.resolve(0),
+  ]);
+
+  return {
+    user: {
+      id: String(user._id),
+      phone: user.phone,
+      roles: user.roles,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+      nationalCode: user.nationalCode ?? null,
+      birthDate: user.birthDate ?? null,
+      profilePhoto: user.profilePhoto ?? null,
+    },
+    roles: user.roles,
+    hasPersonalInfo,
+    // Per-role state — independent; adding a role never clobbers the others.
+    stylist,
+    owner: user.roles.includes('owner') ? { salonsCount } : null,
+    customer: user.roles.includes('customer') ? { ready: hasPersonalInfo } : null,
   };
 }
 

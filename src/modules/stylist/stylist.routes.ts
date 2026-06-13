@@ -15,6 +15,8 @@ import {
   replaceServicesSchema,
   stylistServiceBodySchema,
   stylistServiceIdParamsSchema,
+  createCustomServiceSchema,
+  updateCustomServiceSchema,
   workplaceTypeSchema,
   freelanceSchema,
   joinSalonSchema,
@@ -34,6 +36,25 @@ router.post('/services', validate(setServicesSchema), asyncHandler(controller.se
 // Service management (post-onboarding; does NOT touch onboarding step).
 router.get('/services', asyncHandler(controller.listServices));
 router.put('/services', validate(replaceServicesSchema), asyncHandler(controller.replaceServices));
+
+// Custom (stylist-private) services — registered BEFORE '/services/:serviceId'
+// so that the literal 'custom' segment is never treated as a serviceId.
+router.post(
+  '/services/custom',
+  validate(createCustomServiceSchema),
+  asyncHandler(controller.createCustomService),
+);
+router.patch(
+  '/services/custom/:serviceId',
+  validate(updateCustomServiceSchema),
+  asyncHandler(controller.updateCustomService),
+);
+router.delete(
+  '/services/custom/:serviceId',
+  validate(stylistServiceIdParamsSchema),
+  asyncHandler(controller.deleteCustomService),
+);
+
 router.post(
   '/services/:serviceId',
   validate(stylistServiceBodySchema),

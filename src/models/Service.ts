@@ -7,6 +7,10 @@ export interface IService extends Document {
   description?: string;
   defaultPrice: number;
   isDefault: boolean;
+  /** A stylist-private service: never shown in the public catalogue. */
+  isCustom: boolean;
+  /** The stylist who owns this custom service (null for public services). */
+  ownerStylistId: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,6 +28,8 @@ const serviceSchema = new Schema<IService>(
     description: { type: String },
     defaultPrice: { type: Number, required: true, min: 0 },
     isDefault: { type: Boolean, default: false },
+    isCustom: { type: Boolean, default: false, index: true },
+    ownerStylistId: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
   },
   { timestamps: true },
 );

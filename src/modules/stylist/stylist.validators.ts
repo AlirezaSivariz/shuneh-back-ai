@@ -46,6 +46,28 @@ export const stylistServiceIdParamsSchema = {
   params: z.object({ serviceId: objectId }),
 };
 
+// Custom (stylist-private) services.
+export const createCustomServiceSchema = {
+  body: z.object({
+    name: z.string().trim().min(1, 'نام خدمت لازم است').max(120),
+    durationMin: z.number().int().min(1),
+    price: z.number().min(0),
+    categoryId: objectId.optional(),
+  }),
+};
+
+export const updateCustomServiceSchema = {
+  params: z.object({ serviceId: objectId }),
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      durationMin: z.number().int().min(1).optional(),
+      price: z.number().min(0).optional(),
+      categoryId: objectId.optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'حداقل یک فیلد برای ویرایش لازم است'),
+};
+
 export const workplaceTypeSchema = {
   body: z.object({
     type: z.enum(['freelance', 'salon']),

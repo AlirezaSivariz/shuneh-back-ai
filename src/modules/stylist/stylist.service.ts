@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { Service, IService } from '../../models/Service';
+import { ServiceCategory } from '../../models/ServiceCategory';
 import { StylistService } from '../../models/StylistService';
 import { Salon, ISalon } from '../../models/Salon';
 import { StylistSalon } from '../../models/StylistSalon';
@@ -47,11 +48,10 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
     );
   }
 
-  // Remove de-selected services.
-  await StylistService.deleteMany({
-    stylistId,
-    serviceId: { $nin: serviceIds },
-  });
+  // Remove de-selected services — but NEVER the stylist's custom services
+  // (those are managed via the /services/custom endpoints, not this catalogue set).
+  const keep = [...serviceIds, ...(await customServiceIds(stylistId))];
+  await StylistService.deleteMany({ stylistId, serviceId: { $nin: keep } });
 
   const profile = await ensureStylistProfile(stylistId);
   await advanceStep(profile, 'services');
@@ -190,6 +190,9 @@ async function ensureUsableSalons(
   return new Map(salons.map((s) => [String(s._id), s]));
 }
 
+/** Persian weekday names indexed by dayOfWeek (0=یکشنبه … 6=شنبه, JS getUTCDay). */
+const WEEKDAY_FA = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+
 /** Assert a salon-bound entry fits entirely inside the salon's opening hours. */
 function assertInsideOpeningHours(salon: ISalon, entry: WorkingHourEntry) {
   const dayHours = salon.openingHours.find((h) => h.dayOfWeek === entry.dayOfWeek);
@@ -199,10 +202,18 @@ function assertInsideOpeningHours(salon: ISalon, entry: WorkingHourEntry) {
     ) ?? false;
 
   if (!fits) {
-    throw AppError.badRequest(
-      `Working hours ${entry.start}-${entry.end} on day ${entry.dayOfWeek} are outside the salon's opening hours`,
-      'OUTSIDE_OPENING_HOURS',
-    );
+    const dayName = WEEKDAY_FA[entry.dayOfWeek] ?? `روز ${entry.dayOfWeek}`;
+    const allowed =
+      dayHours && dayHours.intervals.length > 0
+        ? dayHours.intervals.map((iv) => `${iv.start} تا ${iv.end}`).join('، ')
+        : null;
+    const message = allowed
+      ? `سالن ${dayName} ${allowed} باز است؛ بازه‌ی ${entry.start}–${entry.end} خارج از این ساعت است.`
+      : `سالن ${dayName} تعطیل است؛ نمی‌توان برای این روز بازه‌ی کاری ثبت کرد.`;
+    throw AppError.badRequest(message, 'OUTSIDE_OPENING_HOURS', {
+      dayOfWeek: entry.dayOfWeek,
+      allowedIntervals: dayHours?.intervals ?? [],
+    });
   }
 }
 
@@ -403,6 +414,7 @@ export async function listStylistServices(stylistId: string) {
         customDurationMin: link.durationMin,
         defaultPrice: svc.defaultPrice,
         defaultDurationMin: svc.durationMin,
+        isCustom: !!svc.isCustom,
       };
     })
     .filter(Boolean);
@@ -430,7 +442,8 @@ export async function replaceStylistServices(stylistId: string, items: ServiceIt
       { upsert: true },
     );
   }
-  await StylistService.deleteMany({ stylistId, serviceId: { $nin: serviceIds } });
+  const keep = [...serviceIds, ...(await customServiceIds(stylistId))];
+  await StylistService.deleteMany({ stylistId, serviceId: { $nin: keep } });
 
   return listStylistServices(stylistId);
 }
@@ -474,6 +487,87 @@ export async function removeStylistService(stylistId: string, serviceId: string)
   if (result.deletedCount === 0) {
     throw AppError.notFound('This service is not in your offering', 'STYLIST_SERVICE_NOT_FOUND');
   }
+  return listStylistServices(stylistId);
+}
+
+// ───────────────────── Custom (stylist-private) services ─────────────────────
+
+/** The stylist's custom service ids (as strings), to preserve on a set-replace. */
+async function customServiceIds(stylistId: string): Promise<string[]> {
+  const ids = await Service.find({ isCustom: true, ownerStylistId: stylistId }).distinct('_id');
+  return ids.map((id) => String(id));
+}
+
+/** Resolve the category for a custom service (given id, or fall back to first). */
+async function resolveCategoryId(categoryId?: string): Promise<Types.ObjectId> {
+  if (categoryId) {
+    const cat = await ServiceCategory.findById(categoryId).select('_id');
+    if (!cat) throw AppError.badRequest('دسته‌بندی نامعتبر است', 'CATEGORY_NOT_FOUND');
+    return cat._id as Types.ObjectId;
+  }
+  const first = await ServiceCategory.findOne().sort({ order: 1, name: 1 }).select('_id');
+  if (!first) throw AppError.badRequest('دسته‌بندی‌ای موجود نیست', 'NO_CATEGORY');
+  return first._id as Types.ObjectId;
+}
+
+/**
+ * Create a stylist-private (custom) service and attach it to the stylist. It
+ * never appears in the public catalogue or for other stylists.
+ */
+export async function createCustomService(
+  stylistId: string,
+  data: { name: string; durationMin: number; price: number; categoryId?: string },
+) {
+  const categoryId = await resolveCategoryId(data.categoryId);
+  const service = await Service.create({
+    categoryId,
+    name: data.name,
+    durationMin: data.durationMin,
+    defaultPrice: data.price,
+    isDefault: false,
+    isCustom: true,
+    ownerStylistId: new Types.ObjectId(stylistId),
+  });
+  // Link to the stylist (price/duration inherit from the custom service).
+  await StylistService.create({
+    stylistId: new Types.ObjectId(stylistId),
+    serviceId: service._id,
+    price: null,
+    durationMin: null,
+  });
+  return listStylistServices(stylistId);
+}
+
+/** Load a custom service owned by this stylist (or throw). */
+async function ownedCustomService(stylistId: string, serviceId: string) {
+  if (!Types.ObjectId.isValid(serviceId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  const service = await Service.findById(serviceId);
+  if (!service || !service.isCustom || String(service.ownerStylistId) !== stylistId) {
+    throw AppError.notFound('خدمت اختصاصی یافت نشد', 'CUSTOM_SERVICE_NOT_FOUND');
+  }
+  return service;
+}
+
+export async function updateCustomService(
+  stylistId: string,
+  serviceId: string,
+  data: { name?: string; durationMin?: number; price?: number; categoryId?: string },
+) {
+  const service = await ownedCustomService(stylistId, serviceId);
+  if (data.name !== undefined) service.name = data.name;
+  if (data.durationMin !== undefined) service.durationMin = data.durationMin;
+  if (data.price !== undefined) service.defaultPrice = data.price;
+  if (data.categoryId !== undefined) service.categoryId = await resolveCategoryId(data.categoryId);
+  await service.save();
+  return listStylistServices(stylistId);
+}
+
+export async function deleteCustomService(stylistId: string, serviceId: string) {
+  const service = await ownedCustomService(stylistId, serviceId);
+  await StylistService.deleteMany({ stylistId, serviceId: service._id });
+  await service.deleteOne();
   return listStylistServices(stylistId);
 }
 
