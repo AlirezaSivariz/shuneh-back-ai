@@ -20,6 +20,12 @@ export async function validateDiscount(req: Request, res: Response): Promise<voi
   sendSuccess(res, result);
 }
 
+/** Quick-rebook suggestions from the authenticated customer's own history. */
+export async function quickRebook(req: Request, res: Response): Promise<void> {
+  const result = await service.getQuickRebookSuggestions(req.user!.id);
+  sendSuccess(res, result);
+}
+
 export async function list(req: Request, res: Response): Promise<void> {
   const filter = req.query.filter as 'upcoming' | 'past' | undefined;
   const reservations = await service.listCustomerReservations(req.user!.id, filter);

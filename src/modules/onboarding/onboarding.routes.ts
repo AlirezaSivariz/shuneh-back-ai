@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as controller from './onboarding.controller';
 import * as reportsController from '../reports/reports.controller';
+import * as reservationController from '../reservation/reservation.customer.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -21,3 +22,5 @@ meRouter.get('/state', asyncHandler(controller.getUserState));
 meRouter.patch('/personal', validate(personalSchema), asyncHandler(controller.updatePersonal));
 // Customer activity/spending report (scoped to the authenticated user).
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));
+// Quick-rebook suggestions from the customer's own completed history.
+meRouter.get('/quick-rebook', asyncHandler(reservationController.quickRebook));

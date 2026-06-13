@@ -50,6 +50,8 @@ export interface AppConfig {
   disableCron: boolean;
   /** How often the reservation auto-complete job runs, in minutes. */
   autoCompleteIntervalMinutes: number;
+  /** Min times a (stylist, service) must have been completed to be suggested. */
+  quickRebookThreshold: number;
   /** Optional shared secret guarding the /internal endpoints. */
   internalApiKey?: string;
 }
@@ -73,5 +75,6 @@ export const config: AppConfig = {
   uploadDir: required('UPLOAD_DIR', 'uploads'),
   disableCron: asBool('DISABLE_CRON', false),
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
+  quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),
   internalApiKey: process.env.INTERNAL_API_KEY || undefined,
 };

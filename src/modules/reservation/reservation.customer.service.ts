@@ -20,6 +20,7 @@ import { storageProvider } from '../../utils/storage';
 import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
+import { config } from '../../config/env';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -30,6 +31,7 @@ interface CreateInput {
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
   discountCode?: string;
+  customerNote?: string;
 }
 
 function endTimeFrom(startTime: string, durationMin: number): string {
@@ -141,6 +143,9 @@ export async function createReservation(customerId: string, input: CreateInput) 
     };
   }
 
+  // Optional customer note for the stylist (trimmed; length capped by Zod).
+  const customerNote = input.customerNote?.trim() || null;
+
   const reservation = await Reservation.create({
     customerId: new Types.ObjectId(customerId),
     stylistId: new Types.ObjectId(stylistId),
@@ -153,6 +158,7 @@ export async function createReservation(customerId: string, input: CreateInput) 
     endTime,
     price: totalPrice,
     ...discountSnapshot,
+    customerNote,
     status: 'confirmed', // auto-confirm
   });
 
@@ -167,6 +173,23 @@ export async function createReservation(customerId: string, input: CreateInput) 
       throw err;
     }
   }
+
+  // Notify the stylist of the new booking (best-effort; never blocks the flow).
+  // If the customer left a note, the stylist is told to check it.
+  void (async () => {
+    try {
+      const stylistUser = await User.findById(stylistId).select('phone').lean();
+      if (stylistUser?.phone) {
+        const noteHint = customerNote ? ' (مشتری توضیحاتی ثبت کرده است)' : '';
+        await smsProvider.send(
+          stylistUser.phone,
+          `نوبت جدید در تاریخ ${date} ساعت ${startTime} برای شما ثبت شد.${noteHint}`,
+        );
+      }
+    } catch {
+      /* swallow SMS errors */
+    }
+  })();
 
   return serializeReservation(reservation);
 }
@@ -289,6 +312,91 @@ export async function cancelByStylist(
   return serializeReservation(reservation, 'stylist');
 }
 
+/**
+ * Quick-rebook suggestions: (stylist, service) pairs the customer has completed
+ * at least `quickRebookThreshold` times, that are STILL bookable (stylist active
+ * + service still offered). Returns enough data to pre-fill the booking flow.
+ *
+ * Counting is per-item (a multi-service booking counts each service), via
+ * $unwind on items (with a fallback to the single serviceId for legacy rows).
+ * `lastUsedDate` is the Iran calendar day (date is stored at its UTC midnight).
+ */
+export async function getQuickRebookSuggestions(customerId: string) {
+  const rows: { _id: { stylistId: Types.ObjectId; serviceId: Types.ObjectId }; timesUsed: number; lastUsedDate: Date }[] =
+    await Reservation.aggregate([
+      { $match: { customerId: new Types.ObjectId(customerId), status: 'completed' } },
+      {
+        $addFields: {
+          _items: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] },
+              '$items',
+              [{ serviceId: '$serviceId' }],
+            ],
+          },
+        },
+      },
+      { $unwind: '$_items' },
+      {
+        $group: {
+          _id: { stylistId: '$stylistId', serviceId: '$_items.serviceId' },
+          timesUsed: { $sum: 1 },
+          lastUsedDate: { $max: '$date' },
+        },
+      },
+      { $match: { timesUsed: { $gte: config.quickRebookThreshold } } },
+      { $sort: { timesUsed: -1, lastUsedDate: -1 } },
+    ]);
+
+  if (rows.length === 0) return { suggestions: [] };
+
+  const stylistIds = [...new Set(rows.map((r) => String(r._id.stylistId)))];
+  const serviceIds = [...new Set(rows.map((r) => String(r._id.serviceId)))];
+
+  // Only ACTIVE stylists; only services STILL offered by that stylist.
+  const [profiles, users, services, links] = await Promise.all([
+    StylistProfile.find({ userId: { $in: stylistIds }, status: 'active' }).select('userId').lean(),
+    User.find({ _id: { $in: stylistIds } }).select('firstName lastName').lean(),
+    Service.find({ _id: { $in: serviceIds } }).lean(),
+    StylistService.find({
+      stylistId: { $in: stylistIds },
+      serviceId: { $in: serviceIds },
+    }).lean(),
+  ]);
+
+  const activeStylist = new Set(profiles.map((p) => String(p.userId)));
+  const userById = new Map(users.map((u) => [String(u._id), u]));
+  const svcById = new Map(services.map((s) => [String(s._id), s as unknown as IService]));
+  const linkByKey = new Map(
+    links.map((l) => [`${String(l.stylistId)}:${String(l.serviceId)}`, l]),
+  );
+
+  const suggestions = rows
+    .map((r) => {
+      const stylistId = String(r._id.stylistId);
+      const serviceId = String(r._id.serviceId);
+      if (!activeStylist.has(stylistId)) return null; // stylist no longer active
+      const link = linkByKey.get(`${stylistId}:${serviceId}`);
+      const svc = svcById.get(serviceId);
+      if (!link || !svc) return null; // service no longer offered
+      const user = userById.get(stylistId);
+      return {
+        stylistId,
+        stylistName:
+          `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'متخصص',
+        serviceId,
+        serviceName: svc.name,
+        timesUsed: r.timesUsed,
+        lastUsedDate: r.lastUsedDate ? new Date(r.lastUsedDate).toISOString().slice(0, 10) : null,
+        price: effectivePrice(link.price, svc),
+        durationMin: effectiveDuration(link.durationMin, svc),
+      };
+    })
+    .filter(Boolean);
+
+  return { suggestions };
+}
+
 /** Build the public reservation DTO, enriching with service/stylist/salon info. */
 async function serializeReservation(r: IReservation, viewer: 'customer' | 'stylist' = 'customer') {
   const ids = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
@@ -340,6 +448,7 @@ async function serializeReservation(r: IReservation, viewer: 'customer' | 'styli
           }
         : null,
     salon: salon ? { id: String(r.salonId), name: salon.name, address: salon.address ?? null } : null,
+    customerNote: r.customerNote ?? null,
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
     canCancel:

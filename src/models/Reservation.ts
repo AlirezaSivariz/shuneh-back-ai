@@ -50,6 +50,8 @@ export interface IReservation extends Document {
   discountAmount?: number | null;
   originalPrice?: number | null;
   finalPrice?: number | null;
+  /** Optional free-text note from the customer to the stylist (read-only for stylist). */
+  customerNote?: string | null;
   status: ReservationStatus;
   completedAt?: Date;
   /** Who cancelled (set when status becomes 'cancelled'). */
@@ -91,6 +93,7 @@ const reservationSchema = new Schema<IReservation>(
     discountAmount: { type: Number, default: null, min: 0 },
     originalPrice: { type: Number, default: null, min: 0 },
     finalPrice: { type: Number, default: null, min: 0 },
+    customerNote: { type: String, default: null, maxlength: 500 },
     status: {
       type: String,
       enum: RESERVATION_STATUSES,
@@ -117,5 +120,7 @@ reservationSchema.pre('validate', function (next) {
 
 // Helps the auto-complete bulk query (status + endAt range).
 reservationSchema.index({ status: 1, endAt: 1 });
+// Helps the quick-rebook aggregation (a customer's completed history).
+reservationSchema.index({ customerId: 1, status: 1 });
 
 export const Reservation = model<IReservation>('Reservation', reservationSchema);

@@ -15,6 +15,8 @@ export const createReservationSchema = {
       startTime: z.string().refine(isValidHHmm, 'startTime must be HH:mm'),
       // Optional discount code, re-validated and applied server-side.
       discountCode: z.string().trim().min(1).max(32).optional(),
+      // Optional free-text note from the customer to the stylist.
+      customerNote: z.string().trim().max(500).optional(),
     })
     .transform((b) => ({
       ...b,
