@@ -6,15 +6,16 @@ const hhmm = z.string().refine(isValidHHmm, 'Time must be in HH:mm format');
 
 export const setServicesSchema = {
   body: z.object({
-    items: z
-      .array(
-        z.object({
-          serviceId: objectId,
-          price: z.number().min(0).nullable().optional(),
-          durationMin: z.number().int().min(1).nullable().optional(),
-        }),
-      )
-      .min(1, 'Select at least one service'),
+    // May be empty: a stylist who offers ONLY custom services sends no default
+    // items. The "at least one service total (default or custom)" rule is
+    // enforced in the service layer against the persisted set.
+    items: z.array(
+      z.object({
+        serviceId: objectId,
+        price: z.number().min(0).nullable().optional(),
+        durationMin: z.number().int().min(1).nullable().optional(),
+      }),
+    ),
   }),
 };
 

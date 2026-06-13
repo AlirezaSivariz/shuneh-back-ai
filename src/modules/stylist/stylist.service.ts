@@ -53,6 +53,14 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
   const keep = [...serviceIds, ...(await customServiceIds(stylistId))];
   await StylistService.deleteMany({ stylistId, serviceId: { $nin: keep } });
 
+  // The step requires at least one service in TOTAL — a selected default OR a
+  // custom service. Source of truth is the persisted set, so a stylist offering
+  // only custom services (empty `items`) is valid.
+  const total = await StylistService.countDocuments({ stylistId });
+  if (total === 0) {
+    throw AppError.badRequest('حداقل یک خدمت را انتخاب کنید', 'NO_SERVICES');
+  }
+
   const profile = await ensureStylistProfile(stylistId);
   await advanceStep(profile, 'services');
 
@@ -193,8 +201,27 @@ async function ensureUsableSalons(
 /** Persian weekday names indexed by dayOfWeek (0=یکشنبه … 6=شنبه, JS getUTCDay). */
 const WEEKDAY_FA = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
 
+/** True when the salon has no opening hours defined on ANY day yet. */
+function hasNoOpeningHours(salon: ISalon): boolean {
+  return (
+    !salon.openingHours ||
+    salon.openingHours.length === 0 ||
+    salon.openingHours.every((h) => h.intervals.length === 0)
+  );
+}
+
 /** Assert a salon-bound entry fits entirely inside the salon's opening hours. */
 function assertInsideOpeningHours(salon: ISalon, entry: WorkingHourEntry) {
+  // The salon's hours haven't been set at all → there is nothing to validate
+  // against. Reject explicitly instead of silently accepting any interval.
+  if (hasNoOpeningHours(salon)) {
+    throw AppError.badRequest(
+      'ابتدا باید ساعت کاری سالن مشخص شود؛ سپس می‌توانید بازه‌ی کاری خود را داخل آن ثبت کنید.',
+      'SALON_HOURS_NOT_SET',
+      { salonId: String(salon._id) },
+    );
+  }
+
   const dayHours = salon.openingHours.find((h) => h.dayOfWeek === entry.dayOfWeek);
   const fits =
     dayHours?.intervals.some((iv) =>
