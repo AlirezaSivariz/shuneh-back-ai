@@ -99,8 +99,11 @@ async function resolveStylistLocation(
 }
 
 export async function searchStylists(params: SearchParams) {
-  // 1) Start from active stylist profiles.
-  const profiles = await StylistProfile.find({ status: 'active' }).lean();
+  // 1) Start from active stylist profiles that currently accept reservations.
+  const profiles = await StylistProfile.find({
+    status: 'active',
+    isAcceptingReservations: { $ne: false },
+  }).lean();
   if (profiles.length === 0) return [];
 
   const stylistIds = profiles.map((p) => p.userId);
@@ -279,6 +282,7 @@ export async function getStylistProfile(stylistId: string) {
     rating: profile.ratingAverage ?? 0,
     ratingCount: profile.ratingCount ?? 0,
     isPromoted: isPromotedActive(profile),
+    isAcceptingReservations: profile.isAcceptingReservations !== false,
   };
 }
 
@@ -325,6 +329,7 @@ async function ensureActiveStylist(stylistId: string) {
   if (!profile || profile.status !== 'active') {
     throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
   }
+  return profile;
 }
 
 /**
@@ -334,7 +339,11 @@ async function ensureActiveStylist(stylistId: string) {
  * Each slot: { start, end, startTime, endTime, salonId, salonName, salon }.
  */
 export async function getAvailability(stylistId: string, dateStr: string, serviceIds: string[]) {
-  await ensureActiveStylist(stylistId);
+  const profile = await ensureActiveStylist(stylistId);
+  // Paused stylists expose no slots (existing reservations are untouched).
+  if (profile.isAcceptingReservations === false) {
+    return { date: dateStr, dayOfWeek: -1, totalDurationMin: 0, slots: [] };
+  }
   const totalDuration = await resolveTotalDuration(stylistId, serviceIds);
 
   // Iran day → day-of-week. dateStr is "YYYY-MM-DD" representing an Iran day.
@@ -411,7 +420,10 @@ export async function getAvailableDays(
   to: string,
   serviceIds: string[],
 ) {
-  await ensureActiveStylist(stylistId);
+  const profile = await ensureActiveStylist(stylistId);
+  if (profile.isAcceptingReservations === false) {
+    return { from, to, days: [] as string[] };
+  }
   const totalDuration = await resolveTotalDuration(stylistId, serviceIds);
 
   const today = iranNow();

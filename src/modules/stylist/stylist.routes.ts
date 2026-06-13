@@ -26,6 +26,8 @@ import {
   workplaceTypeSchema,
   freelanceSchema,
   joinSalonSchema,
+  leaveSalonSchema,
+  availabilityStatusSchema,
   workingHoursSchema,
   updateWorkingHourSchema,
   workingHourIdParamsSchema,
@@ -87,6 +89,15 @@ router.post(
 router.post('/salons', validate(joinSalonSchema), asyncHandler(controller.joinSalon));
 // All salons the stylist is linked to (active + pending) — supports multi-salon.
 router.get('/salons', asyncHandler(controller.listSalons));
+// Leave a salon (?force=true cancels future confirmed reservations there).
+router.delete('/salons/:salonId', validate(leaveSalonSchema), asyncHandler(controller.leaveSalon));
+
+// Pause / resume accepting new reservations (does not affect existing ones).
+router.patch(
+  '/availability-status',
+  validate(availabilityStatusSchema),
+  asyncHandler(controller.setAvailabilityStatus),
+);
 
 // Step 4 — working hours.
 router.post(

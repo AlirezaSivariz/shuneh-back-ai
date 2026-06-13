@@ -36,6 +36,12 @@ export interface IStylistProfile extends Document {
   portfolio: string[]; // storage keys
   onboardingStep: OnboardingStep;
   status: StylistStatus;
+  /**
+   * Whether the stylist currently accepts NEW reservations. Independent of the
+   * onboarding `status`: a fully-active stylist can pause bookings without
+   * touching existing reservations.
+   */
+  isAcceptingReservations: boolean;
   /** Aggregate rating, updated incrementally on each new review. */
   ratingAverage: number;
   ratingCount: number;
@@ -72,6 +78,7 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     portfolio: { type: [String], default: [] },
     onboardingStep: { type: String, enum: ONBOARDING_STEPS, default: 'role' },
     status: { type: String, enum: ['draft', 'active'], default: 'draft' },
+    isAcceptingReservations: { type: Boolean, default: true },
     // Ratings (defaults keep existing docs valid).
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
     ratingCount: { type: Number, default: 0, min: 0 },

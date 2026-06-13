@@ -6,9 +6,12 @@ import { Salon, ISalon } from '../../models/Salon';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { WorkplaceType } from '../../models/StylistProfile';
+import { Reservation } from '../../models/Reservation';
+import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toGeoPoint } from '../../utils/geo';
 import { Interval, isOrdered, overlaps, contains } from '../../utils/time';
+import { notificationService } from '../../utils/notification';
 import {
   ensureStylistProfile,
   advanceStep,
@@ -140,6 +143,91 @@ export async function listStylistSalons(stylistId: string) {
         : null,
     };
   });
+}
+
+/**
+ * Leave a salon. By default refuses (409) if the stylist has FUTURE confirmed
+ * reservations there, returning the affected list. With `force`, those
+ * reservations are cancelled (cancelledBy='stylist', reason='stylist_left_salon')
+ * and the customers are notified (best-effort). In all success cases the
+ * membership and the stylist's working hours for that salon are removed so no
+ * orphan hours remain.
+ */
+export async function leaveSalon(stylistId: string, salonId: string, force = false) {
+  if (!Types.ObjectId.isValid(salonId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  const link = await StylistSalon.findOne({ stylistId, salonId });
+  if (!link) {
+    throw AppError.notFound('شما عضو این سالن نیستید', 'SALON_NOT_LINKED');
+  }
+
+  // Future confirmed reservations at this salon for this stylist.
+  const affected = await Reservation.find({
+    stylistId,
+    salonId,
+    status: 'confirmed',
+    startAt: { $gte: new Date() },
+  })
+    .sort({ startAt: 1 })
+    .lean();
+
+  if (affected.length > 0 && !force) {
+    throw new AppError(
+      409,
+      `برای خروج از این سالن، ابتدا باید ${affected.length} رزرو فعالِ آینده تعیین‌تکلیف شود.`,
+      'SALON_HAS_ACTIVE_RESERVATIONS',
+      {
+        affectedReservations: affected.map((r) => ({
+          id: String(r._id),
+          date: r.date.toISOString().slice(0, 10),
+          startTime: r.startTime,
+        })),
+      },
+    );
+  }
+
+  // Cancel the affected reservations atomically (force path).
+  if (affected.length > 0) {
+    const ids = affected.map((r) => r._id);
+    await Reservation.updateMany(
+      { _id: { $in: ids } },
+      { $set: { status: 'cancelled', cancelledBy: 'stylist', cancelReason: 'stylist_left_salon' } },
+    );
+    // Notify the customers (best-effort; never blocks the leave operation).
+    void (async () => {
+      const customers = await User.find({
+        _id: { $in: affected.map((r) => r.customerId) },
+      })
+        .select('phone')
+        .lean();
+      const phoneById = new Map(customers.map((u) => [String(u._id), u.phone]));
+      for (const r of affected) {
+        const phone = phoneById.get(String(r.customerId));
+        if (phone) {
+          void notificationService.reservationCancelled(phone, {
+            date: r.date.toISOString().slice(0, 10),
+            startTime: r.startTime,
+            reason: 'خروج متخصص از سالن',
+          });
+        }
+      }
+    })();
+  }
+
+  // Remove the membership and the now-orphan working hours for this salon.
+  await WorkingHour.deleteMany({ stylistId, salonId });
+  await link.deleteOne();
+
+  return { salonId, cancelledReservations: affected.length };
+}
+
+/** Toggle whether the stylist currently accepts new reservations. */
+export async function setAcceptingReservations(stylistId: string, isAccepting: boolean) {
+  const profile = await ensureStylistProfile(stylistId);
+  profile.isAcceptingReservations = isAccepting;
+  await profile.save();
+  return { isAcceptingReservations: profile.isAcceptingReservations };
 }
 
 // ───────────────────────── Working hours ─────────────────────────

@@ -45,9 +45,18 @@ function endTimeFrom(startTime: string, durationMin: number): string {
 export async function createReservation(customerId: string, input: CreateInput) {
   const { stylistId, serviceIds, date, startTime } = input;
 
+  // A user cannot book themselves (even though one user may be both a stylist
+  // and a customer — they may still book OTHER stylists).
+  if (customerId === stylistId) {
+    throw AppError.badRequest('نمی‌توانید برای خودتان رزرو ثبت کنید', 'SELF_BOOKING');
+  }
+
   const profile = await StylistProfile.findOne({ userId: stylistId }).lean();
   if (!profile || profile.status !== 'active') {
     throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  }
+  if (profile.isAcceptingReservations === false) {
+    throw AppError.badRequest('این متخصص فعلاً رزرو نمی‌پذیرد', 'NOT_ACCEPTING_RESERVATIONS');
   }
 
   // Resolve effective duration / price for the chosen services.

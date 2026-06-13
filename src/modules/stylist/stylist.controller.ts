@@ -75,6 +75,20 @@ export async function listSalons(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { salons });
 }
 
+export async function leaveSalon(req: Request, res: Response): Promise<void> {
+  const force = req.query.force === 'true' || req.body?.force === true;
+  const result = await service.leaveSalon(req.user!.id, req.params.salonId, force);
+  sendSuccess(res, result);
+}
+
+export async function setAvailabilityStatus(req: Request, res: Response): Promise<void> {
+  const result = await service.setAcceptingReservations(
+    req.user!.id,
+    req.body.isAcceptingReservations,
+  );
+  sendSuccess(res, result);
+}
+
 export async function setWorkingHours(req: Request, res: Response): Promise<void> {
   const result = await service.setWorkingHours(req.user!.id, req.body.entries);
   sendSuccess(res, result);

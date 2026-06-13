@@ -89,6 +89,20 @@ export const joinSalonSchema = {
   }),
 };
 
+export const leaveSalonSchema = {
+  params: z.object({ salonId: objectId }),
+  query: z.object({
+    // `?force=true` cancels future confirmed reservations and leaves anyway.
+    force: z.enum(['true', 'false']).optional(),
+  }),
+};
+
+export const availabilityStatusSchema = {
+  body: z.object({
+    isAcceptingReservations: z.boolean(),
+  }),
+};
+
 export const workingHoursSchema = {
   body: z.object({
     entries: z
