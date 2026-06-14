@@ -24,9 +24,13 @@ export async function authenticate(
     const token = header.slice('Bearer '.length).trim();
     const payload = verifyAccessToken(token);
 
-    const user = await User.findById(payload.sub).select('roles');
+    const user = await User.findById(payload.sub).select('roles isActive');
     if (!user) {
       throw AppError.unauthorized('User no longer exists', 'USER_NOT_FOUND');
+    }
+    // A disabled account (admin-blocked) cannot make authenticated requests.
+    if (user.isActive === false) {
+      throw AppError.forbidden('حساب شما غیرفعال شده است', 'ACCOUNT_DISABLED');
     }
 
     req.user = { id: payload.sub, roles: user.roles };

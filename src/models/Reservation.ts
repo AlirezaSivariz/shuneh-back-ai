@@ -55,7 +55,7 @@ export interface IReservation extends Document {
   status: ReservationStatus;
   completedAt?: Date;
   /** Who cancelled (set when status becomes 'cancelled'). */
-  cancelledBy?: 'customer' | 'stylist' | null;
+  cancelledBy?: 'customer' | 'stylist' | 'admin' | null;
   cancelReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -101,7 +101,7 @@ const reservationSchema = new Schema<IReservation>(
       index: true,
     },
     completedAt: { type: Date },
-    cancelledBy: { type: String, enum: ['customer', 'stylist', null], default: null },
+    cancelledBy: { type: String, enum: ['customer', 'stylist', 'admin', null], default: null },
     cancelReason: { type: String, default: null },
   },
   { timestamps: true },

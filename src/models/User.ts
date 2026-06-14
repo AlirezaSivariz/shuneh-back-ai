@@ -1,12 +1,14 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type Role = 'owner' | 'stylist' | 'customer';
-export const ROLES: Role[] = ['owner', 'stylist', 'customer'];
+export type Role = 'owner' | 'stylist' | 'customer' | 'admin';
+export const ROLES: Role[] = ['owner', 'stylist', 'customer', 'admin'];
 
 export interface IUser extends Document {
   _id: Types.ObjectId;
   phone: string;
   roles: Role[];
+  /** When false the account is disabled (cannot authenticate). Admin-managed. */
+  isActive: boolean;
   firstName?: string;
   lastName?: string;
   nationalCode?: string;
@@ -24,6 +26,7 @@ const userSchema = new Schema<IUser>(
       enum: ROLES,
       default: [],
     },
+    isActive: { type: Boolean, default: true, index: true },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     nationalCode: { type: String, trim: true },

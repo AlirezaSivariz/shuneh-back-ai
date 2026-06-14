@@ -54,6 +54,8 @@ export interface AppConfig {
   quickRebookThreshold: number;
   /** Optional shared secret guarding the /internal endpoints. */
   internalApiKey?: string;
+  /** Phone of the bootstrap admin (used by the admin seed script only). */
+  adminPhone?: string;
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -77,4 +79,5 @@ export const config: AppConfig = {
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),
   internalApiKey: process.env.INTERNAL_API_KEY || undefined,
+  adminPhone: process.env.ADMIN_PHONE || undefined,
 };
