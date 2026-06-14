@@ -38,6 +38,21 @@ export const reservationIdParamsSchema = {
   params: z.object({ id: objectId }),
 };
 
+export const rescheduleSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
+    startTime: z.string().refine(isValidHHmm, 'startTime must be HH:mm'),
+  }),
+};
+
+export const tipSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    amount: z.number().int().positive('مبلغ انعام باید بزرگ‌تر از صفر باشد'),
+  }),
+};
+
 export const stylistCancelSchema = {
   params: z.object({ id: objectId }),
   body: z.object({

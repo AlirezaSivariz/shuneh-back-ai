@@ -21,6 +21,9 @@ import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
 import { config } from '../../config/env';
+import { Tip } from '../../models/Tip';
+import { notificationService } from '../../utils/notification';
+import { paymentProvider } from '../../utils/payment';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -322,6 +325,201 @@ export async function cancelByStylist(
 }
 
 /**
+ * Reschedule a confirmed, future reservation to a new date/time. Works for the
+ * reservation's OWN customer or stylist (the caller determines who). Services
+ * stay the same; the SAME record is updated (rating/note/discount preserved).
+ *
+ * The new slot is validated with the same rules as booking (inside a working
+ * interval that weekday → determines the possibly-different salon; future; no
+ * overlap with OTHER active reservations). The reservation does not block
+ * itself. Uses the same check-then-write anti-double-booking mechanism as
+ * `createReservation` (a real DB transaction would need a replica set).
+ */
+export async function rescheduleReservation(
+  userId: string,
+  reservationId: string,
+  input: { date: string; startTime: string },
+) {
+  if (!Types.ObjectId.isValid(reservationId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  const reservation = await Reservation.findById(reservationId);
+  if (!reservation) throw AppError.notFound('رزرو یافت نشد', 'RESERVATION_NOT_FOUND');
+
+  const isStylistOwner = String(reservation.stylistId) === userId;
+  const isCustomer = String(reservation.customerId) === userId;
+  if (!isStylistOwner && !isCustomer) {
+    throw AppError.forbidden('دسترسی غیرمجاز', 'FORBIDDEN');
+  }
+  const by: 'customer' | 'stylist' = isStylistOwner ? 'stylist' : 'customer';
+
+  if (reservation.status !== 'confirmed') {
+    throw AppError.badRequest('فقط نوبت‌های تأییدشده قابل جابه‌جایی هستند', 'NOT_RESCHEDULABLE');
+  }
+  if (reservation.startAt.getTime() <= Date.now()) {
+    throw AppError.badRequest('نوبت گذشته قابل جابه‌جایی نیست', 'RESERVATION_IN_PAST');
+  }
+
+  const stylistId = String(reservation.stylistId);
+  const { date, startTime } = input;
+
+  // Preserve the original total duration (services unchanged).
+  const totalDuration = toMinutes(reservation.endTime) - toMinutes(reservation.startTime);
+  if (!(totalDuration > 0)) throw AppError.badRequest('مدت نوبت نامعتبر است', 'INVALID_DURATION');
+  const endTime = endTimeFrom(startTime, totalDuration);
+
+  const dayDate = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(dayDate.getTime())) throw AppError.badRequest('تاریخ نامعتبر است', 'INVALID_DATE');
+  const dayOfWeek = dayDate.getUTCDay();
+
+  // The new slot must lie within a working interval for that weekday. The host
+  // interval determines the (possibly different) salon for the new day.
+  const hours = await WorkingHour.find({ stylistId, dayOfWeek }).lean();
+  const host = hours.find((h) =>
+    contains({ start: h.start, end: h.end }, { start: startTime, end: endTime }),
+  );
+  if (!host) {
+    throw AppError.badRequest('این بازه در ساعات کاری متخصص نیست', 'OUTSIDE_WORKING_HOURS');
+  }
+  const newSalonId = host.salonId ? String(host.salonId) : null;
+  if (newSalonId) {
+    const membership = await StylistSalon.findOne({ stylistId, salonId: newSalonId }).lean();
+    if (membership?.status === 'rejected') {
+      throw AppError.badRequest('این سالن برای رزرو در دسترس نیست', 'SALON_REJECTED');
+    }
+  }
+
+  const newStartAt = iranWallClockToUtc(dayDate, startTime);
+  if (newStartAt.getTime() <= Date.now()) {
+    throw AppError.badRequest('زمان انتخابی گذشته است', 'SLOT_IN_PAST');
+  }
+
+  // No overlap with OTHER active reservations (this reservation excluded).
+  const dayReservations = await Reservation.find({
+    stylistId,
+    date: dayDate,
+    status: { $in: ['pending', 'confirmed'] },
+    _id: { $ne: reservation._id },
+  }).lean();
+  const clash = dayReservations.some((r) =>
+    overlaps({ start: r.startTime, end: r.endTime }, { start: startTime, end: endTime }),
+  );
+  if (clash) throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
+
+  // Apply on the SAME record; append to history. startAt/endAt are recomputed
+  // by the model's pre('validate') hook from date + start/endTime.
+  const fromDate = reservation.date.toISOString().slice(0, 10);
+  const fromStartTime = reservation.startTime;
+  reservation.date = dayDate;
+  reservation.startTime = startTime;
+  reservation.endTime = endTime;
+  reservation.salonId = newSalonId ? new Types.ObjectId(newSalonId) : null;
+  reservation.rescheduleHistory = [
+    ...(reservation.rescheduleHistory ?? []),
+    { fromDate, fromStartTime, toDate: date, toStartTime: startTime, by, at: new Date() },
+  ];
+  await reservation.save();
+
+  // Notify the OTHER party (best-effort).
+  void (async () => {
+    const otherId = by === 'customer' ? reservation.stylistId : reservation.customerId;
+    const other = await User.findById(otherId).select('phone').lean();
+    if (other?.phone) {
+      void notificationService.reservationRescheduled(other.phone, { date, startTime, by });
+    }
+  })();
+
+  return serializeReservation(reservation, by === 'stylist' ? 'stylist' : 'customer');
+}
+
+/** Maximum tip we accept (sanity cap, toman). */
+const MAX_TIP = 50_000_000;
+
+/**
+ * Record a tip for a completed reservation. Money is NOT actually moved — it
+ * goes through the (stub) payment seam and is stored with the returned status
+ * (currently 'recorded'). One tip per reservation (idempotent).
+ */
+export async function recordTip(customerId: string, reservationId: string, amount: number) {
+  if (!Types.ObjectId.isValid(reservationId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  if (!(amount > 0)) throw AppError.badRequest('مبلغ انعام نامعتبر است', 'INVALID_AMOUNT');
+  if (amount > MAX_TIP) throw AppError.badRequest('مبلغ انعام بیش از حد مجاز است', 'TIP_TOO_LARGE');
+
+  const reservation = await Reservation.findById(reservationId).lean();
+  if (!reservation) throw AppError.notFound('رزرو یافت نشد', 'RESERVATION_NOT_FOUND');
+  if (String(reservation.customerId) !== customerId) {
+    throw AppError.forbidden('دسترسی غیرمجاز', 'FORBIDDEN');
+  }
+  if (reservation.status !== 'completed') {
+    throw AppError.badRequest('انعام فقط برای نوبت انجام‌شده ممکن است', 'NOT_COMPLETED');
+  }
+
+  const already = await Tip.findOne({ reservationId }).lean();
+  if (already) throw AppError.conflict('برای این نوبت قبلاً انعام ثبت شده است', 'TIP_ALREADY_RECORDED');
+
+  // Payment seam (stub) — see utils/payment.ts. No real charge happens yet.
+  const charge = await paymentProvider.recordTip({
+    customerId,
+    stylistId: String(reservation.stylistId),
+    amount,
+  });
+
+  try {
+    const tip = await Tip.create({
+      reservationId: reservation._id,
+      customerId: new Types.ObjectId(customerId),
+      stylistId: reservation.stylistId,
+      amount,
+      status: charge.status,
+    });
+    return { id: String(tip._id), amount: tip.amount, status: tip.status };
+  } catch {
+    // Unique-index race: another request recorded it first.
+    throw AppError.conflict('برای این نوبت قبلاً انعام ثبت شده است', 'TIP_ALREADY_RECORDED');
+  }
+}
+
+/** A stylist's received tips: total + per-reservation list. */
+export async function getStylistTips(stylistId: string) {
+  const tips = await Tip.find({ stylistId: new Types.ObjectId(stylistId) })
+    .sort({ createdAt: -1 })
+    .lean();
+  const total = tips.reduce((s, t) => s + t.amount, 0);
+
+  const reservationIds = tips.map((t) => t.reservationId);
+  const reservations = await Reservation.find({ _id: { $in: reservationIds } })
+    .select('date customerId')
+    .lean();
+  const resById = new Map(reservations.map((r) => [String(r._id), r]));
+  const customerIds = reservations.map((r) => r.customerId);
+  const customers = await User.find({ _id: { $in: customerIds } })
+    .select('firstName lastName')
+    .lean();
+  const custById = new Map(customers.map((u) => [String(u._id), u]));
+
+  return {
+    total,
+    count: tips.length,
+    items: tips.map((t) => {
+      const r = resById.get(String(t.reservationId));
+      const cust = r ? custById.get(String(r.customerId)) : null;
+      return {
+        id: String(t._id),
+        amount: t.amount,
+        status: t.status,
+        date: r ? r.date.toISOString().slice(0, 10) : null,
+        customerName: cust
+          ? `${cust.firstName ?? ''} ${cust.lastName ?? ''}`.trim() || 'مشتری'
+          : 'مشتری',
+        createdAt: t.createdAt,
+      };
+    }),
+  };
+}
+
+/**
  * Quick-rebook suggestions: (stylist, service) pairs the customer has completed
  * at least `quickRebookThreshold` times, that are STILL bookable (stylist active
  * + service still offered). Returns enough data to pre-fill the booking flow.
@@ -409,13 +607,14 @@ export async function getQuickRebookSuggestions(customerId: string) {
 /** Build the public reservation DTO, enriching with service/stylist/salon info. */
 async function serializeReservation(r: IReservation, viewer: 'customer' | 'stylist' = 'customer') {
   const ids = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
-  const [services, stylist, customer, salon] = await Promise.all([
+  const [services, stylist, customer, salon, tip] = await Promise.all([
     Service.find({ _id: { $in: ids } }).select('name durationMin').lean(),
     User.findById(r.stylistId).select('firstName lastName profilePhoto').lean(),
     viewer === 'stylist'
       ? User.findById(r.customerId).select('firstName lastName phone').lean()
       : Promise.resolve(null),
     r.salonId ? Salon.findById(r.salonId).select('name address').lean() : Promise.resolve(null),
+    Tip.findOne({ reservationId: r._id }).select('amount status').lean(),
   ]);
 
   const photo = (stylist as { profilePhoto?: string } | null)?.profilePhoto;
@@ -460,10 +659,23 @@ async function serializeReservation(r: IReservation, viewer: 'customer' | 'styli
     customerNote: r.customerNote ?? null,
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
+    rescheduleHistory: (r.rescheduleHistory ?? []).map((h) => ({
+      fromDate: h.fromDate,
+      fromStartTime: h.fromStartTime,
+      toDate: h.toDate,
+      toStartTime: h.toStartTime,
+      by: h.by,
+      at: h.at,
+    })),
+    tip: tip ? { amount: tip.amount, status: tip.status } : null,
     canCancel:
       ['pending', 'confirmed'].includes(r.status) &&
       r.startAt.getTime() - Date.now() >= CANCEL_WINDOW_MS,
     /** A stylist may cancel a future confirmed reservation. */
     canCancelAsStylist: r.status === 'confirmed' && r.startAt.getTime() > Date.now(),
+    /** Customer or stylist may reschedule a confirmed, future reservation. */
+    canReschedule: r.status === 'confirmed' && r.startAt.getTime() > Date.now(),
+    /** The customer may tip a completed reservation that has no tip yet. */
+    canTip: r.status === 'completed' && !tip,
   };
 }

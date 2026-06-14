@@ -74,3 +74,15 @@ export const stylistIdParamsSchema = {
 export const paginationSchema = {
   query: z.object({ ...pageQuery }),
 };
+
+export const listVerificationsSchema = {
+  query: z.object({
+    status: z.enum(['pending', 'verified', 'rejected', 'incomplete']).optional(),
+    ...pageQuery,
+  }),
+};
+
+export const rejectVerificationSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};

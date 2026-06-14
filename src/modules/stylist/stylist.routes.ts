@@ -7,6 +7,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import {
   listReservationsSchema,
   stylistCancelSchema,
+  rescheduleSchema,
 } from '../reservation/reservation.validators';
 import * as reportsController from '../reports/reports.controller';
 import { reportRangeSchema } from '../reports/reports.validators';
@@ -129,6 +130,17 @@ router.patch(
   validate(stylistCancelSchema),
   asyncHandler(reservationController.stylistCancel),
 );
+// Stylist reschedules one of their own reservations (same shared service).
+router.patch(
+  '/reservations/:id/reschedule',
+  validate(rescheduleSchema),
+  asyncHandler(reservationController.reschedule),
+);
+// Tips received by this stylist (total + list).
+router.get('/tips', asyncHandler(reservationController.stylistTips));
+
+// Submit the profile for admin verification (blue tick).
+router.post('/profile/submit-verification', asyncHandler(controller.submitVerification));
 
 // Stylist earnings/activity report + analytics (services ranking + weekday).
 router.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.stylistReport));

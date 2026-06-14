@@ -18,6 +18,7 @@ import { DiscountCode } from '../../models/DiscountCode';
 import { AuditLog } from '../../models/AuditLog';
 import { AppError } from '../../utils/AppError';
 import { notificationService } from '../../utils/notification';
+import { storageProvider } from '../../utils/storage';
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -489,4 +490,79 @@ export async function unpromoteStylist(adminId: string, stylistId: string) {
   await profile.save();
   await audit(adminId, 'stylist.unpromote', 'stylist', stylistId, {});
   return summarizePromotion(stylistId, profile);
+}
+
+// ───────────────────────── verification (blue tick) ─────────────────────────
+
+export async function listVerifications(
+  filter: { status?: 'pending' | 'verified' | 'rejected' | 'incomplete' } & PageQuery,
+) {
+  const { page, limit, skip } = paginate(filter);
+  const status = filter.status ?? 'pending';
+  const q = { verificationStatus: status };
+
+  const [profiles, total] = await Promise.all([
+    StylistProfile.find(q).sort({ profileSubmittedAt: -1 }).skip(skip).limit(limit).lean(),
+    StylistProfile.countDocuments(q),
+  ]);
+  const users = await User.find({ _id: { $in: profiles.map((p) => p.userId) } })
+    .select('firstName lastName phone nationalCode profilePhoto')
+    .lean();
+  const userById = new Map(users.map((u) => [String(u._id), u]));
+
+  return {
+    items: profiles.map((p) => {
+      const u = userById.get(String(p.userId));
+      return {
+        id: String(p.userId),
+        fullName: fullName(u) ?? 'متخصص',
+        phone: u?.phone ?? null,
+        nationalCode: u?.nationalCode ?? null, // admin-only
+        profilePhoto: u?.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
+        portfolio: (p.portfolio ?? []).map((k) => storageProvider.getUrl(k)),
+        verificationStatus: p.verificationStatus,
+        profileSubmittedAt: p.profileSubmittedAt,
+      };
+    }),
+    ...pageMeta(page, limit, total),
+  };
+}
+
+export async function verifyStylist(adminId: string, stylistId: string) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+
+  profile.isVerified = true;
+  profile.verificationStatus = 'verified';
+  profile.verifiedAt = new Date();
+  profile.verifiedBy = new Types.ObjectId(adminId);
+  profile.rejectionReason = null;
+  await profile.save();
+  await audit(adminId, 'stylist.verify', 'stylist', stylistId, {});
+
+  void (async () => {
+    const u = await User.findById(stylistId).select('phone').lean();
+    if (u?.phone) void notificationService.verificationApproved(u.phone);
+  })();
+
+  return { stylistId, isVerified: true, verificationStatus: profile.verificationStatus };
+}
+
+export async function rejectVerification(adminId: string, stylistId: string, reason?: string) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+
+  profile.isVerified = false;
+  profile.verificationStatus = 'rejected';
+  profile.rejectionReason = reason ?? null;
+  profile.verifiedBy = new Types.ObjectId(adminId);
+  await profile.save();
+  await audit(adminId, 'stylist.rejectVerification', 'stylist', stylistId, { reason: reason ?? null });
+
+  void (async () => {
+    const u = await User.findById(stylistId).select('phone').lean();
+    if (u?.phone) void notificationService.verificationRejected(u.phone, { reason });
+  })();
+
+  return { stylistId, isVerified: false, verificationStatus: profile.verificationStatus };
 }

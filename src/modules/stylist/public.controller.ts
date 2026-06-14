@@ -26,8 +26,12 @@ export async function featured(_req: Request, res: Response): Promise<void> {
 }
 
 export async function availability(req: Request, res: Response): Promise<void> {
-  const { date, serviceIds } = req.query as unknown as { date: string; serviceIds: string[] };
-  const result = await service.getAvailability(req.params.id, date, serviceIds);
+  const { date, serviceIds, excludeReservationId } = req.query as unknown as {
+    date: string;
+    serviceIds: string[];
+    excludeReservationId?: string;
+  };
+  const result = await service.getAvailability(req.params.id, date, serviceIds, excludeReservationId);
   sendSuccess(res, result);
 }
 

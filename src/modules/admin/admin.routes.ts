@@ -16,6 +16,8 @@ import {
   promoteSchema,
   stylistIdParamsSchema,
   paginationSchema,
+  listVerificationsSchema,
+  rejectVerificationSchema,
 } from './admin.validators';
 
 /**
@@ -33,6 +35,7 @@ adminRouter.get('/reservations', validate(listReservationsSchema), asyncHandler(
 adminRouter.get('/reservations/:id', validate(idParamsSchema), asyncHandler(controller.getReservation));
 adminRouter.get('/salons', validate(listSalonsSchema), asyncHandler(controller.listSalons));
 adminRouter.get('/stylists', validate(listStylistsSchema), asyncHandler(controller.listStylists));
+adminRouter.get('/verifications', validate(listVerificationsSchema), asyncHandler(controller.listVerifications));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
 
 // ── Write (conservative; audited) ──
@@ -40,3 +43,5 @@ adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandl
 adminRouter.post('/reservations/:id/cancel', validate(cancelReservationSchema), asyncHandler(controller.cancelReservation));
 adminRouter.post('/stylists/:id/promote', validate(promoteSchema), asyncHandler(controller.promote));
 adminRouter.post('/stylists/:id/unpromote', validate(stylistIdParamsSchema), asyncHandler(controller.unpromote));
+adminRouter.post('/stylists/:id/verify', validate(stylistIdParamsSchema), asyncHandler(controller.verifyStylist));
+adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));

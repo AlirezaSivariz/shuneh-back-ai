@@ -56,3 +56,24 @@ export async function stylistCancel(req: Request, res: Response): Promise<void> 
   );
   sendSuccess(res, { reservation });
 }
+
+/** Reschedule — works for the reservation's own customer OR stylist. */
+export async function reschedule(req: Request, res: Response): Promise<void> {
+  const reservation = await service.rescheduleReservation(req.user!.id, req.params.id, {
+    date: req.body.date,
+    startTime: req.body.startTime,
+  });
+  sendSuccess(res, { reservation });
+}
+
+/** Record a tip for a completed reservation (customer only). */
+export async function tip(req: Request, res: Response): Promise<void> {
+  const result = await service.recordTip(req.user!.id, req.params.id, req.body.amount);
+  sendSuccess(res, { tip: result }, 201);
+}
+
+/** A stylist's received tips (total + list). */
+export async function stylistTips(req: Request, res: Response): Promise<void> {
+  const result = await service.getStylistTips(req.user!.id);
+  sendSuccess(res, result);
+}

@@ -52,8 +52,19 @@ export interface IReservation extends Document {
   finalPrice?: number | null;
   /** Optional free-text note from the customer to the stylist (read-only for stylist). */
   customerNote?: string | null;
+  /** Audit trail of reschedules (oldest → newest). */
+  rescheduleHistory?: {
+    fromDate: string;
+    fromStartTime: string;
+    toDate: string;
+    toStartTime: string;
+    by: 'customer' | 'stylist';
+    at: Date;
+  }[];
   status: ReservationStatus;
   completedAt?: Date;
+  /** Set once the post-completion (review/tip) SMS has been sent — prevents duplicates. */
+  completionNotifiedAt?: Date | null;
   /** Who cancelled (set when status becomes 'cancelled'). */
   cancelledBy?: 'customer' | 'stylist' | 'admin' | null;
   cancelReason?: string | null;
@@ -94,6 +105,23 @@ const reservationSchema = new Schema<IReservation>(
     originalPrice: { type: Number, default: null, min: 0 },
     finalPrice: { type: Number, default: null, min: 0 },
     customerNote: { type: String, default: null, maxlength: 500 },
+    rescheduleHistory: {
+      type: [
+        new Schema(
+          {
+            fromDate: { type: String, required: true },
+            fromStartTime: { type: String, required: true },
+            toDate: { type: String, required: true },
+            toStartTime: { type: String, required: true },
+            by: { type: String, enum: ['customer', 'stylist'], required: true },
+            at: { type: Date, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    completionNotifiedAt: { type: Date, default: null },
     status: {
       type: String,
       enum: RESERVATION_STATUSES,

@@ -29,6 +29,8 @@ export const availabilitySchema = {
   query: z.object({
     date: dateStr,
     serviceIds: serviceIdsCsv,
+    // When set (reschedule flow), this reservation's own slot is treated as free.
+    excludeReservationId: objectId.optional(),
   }),
 };
 

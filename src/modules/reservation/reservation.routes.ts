@@ -10,6 +10,8 @@ import {
   createReservationSchema,
   listReservationsSchema,
   reservationIdParamsSchema,
+  rescheduleSchema,
+  tipSchema,
 } from './reservation.validators';
 import {
   createReviewSchema,
@@ -45,6 +47,14 @@ reservationRouter.post(
   validate(reservationIdParamsSchema),
   asyncHandler(customer.cancel),
 );
+// Reschedule to a new date/time (services unchanged).
+reservationRouter.patch(
+  '/:id/reschedule',
+  validate(rescheduleSchema),
+  asyncHandler(customer.reschedule),
+);
+// Record a tip for a completed reservation.
+reservationRouter.post('/:id/tip', validate(tipSchema), asyncHandler(customer.tip));
 
 // Ratings & reviews for a (completed) reservation.
 reservationRouter.post(

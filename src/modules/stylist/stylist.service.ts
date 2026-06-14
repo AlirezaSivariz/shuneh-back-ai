@@ -686,5 +686,50 @@ export async function deleteCustomService(stylistId: string, serviceId: string) 
   return listStylistServices(stylistId);
 }
 
+// ───────────────────── Verification (blue tick) ─────────────────────
+
+/**
+ * Submit the profile for admin verification. Requires the core profile to be
+ * complete; otherwise returns a clear list of what's missing. Re-submission is
+ * allowed from 'incomplete'/'rejected', but not while 'pending'/'verified'.
+ */
+export async function submitVerification(stylistId: string) {
+  const profile = await ensureStylistProfile(stylistId);
+  const user = await User.findById(stylistId)
+    .select('firstName lastName nationalCode profilePhoto')
+    .lean();
+
+  const missing: string[] = [];
+  if (!user?.firstName || !user?.lastName) missing.push('نام و نام خانوادگی');
+  if (!user?.nationalCode) missing.push('کد ملی');
+  if (!user?.profilePhoto) missing.push('عکس پروفایل');
+  if (!(profile.portfolio && profile.portfolio.length > 0)) missing.push('حداقل یک نمونه‌کار');
+  if (profile.status !== 'active') missing.push('تکمیل آنبوردینگ');
+
+  if (missing.length > 0) {
+    throw AppError.badRequest(
+      `برای ارسال جهت تأیید، این موارد باید کامل شود: ${missing.join('، ')}`,
+      'PROFILE_INCOMPLETE',
+      { missing },
+    );
+  }
+  if (profile.verificationStatus === 'verified') {
+    throw AppError.badRequest('پروفایل شما قبلاً تأیید شده است', 'ALREADY_VERIFIED');
+  }
+  if (profile.verificationStatus === 'pending') {
+    throw AppError.badRequest('درخواست تأیید شما در حال بررسی است', 'VERIFICATION_PENDING');
+  }
+
+  profile.verificationStatus = 'pending';
+  profile.profileSubmittedAt = new Date();
+  profile.rejectionReason = null;
+  await profile.save();
+
+  return {
+    verificationStatus: profile.verificationStatus,
+    profileSubmittedAt: profile.profileSubmittedAt,
+  };
+}
+
 /** Read the stylist profile (used by the media step and others). */
 export { getStylistProfile };

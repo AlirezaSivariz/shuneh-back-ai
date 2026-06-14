@@ -1,4 +1,7 @@
 import { Reservation } from '../../models/Reservation';
+import { User } from '../../models/User';
+import { config } from '../../config/env';
+import { notificationService } from '../../utils/notification';
 
 export interface CompleteDueResult {
   matched: number;
@@ -24,10 +27,41 @@ export interface CompleteDueResult {
  * `now` is injectable for testing.
  */
 export async function completeDueReservations(now: Date = new Date()): Promise<CompleteDueResult> {
+  // Capture the rows about to complete (so we know exactly who to notify) BEFORE
+  // flipping them, then mark them all completed in one bulk update.
+  const due = await Reservation.find({ status: 'confirmed', endAt: { $lte: now } })
+    .select('_id customerId date startTime completionNotifiedAt')
+    .lean();
+
   const result = await Reservation.updateMany(
     { status: 'confirmed', endAt: { $lte: now } },
     { $set: { status: 'completed', completedAt: now } },
   );
+
+  // Send the review/tip invite ONCE per reservation (completionNotifiedAt flag).
+  const toNotify = due.filter((r) => !r.completionNotifiedAt);
+  if (toNotify.length > 0) {
+    void (async () => {
+      try {
+        const customers = await User.find({ _id: { $in: toNotify.map((r) => r.customerId) } })
+          .select('phone')
+          .lean();
+        const phoneById = new Map(customers.map((u) => [String(u._id), u.phone]));
+        const link = `${config.webBaseUrl}/dashboard/customer`;
+        for (const r of toNotify) {
+          const phone = phoneById.get(String(r.customerId));
+          if (phone) void notificationService.serviceCompleted(phone, { link });
+        }
+        // Mark notified so a later run never re-sends.
+        await Reservation.updateMany(
+          { _id: { $in: toNotify.map((r) => r._id) } },
+          { $set: { completionNotifiedAt: now } },
+        );
+      } catch {
+        /* best-effort — never throw out of the cron pass */
+      }
+    })();
+  }
 
   return {
     matched: result.matchedCount ?? 0,

@@ -192,6 +192,7 @@ export async function searchStylists(params: SearchParams) {
       rating: profile.ratingAverage ?? 0,
       ratingCount: profile.ratingCount ?? 0,
       isPromoted: isPromotedActive(profile),
+      isVerified: profile.isVerified === true,
     });
   }
 
@@ -283,6 +284,7 @@ export async function getStylistProfile(stylistId: string) {
     ratingCount: profile.ratingCount ?? 0,
     isPromoted: isPromotedActive(profile),
     isAcceptingReservations: profile.isAcceptingReservations !== false,
+    isVerified: profile.isVerified === true,
   };
 }
 
@@ -338,7 +340,12 @@ async function ensureActiveStylist(stylistId: string) {
  * (never an error) when the stylist doesn't work that day or nothing is free.
  * Each slot: { start, end, startTime, endTime, salonId, salonName, salon }.
  */
-export async function getAvailability(stylistId: string, dateStr: string, serviceIds: string[]) {
+export async function getAvailability(
+  stylistId: string,
+  dateStr: string,
+  serviceIds: string[],
+  excludeReservationId?: string,
+) {
   const profile = await ensureActiveStylist(stylistId);
   // Paused stylists expose no slots (existing reservations are untouched).
   if (profile.isAcceptingReservations === false) {
@@ -376,11 +383,16 @@ export async function getAvailability(stylistId: string, dateStr: string, servic
     });
 
   // Already-booked intervals for the day (pending/confirmed block the slot).
-  const dayReservations = await Reservation.find({
+  // When rescheduling, the reservation being moved must NOT block itself.
+  const busyQuery: Record<string, unknown> = {
     stylistId,
     date: dayDate,
     status: { $in: ['pending', 'confirmed'] },
-  }).lean();
+  };
+  if (excludeReservationId && Types.ObjectId.isValid(excludeReservationId)) {
+    busyQuery._id = { $ne: new Types.ObjectId(excludeReservationId) };
+  }
+  const dayReservations = await Reservation.find(busyQuery).lean();
   const busy: Interval[] = dayReservations.map((r) => ({ start: r.startTime, end: r.endTime }));
 
   // If the requested day is today (Iran), forbid past start times.

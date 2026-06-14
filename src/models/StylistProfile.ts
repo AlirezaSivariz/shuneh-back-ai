@@ -49,9 +49,18 @@ export interface IStylistProfile extends Document {
   isPromoted: boolean;
   promotedUntil: Date | null;
   promotionTier?: number | null;
+  /** Identity/quality verification (the "blue tick"). Managed by admins. */
+  profileSubmittedAt: Date | null;
+  verificationStatus: 'incomplete' | 'pending' | 'verified' | 'rejected';
+  isVerified: boolean;
+  verifiedAt: Date | null;
+  verifiedBy: Types.ObjectId | null;
+  rejectionReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type VerificationStatus = IStylistProfile['verificationStatus'];
 
 const geoPointSchema = new Schema<GeoPoint>(
   {
@@ -86,6 +95,18 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     isPromoted: { type: Boolean, default: false },
     promotedUntil: { type: Date, default: null },
     promotionTier: { type: Number, default: null },
+    // Verification (blue tick). Defaults keep existing docs valid.
+    profileSubmittedAt: { type: Date, default: null },
+    verificationStatus: {
+      type: String,
+      enum: ['incomplete', 'pending', 'verified', 'rejected'],
+      default: 'incomplete',
+      index: true,
+    },
+    isVerified: { type: Boolean, default: false },
+    verifiedAt: { type: Date, default: null },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    rejectionReason: { type: String, default: null },
   },
   { timestamps: true },
 );

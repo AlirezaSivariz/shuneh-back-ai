@@ -78,6 +78,28 @@ export async function unpromote(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { promotion: result });
 }
 
+// ── Verification ──
+export async function listVerifications(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string>;
+  sendSuccess(
+    res,
+    await service.listVerifications({
+      status: q.status as 'pending' | 'verified' | 'rejected' | 'incomplete' | undefined,
+      page: Number(q.page),
+      limit: Number(q.limit),
+    }),
+  );
+}
+
+export async function verifyStylist(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { verification: await service.verifyStylist(req.user!.id, req.params.id) });
+}
+
+export async function rejectVerification(req: Request, res: Response): Promise<void> {
+  const result = await service.rejectVerification(req.user!.id, req.params.id, req.body?.reason);
+  sendSuccess(res, { verification: result });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

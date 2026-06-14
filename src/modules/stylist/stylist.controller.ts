@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import * as service from './stylist.service';
 import { sendSuccess } from '../../utils/response';
 
+export async function submitVerification(req: Request, res: Response): Promise<void> {
+  const result = await service.submitVerification(req.user!.id);
+  sendSuccess(res, result);
+}
+
 export async function setServices(req: Request, res: Response): Promise<void> {
   const services = await service.setServices(req.user!.id, req.body.items);
   sendSuccess(res, { services });

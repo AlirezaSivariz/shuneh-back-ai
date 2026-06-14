@@ -100,6 +100,12 @@ export async function getOnboardingState(userId: string) {
     onboardingStep: profile?.onboardingStep ?? 'role',
     status: profile?.status ?? 'draft',
     isAcceptingReservations: profile?.isAcceptingReservations ?? true,
+    verification: {
+      status: profile?.verificationStatus ?? 'incomplete',
+      isVerified: profile?.isVerified ?? false,
+      rejectionReason: profile?.rejectionReason ?? null,
+      profileSubmittedAt: profile?.profileSubmittedAt ?? null,
+    },
     workplaceType: profile?.workplaceType ?? null,
     freelance: profile?.freelance ?? null,
     portfolio: profile?.portfolio ?? [],
