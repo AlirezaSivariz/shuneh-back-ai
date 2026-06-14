@@ -1,11 +1,12 @@
 import { z } from 'zod';
-import { ROLES } from '../../models/User';
+import { SELF_ASSIGNABLE_ROLES } from '../../models/User';
 import { isValidNationalCode } from '../../utils/nationalCode';
 
 export const setRolesSchema = {
   body: z.object({
+    // Only self-assignable roles — 'admin' can never be granted this way.
     roles: z
-      .array(z.enum(ROLES as [string, ...string[]]))
+      .array(z.enum(SELF_ASSIGNABLE_ROLES as [string, ...string[]]))
       .nonempty('At least one role is required'),
   }),
 };

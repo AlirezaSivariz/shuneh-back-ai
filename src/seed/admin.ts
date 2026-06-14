@@ -19,18 +19,19 @@ async function run() {
   }
 
   await connectDb();
-  const user = await User.findOne({ phone });
-  if (!user) {
+  const existing = await User.findOne({ phone });
+  let action: 'ساخته' | 'به‌روزرسانی';
+  if (!existing) {
     await User.create({ phone, roles: ['admin'], isActive: true });
-    // eslint-disable-next-line no-console
-    console.log(`[seed:admin] created admin ${phone}`);
+    action = 'ساخته';
   } else {
-    if (!user.roles.includes('admin')) user.roles.push('admin');
-    user.isActive = true;
-    await user.save();
-    // eslint-disable-next-line no-console
-    console.log(`[seed:admin] granted admin to existing user ${phone}`);
+    if (!existing.roles.includes('admin')) existing.roles.push('admin');
+    existing.isActive = true;
+    await existing.save();
+    action = 'به‌روزرسانی';
   }
+  // eslint-disable-next-line no-console
+  console.log(`✅ ادمین با شماره ${phone} ${action} شد. اکنون می‌تواند با OTP وارد شود.`);
   await disconnectDb();
 }
 

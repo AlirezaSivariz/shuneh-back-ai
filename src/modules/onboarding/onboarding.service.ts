@@ -1,4 +1,4 @@
-import { User, Role, ROLES } from '../../models/User';
+import { User, Role, SELF_ASSIGNABLE_ROLES } from '../../models/User';
 import {
   StylistProfile,
   IStylistProfile,
@@ -52,8 +52,9 @@ export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
   if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
 
   for (const role of roles) {
-    if (!ROLES.includes(role)) {
-      throw AppError.badRequest(`Unknown role: ${role}`, 'INVALID_ROLE');
+    // 'admin' is never self-assignable — only the seed script can grant it.
+    if (!SELF_ASSIGNABLE_ROLES.includes(role)) {
+      throw AppError.badRequest(`Role not allowed: ${role}`, 'INVALID_ROLE');
     }
     if (!user.roles.includes(role)) user.roles.push(role);
   }
