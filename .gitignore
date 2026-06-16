@@ -5,3 +5,4 @@ uploads/
 *.log
 web
 uploads-private/
+coverage/

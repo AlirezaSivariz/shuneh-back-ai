@@ -146,3 +146,14 @@ regresses, so a stylist can resume from where they left off via
 - Junction collections (`StylistService`, `StylistSalon`, `WorkingHour`) keep the
   schema ready for the upcoming customer booking phase.
 ```
+
+## Testing
+
+Automated API integration tests run against an in-memory MongoDB (Jest + Supertest):
+
+```bash
+npm test               # full suite
+npm run test:coverage  # with coverage
+```
+
+See [`tests/README.md`](tests/README.md) for the layout and what each file covers.

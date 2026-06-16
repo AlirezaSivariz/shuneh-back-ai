@@ -174,6 +174,30 @@ export async function createReservation(customerId: string, input: CreateInput) 
     status: 'confirmed', // auto-confirm
   });
 
+  // Concurrency guard (no DB transaction available on standalone Mongo): the
+  // pre-create clash check has a race window where two parallel bookings can
+  // both pass. After creating, re-check for OVERLAPPING active reservations;
+  // among a conflicting set the row with the smallest _id (earliest) wins, and
+  // every loser deletes itself. This deterministically leaves exactly one
+  // booking per overlapping slot even under concurrency.
+  const concurrent = await Reservation.find({
+    stylistId,
+    date: dayDate,
+    status: { $in: ['pending', 'confirmed'] },
+    _id: { $ne: reservation._id },
+  })
+    .select('_id startTime endTime')
+    .lean();
+  const loses = concurrent.some(
+    (c) =>
+      overlaps({ start: c.startTime, end: c.endTime }, { start: startTime, end: endTime }) &&
+      String(c._id) < String(reservation._id),
+  );
+  if (loses) {
+    await reservation.deleteOne().catch(() => {});
+    throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
+  }
+
   // Atomically consume usage AFTER the reservation exists, so the usage limit
   // can't be exceeded by concurrent bookings. If the cap was hit in the
   // meantime, undo the reservation and surface a clear error.
