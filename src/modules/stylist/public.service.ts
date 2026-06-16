@@ -17,6 +17,7 @@ import { GeoPoint } from '../../utils/geo';
 import { storageProvider } from '../../utils/storage';
 import { Interval } from '../../utils/time';
 import { buildSlots, iranNow, WorkingInterval } from '../../utils/slots';
+import { getBookability, getBookabilityMap } from './bookability';
 
 /** Effective price/duration: stylist override falls back to the service default. */
 export function effectivePrice(override: number | null, svc: IService): number {
@@ -119,6 +120,8 @@ export async function searchStylists(params: SearchParams) {
 
   const serviceById = new Map(allServices.map((s) => [String(s._id), s as unknown as IService]));
   const userById = new Map(users.map((u) => [String(u._id), u]));
+  // Only stylists with an active workplace are bookable → shown in search.
+  const bookMap = await getBookabilityMap(profiles);
 
   // Optional category filter resolves to a set of serviceIds.
   let categoryServiceIds: Set<string> | null = null;
@@ -132,6 +135,9 @@ export async function searchStylists(params: SearchParams) {
     const uid = String(profile.userId);
     const user = userById.get(uid);
     if (!user) continue;
+
+    // Not bookable (no active workplace) → never appears in search/featured.
+    if (!bookMap.get(uid)?.bookable) continue;
 
     const myServices = stylistServices.filter((s) => String(s.stylistId) === uid);
     if (myServices.length === 0) continue;
@@ -347,8 +353,10 @@ export async function getAvailability(
   excludeReservationId?: string,
 ) {
   const profile = await ensureActiveStylist(stylistId);
-  // Paused stylists expose no slots (existing reservations are untouched).
-  if (profile.isAcceptingReservations === false) {
+  // Not bookable (paused, or no active workplace) → no slots. Existing
+  // reservations are untouched.
+  const book = await getBookability(stylistId, profile);
+  if (!book.bookable) {
     return { date: dateStr, dayOfWeek: -1, totalDurationMin: 0, slots: [] };
   }
   const totalDuration = await resolveTotalDuration(stylistId, serviceIds);
@@ -370,8 +378,11 @@ export async function getAvailability(
     .populate<{ salonId: ISalon | null }>('salonId')
     .sort({ start: 1 });
 
+  // Only ACTIVE workplaces are bookable: freelance intervals (no salon) count
+  // only if the stylist is a freelancer; salon intervals only for active salons.
+  const activeSalonSet = new Set(book.activeSalonIds);
   const working: WorkingInterval[] = hours
-    .filter((h) => !h.salonId || statusBySalon.get(String(h.salonId)) !== 'rejected')
+    .filter((h) => (h.salonId ? activeSalonSet.has(String(h.salonId)) : book.freelance))
     .map((h) => {
       const salon = h.salonId as unknown as ISalon | null;
       return {
@@ -433,7 +444,8 @@ export async function getAvailableDays(
   serviceIds: string[],
 ) {
   const profile = await ensureActiveStylist(stylistId);
-  if (profile.isAcceptingReservations === false) {
+  const book = await getBookability(stylistId, profile);
+  if (!book.bookable) {
     return { from, to, days: [] as string[] };
   }
   const totalDuration = await resolveTotalDuration(stylistId, serviceIds);
@@ -447,16 +459,15 @@ export async function getAvailableDays(
   const days: string[] = [];
   if (start > end) return { from: start, to: end, days };
 
-  // Membership status per salon (to exclude rejected-salon intervals).
-  const memberships = await StylistSalon.find({ stylistId }).lean();
-  const statusBySalon = new Map(memberships.map((m) => [String(m.salonId), m.status]));
+  // Only ACTIVE workplaces produce bookable days.
+  const activeSalonSet = new Set(book.activeSalonIds);
 
   // Bulk-load working hours grouped by weekday.
   const hours = await WorkingHour.find({ stylistId }).lean();
   const workingByDay = new Map<number, WorkingInterval[]>();
   for (const h of hours) {
     const salonId = h.salonId ? String(h.salonId) : null;
-    if (salonId && statusBySalon.get(salonId) === 'rejected') continue;
+    if (salonId ? !activeSalonSet.has(salonId) : !book.freelance) continue;
     const list = workingByDay.get(h.dayOfWeek) ?? [];
     list.push({ start: h.start, end: h.end, salonId, salon: null });
     workingByDay.set(h.dayOfWeek, list);

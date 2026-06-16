@@ -1,11 +1,31 @@
 import { Types } from 'mongoose';
-import { SalonInvite } from '../../models/SalonInvite';
+import { SalonInvite, ISalonInvite, SalonInviteStatus } from '../../models/SalonInvite';
 import { Salon, IOpeningHours } from '../../models/Salon';
+import { StylistSalon } from '../../models/StylistSalon';
 import { User, IUser } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toGeoPoint } from '../../utils/geo';
 import { assertValidOpeningHours } from '../../utils/openingHours';
 import { maskPhone } from '../../utils/phone';
+import { smsProvider } from '../../utils/sms';
+import { config } from '../../config/env';
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const RESEND_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between resends
+
+const inviteUrlFor = (token: string) => `${config.webBaseUrl}/invite/${token}`;
+
+/**
+ * Lazily flip a pending-but-past-expiry invite to 'expired' (persisting it) so a
+ * stylist can see WHY an invite went unanswered. Returns the effective status.
+ */
+async function expireIfNeeded(invite: ISalonInvite): Promise<SalonInviteStatus> {
+  if (invite.status === 'pending' && invite.expiresAt.getTime() < Date.now()) {
+    invite.status = 'expired';
+    await invite.save();
+  }
+  return invite.status;
+}
 
 /**
  * Public lookup of an invite + its pending salon + the requesting stylist.
@@ -129,6 +149,17 @@ export async function acceptInvite(userId: string, token: string, updates: Accep
   invite.status = 'completed';
   await invite.save();
 
+  // NOTE: the requesting stylist's membership intentionally stays 'pending' — the
+  // owner approves them through the normal salon-stylists flow after claiming.
+
+  // Notify the stylist who created the invite that the owner accepted (non-blocking).
+  const requester = await User.findById(invite.requestedBy).select('phone').lean();
+  if (requester?.phone) {
+    void smsProvider
+      .send(requester.phone, `سالن «${salon.name}» توسط مالک در شونه تأیید شد.`)
+      .catch(() => {});
+  }
+
   return {
     salon: {
       id: String(salon._id),
@@ -139,4 +170,172 @@ export async function acceptInvite(userId: string, token: string, updates: Accep
     invite: { token: invite.token, status: invite.status },
     roles: owner.roles,
   };
+}
+
+/**
+ * Invites a stylist has created, newest first, with effective status (expiring
+ * stale ones on read) so they can track who hasn't responded. Scoped strictly to
+ * the requesting stylist — an invite is only ever visible to its creator.
+ */
+export async function listStylistInvites(stylistId: string) {
+  const invites = await SalonInvite.find({ requestedBy: stylistId }).sort({ createdAt: -1 });
+
+  const salonIds = invites.map((i) => i.salonId);
+  const salons = await Salon.find({ _id: { $in: salonIds } })
+    .select('name status')
+    .lean();
+  const salonById = new Map(salons.map((s) => [String(s._id), s]));
+
+  const result = [];
+  for (const invite of invites) {
+    const status = await expireIfNeeded(invite);
+    const salon = salonById.get(String(invite.salonId));
+    result.push({
+      id: String(invite._id),
+      status,
+      // Masked — the full owner number is never exposed back to the stylist.
+      targetPhone: maskPhone(invite.targetPhone),
+      salon: {
+        id: String(invite.salonId),
+        name: salon?.name ?? ((invite.salonDraft?.name as string) || 'سالن'),
+        status: salon?.status ?? 'pending',
+      },
+      inviteUrl: inviteUrlFor(invite.token),
+      createdAt: invite.createdAt,
+      expiresAt: invite.expiresAt,
+      canResend: status === 'pending' || status === 'expired',
+      canCancel: status !== 'completed',
+    });
+  }
+  return result;
+}
+
+/**
+ * Pending owner-invites addressed to a user's phone — the key to making invites
+ * discoverable by NUMBER, not just by opening the magic link. A user who logs in
+ * directly (never clicked the link) still sees the invitation(s) waiting for them.
+ * Only non-expired pending invites are returned; the phone match is the same
+ * normalized 09xxxxxxxxx format used at signup.
+ */
+export async function getPendingInvitesForUser(userId: string) {
+  const user = await User.findById(userId).select('phone').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const invites = await SalonInvite.find({
+    targetPhone: user.phone,
+    status: 'pending',
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });
+
+  const salons = await Salon.find({ _id: { $in: invites.map((i) => i.salonId) } })
+    .select('name')
+    .lean();
+  const requesters = await User.find({ _id: { $in: invites.map((i) => i.requestedBy) } })
+    .select('firstName lastName')
+    .lean();
+  const salonById = new Map(salons.map((s) => [String(s._id), s]));
+  const reqById = new Map(requesters.map((u) => [String(u._id), u]));
+
+  return invites.map((invite) => {
+    const requester = reqById.get(String(invite.requestedBy));
+    return {
+      id: String(invite._id),
+      token: invite.token,
+      salonName:
+        salonById.get(String(invite.salonId))?.name ??
+        ((invite.salonDraft?.name as string) || 'سالن'),
+      requestedBy: requester
+        ? { firstName: requester.firstName ?? null, lastName: requester.lastName ?? null }
+        : null,
+      createdAt: invite.createdAt,
+      expiresAt: invite.expiresAt,
+    };
+  });
+}
+
+/** Whether the user (by phone) has any actionable pending owner-invite. */
+export async function hasPendingInvitesForPhone(phone: string): Promise<boolean> {
+  const count = await SalonInvite.countDocuments({
+    targetPhone: phone,
+    status: 'pending',
+    expiresAt: { $gt: new Date() },
+  });
+  return count > 0;
+}
+
+/** Load an invite that MUST belong to the given stylist, or 404. */
+async function ownInviteOrThrow(stylistId: string, inviteId: string) {
+  const invite = await SalonInvite.findOne({ _id: inviteId, requestedBy: stylistId });
+  if (!invite) throw AppError.notFound('دعوت یافت نشد', 'INVITE_NOT_FOUND');
+  return invite;
+}
+
+/**
+ * Re-send the invite SMS (and refresh its 7-day expiry so a re-sent link works).
+ * Rate-limited to one send per RESEND_COOLDOWN_MS to prevent spamming the owner.
+ */
+export async function resendInvite(stylistId: string, inviteId: string) {
+  const invite = await ownInviteOrThrow(stylistId, inviteId);
+
+  if (invite.status === 'completed') {
+    throw AppError.conflict('این دعوت قبلاً تکمیل شده است', 'INVITE_COMPLETED');
+  }
+
+  const last = invite.lastSentAt?.getTime() ?? 0;
+  const sinceLast = Date.now() - last;
+  if (sinceLast < RESEND_COOLDOWN_MS) {
+    const retryAfterSec = Math.ceil((RESEND_COOLDOWN_MS - sinceLast) / 1000);
+    throw new AppError(
+      429,
+      'به‌تازگی این دعوت ارسال شده؛ کمی بعد دوباره تلاش کن',
+      'RESEND_COOLDOWN',
+      { retryAfterSec },
+    );
+  }
+
+  // Re-activate + extend a (possibly expired) invite and re-send.
+  invite.status = 'pending';
+  invite.expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+  invite.lastSentAt = new Date();
+  await invite.save();
+
+  const url = inviteUrlFor(invite.token);
+  void smsProvider
+    .send(
+      invite.targetPhone,
+      `یادآوری: از شما دعوت شده تا سالن خود را در شونه ثبت کنید. لینک دعوت: ${url}`,
+    )
+    .catch(() => {});
+
+  return {
+    id: String(invite._id),
+    status: invite.status,
+    expiresAt: invite.expiresAt,
+    inviteUrl: url,
+  };
+}
+
+/**
+ * Cancel a not-yet-completed invite. Removes the invite, and — only if still
+ * unclaimed — the pending salon and the stylist's pending membership for it, so
+ * no orphan pending records linger. A completed invite can't be cancelled.
+ */
+export async function cancelInvite(stylistId: string, inviteId: string) {
+  const invite = await ownInviteOrThrow(stylistId, inviteId);
+
+  if (invite.status === 'completed') {
+    throw AppError.conflict('دعوت تکمیل‌شده قابل لغو نیست', 'INVITE_COMPLETED');
+  }
+
+  const salonId = invite.salonId;
+  await invite.deleteOne();
+
+  // Drop the pending salon + membership only if the owner never claimed it.
+  const salon = await Salon.findById(salonId).select('status ownerId');
+  if (salon && salon.status === 'pending' && !salon.ownerId) {
+    await StylistSalon.deleteOne({ stylistId, salonId, status: 'pending' });
+    await salon.deleteOne();
+  }
+
+  return { id: inviteId, cancelled: true };
 }

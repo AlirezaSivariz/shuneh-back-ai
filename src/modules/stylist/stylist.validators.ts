@@ -137,3 +137,15 @@ export const updateWorkingHourSchema = {
 export const workingHourIdParamsSchema = {
   params: z.object({ id: objectId }),
 };
+
+export const inviteIdParamsSchema = {
+  params: z.object({ id: objectId }),
+};
+
+export const salonRequestIdParamsSchema = {
+  params: z.object({ id: objectId }),
+};
+
+export const salonRequestsQuerySchema = {
+  query: z.object({ status: z.enum(['pending', 'active', 'rejected']).optional() }),
+};

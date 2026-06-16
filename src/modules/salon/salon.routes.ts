@@ -8,6 +8,7 @@ import {
   searchSalonsSchema,
   createSalonSchema,
   salonInviteSchema,
+  byOwnerPhoneSchema,
   stylistApprovalParamsSchema,
   salonStylistsSchema,
 } from './salon.validators';
@@ -20,6 +21,16 @@ router.get(
   authenticate,
   validate(searchSalonsSchema),
   asyncHandler(controller.search),
+);
+
+// Stylist looks up an owner's existing salons by phone (to join instead of
+// creating a duplicate). Privacy: returns salon info only, no owner identity.
+router.get(
+  '/by-owner-phone',
+  authenticate,
+  authorize('stylist'),
+  validate(byOwnerPhoneSchema),
+  asyncHandler(controller.byOwnerPhone),
 );
 
 // Stylist creates a salon they own.

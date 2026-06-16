@@ -8,6 +8,8 @@ import {
   salonStylistsSchema,
   stylistApprovalParamsSchema,
   updateSalonSchema,
+  inviteStylistSchema,
+  ownerStylistSearchSchema,
 } from './salon.validators';
 
 // Routes under /owner — salon management from the owner's perspective.
@@ -19,6 +21,21 @@ ownerRouter.use(authenticate, authorize('owner'));
 
 // List all salons this owner owns (active and pending).
 ownerRouter.get('/salons', asyncHandler(controller.listOwnerSalons));
+
+// Find stylists (by name) to invite into a salon.
+ownerRouter.get(
+  '/stylists/search',
+  validate(ownerStylistSearchSchema),
+  asyncHandler(controller.searchStylistsForInvite),
+);
+
+// Owner invites a stylist to a salon (reverse of the join flow → stylist accepts).
+ownerRouter.post(
+  '/salons/:salonId/invite-stylist',
+  validate(inviteStylistSchema),
+  requireSalonOwner,
+  asyncHandler(controller.inviteStylist),
+);
 
 // Edit one of the owner's salons.
 ownerRouter.patch(

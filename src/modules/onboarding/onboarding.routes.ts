@@ -19,6 +19,8 @@ export const meRouter = Router();
 meRouter.use(authenticate);
 // Multi-role state: roles + per-role status, for navigation/panel switching.
 meRouter.get('/state', asyncHandler(controller.getUserState));
+// Pending owner-invites by phone (discoverable without opening the magic link).
+meRouter.get('/pending-invites', asyncHandler(controller.getPendingInvites));
 meRouter.patch('/personal', validate(personalSchema), asyncHandler(controller.updatePersonal));
 // Customer activity/spending report (scoped to the authenticated user).
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));

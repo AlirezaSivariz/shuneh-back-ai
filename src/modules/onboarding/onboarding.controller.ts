@@ -1,7 +1,14 @@
 import { Request, Response } from 'express';
 import * as service from './onboarding.service';
+import * as inviteService from '../invite/invite.service';
 import { sendSuccess } from '../../utils/response';
 import { Role } from '../../models/User';
+
+/** Pending owner-invites addressed to the logged-in user's phone number. */
+export async function getPendingInvites(req: Request, res: Response): Promise<void> {
+  const invites = await inviteService.getPendingInvitesForUser(req.user!.id);
+  sendSuccess(res, { invites });
+}
 
 export async function setRoles(req: Request, res: Response): Promise<void> {
   const roles = await service.setRoles(req.user!.id, req.body.roles as Role[]);

@@ -11,7 +11,6 @@ import { StylistService } from '../../models/StylistService';
 import { StylistProfile } from '../../models/StylistProfile';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Salon, ISalon } from '../../models/Salon';
-import { StylistSalon } from '../../models/StylistSalon';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toMinutes, overlaps, contains } from '../../utils/time';
@@ -19,6 +18,7 @@ import { iranWallClockToUtc } from '../../utils/timezone';
 import { storageProvider } from '../../utils/storage';
 import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
+import { resolveActiveSalons } from '../stylist/bookability';
 import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
 import { config } from '../../config/env';
 import { Tip } from '../../models/Tip';
@@ -60,6 +60,17 @@ export async function createReservation(customerId: string, input: CreateInput) 
   }
   if (profile.isAcceptingReservations === false) {
     throw AppError.badRequest('این متخصص فعلاً رزرو نمی‌پذیرد', 'NOT_ACCEPTING_RESERVATIONS');
+  }
+
+  // The stylist must have at least one ACTIVE workplace (freelance, or an active
+  // membership in an active salon). Rejected/left/pending salons don't count.
+  const { activeSalonIds } = await resolveActiveSalons(stylistId);
+  const isFreelance = profile.workplaceType === 'freelance' && !!profile.freelance?.location;
+  if (activeSalonIds.length === 0 && !isFreelance) {
+    throw AppError.badRequest(
+      'این متخصص در حال حاضر محل کار فعالی برای رزرو ندارد',
+      'NO_ACTIVE_WORKPLACE',
+    );
   }
 
   // Resolve effective duration / price for the chosen services.
@@ -104,12 +115,16 @@ export async function createReservation(customerId: string, input: CreateInput) 
   }
   const salonId = host.salonId ? String(host.salonId) : null;
 
-  // A pending salon is bookable, but a rejected membership is not.
+  // The chosen slot must be at an ACTIVE workplace (active salon, or freelance).
   if (salonId) {
-    const membership = await StylistSalon.findOne({ stylistId, salonId }).lean();
-    if (membership?.status === 'rejected') {
-      throw AppError.badRequest('این سالن برای رزرو در دسترس نیست', 'SALON_REJECTED');
+    if (!activeSalonIds.includes(salonId)) {
+      throw AppError.badRequest('این متخصص در این سالن محل کار فعالی ندارد', 'SALON_NOT_ACTIVE');
     }
+  } else if (!isFreelance) {
+    throw AppError.badRequest(
+      'این متخصص در حال حاضر محل کار فعالی برای رزرو ندارد',
+      'NO_ACTIVE_WORKPLACE',
+    );
   }
 
   // Must be in the future.
@@ -407,9 +422,10 @@ export async function rescheduleReservation(
   }
   const newSalonId = host.salonId ? String(host.salonId) : null;
   if (newSalonId) {
-    const membership = await StylistSalon.findOne({ stylistId, salonId: newSalonId }).lean();
-    if (membership?.status === 'rejected') {
-      throw AppError.badRequest('این سالن برای رزرو در دسترس نیست', 'SALON_REJECTED');
+    // The new slot must be at an ACTIVE workplace (not pending/rejected/left).
+    const { activeSalonIds } = await resolveActiveSalons(stylistId);
+    if (!activeSalonIds.includes(newSalonId)) {
+      throw AppError.badRequest('این متخصص در این سالن محل کار فعالی ندارد', 'SALON_NOT_ACTIVE');
     }
   }
 

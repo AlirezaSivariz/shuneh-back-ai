@@ -10,6 +10,8 @@ import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Salon } from '../../models/Salon';
 import { AppError } from '../../utils/AppError';
+import { hasPendingInvitesForPhone } from '../invite/invite.service';
+import { getBookability } from '../stylist/bookability';
 
 /** Ensure a (draft) StylistProfile exists for a stylist user. */
 export async function ensureStylistProfile(userId: string): Promise<IStylistProfile> {
@@ -138,10 +140,39 @@ export async function getUserState(userId: string) {
   if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
 
   const hasPersonalInfo = !!user.firstName && !!user.nationalCode;
-  const [stylist, salonsCount] = await Promise.all([
-    getStylistRoleState(userId),
+  const isStylist = user.roles.includes('stylist');
+  const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
+    isStylist
+      ? StylistProfile.findOne({ userId })
+          .select('onboardingStep status workplaceType freelance isAcceptingReservations')
+          .lean()
+      : Promise.resolve(null),
     user.roles.includes('owner') ? Salon.countDocuments({ ownerId: userId }) : Promise.resolve(0),
+    hasPendingInvitesForPhone(user.phone),
   ]);
+
+  // For an active stylist, surface WHY they're not bookable so their panel can
+  // show a clear banner (no active workplace / pending salons / not accepting).
+  let stylist:
+    | {
+        onboardingStep: string;
+        status: string;
+        bookable: boolean;
+        bookableReason: string | null;
+      }
+    | null = null;
+  if (stylistProfile) {
+    const book =
+      stylistProfile.status === 'active'
+        ? await getBookability(userId, stylistProfile)
+        : null;
+    stylist = {
+      onboardingStep: stylistProfile.onboardingStep,
+      status: stylistProfile.status,
+      bookable: book?.bookable ?? false,
+      bookableReason: book?.reason ?? null,
+    };
+  }
 
   return {
     user: {
@@ -156,6 +187,9 @@ export async function getUserState(userId: string) {
     },
     roles: user.roles,
     hasPersonalInfo,
+    // True when an owner-invite (by phone) is waiting — lets the client offer the
+    // "continue as salon owner" path instead of the generic role question.
+    hasPendingOwnerInvites,
     // Per-role state — independent; adding a role never clobbers the others.
     stylist,
     owner: user.roles.includes('owner') ? { salonsCount } : null,

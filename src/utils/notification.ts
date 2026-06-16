@@ -18,6 +18,10 @@ export interface NotificationService {
   serviceCompleted(phone: string, info: { link: string }): Promise<void>;
   verificationApproved(phone: string): Promise<void>;
   verificationRejected(phone: string, info: { reason?: string }): Promise<void>;
+  /** Tell a stylist their request to join a salon was declined by the owner. */
+  salonMembershipRejected(phone: string, info: { salonName?: string }): Promise<void>;
+  /** Tell a stylist that a salon owner invited them to work there. */
+  salonInviteFromOwner(phone: string, info: { salonName?: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string) {
@@ -59,6 +63,16 @@ class StubNotificationService implements NotificationService {
   async verificationRejected(phone: string, info: { reason?: string }) {
     const reason = info.reason ? ` علت: ${info.reason}` : '';
     await safeSend(phone, `درخواست تأیید پروفایل شما رد شد.${reason} می‌توانید پس از اصلاح، دوباره ارسال کنید.`);
+  }
+
+  async salonMembershipRejected(phone: string, info: { salonName?: string }) {
+    const where = info.salonName ? ` در سالن «${info.salonName}»` : '';
+    await safeSend(phone, `درخواست عضویت تو${where} پذیرفته نشد.`);
+  }
+
+  async salonInviteFromOwner(phone: string, info: { salonName?: string }) {
+    const where = info.salonName ? ` سالن «${info.salonName}»` : ' یک سالن';
+    await safeSend(phone, `صاحب${where} از تو دعوت کرده تا در آن همکاری کنی. در پنل شونه آن را ببین.`);
   }
 }
 

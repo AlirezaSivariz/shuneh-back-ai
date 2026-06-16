@@ -19,4 +19,12 @@ router.post(
   asyncHandler(controller.uploadStylistMedia),
 );
 
+// DELETE /stylist/media/portfolio — remove a single portfolio image by its key.
+router.delete(
+  '/portfolio',
+  authenticate,
+  authorize('stylist'),
+  asyncHandler(controller.deletePortfolioItem),
+);
+
 export default router;

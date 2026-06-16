@@ -48,3 +48,26 @@ export async function saveStylistMedia(
     portfolio: profile.portfolio.map((p) => storageProvider.getUrl(p)),
   };
 }
+
+/**
+ * Remove a single portfolio image (post-onboarding management). `key` is the
+ * stored key as held in the profile (the value the client received from the
+ * onboarding state). The image file is deleted best-effort.
+ */
+export async function deletePortfolioItem(stylistId: string, key: string) {
+  const profile = await ensureStylistProfile(stylistId);
+
+  const idx = profile.portfolio.indexOf(key);
+  if (idx === -1) {
+    throw AppError.notFound('Portfolio item not found', 'PORTFOLIO_ITEM_NOT_FOUND');
+  }
+
+  profile.portfolio.splice(idx, 1);
+  await profile.save();
+  await storageProvider.delete(key);
+
+  return {
+    portfolio: profile.portfolio,
+    portfolioUrls: profile.portfolio.map((p) => storageProvider.getUrl(p)),
+  };
+}

@@ -32,6 +32,15 @@ export const createSalonSchema = {
   }),
 };
 
+export const byOwnerPhoneSchema = {
+  query: z.object({
+    phone: z
+      .string()
+      .trim()
+      .regex(/^09\d{9}$/, 'phone must be a valid Iranian mobile number'),
+  }),
+};
+
 export const salonInviteSchema = {
   body: z.object({
     targetPhone: z
@@ -80,4 +89,13 @@ export const updateSalonSchema = {
 
 export const salonIdParamsSchema = {
   params: z.object({ salonId: objectId }),
+};
+
+export const inviteStylistSchema = {
+  params: z.object({ salonId: objectId }),
+  body: z.object({ stylistId: objectId }),
+};
+
+export const ownerStylistSearchSchema = {
+  query: z.object({ q: z.string().trim().min(1).max(60) }),
 };

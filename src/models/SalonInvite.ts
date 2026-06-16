@@ -14,6 +14,8 @@ export interface ISalonInvite extends Document {
   salonDraft?: Record<string, unknown>;
   status: SalonInviteStatus;
   expiresAt: Date;
+  /** Last time the invite SMS was sent — used to rate-limit resends. */
+  lastSentAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +29,7 @@ const salonInviteSchema = new Schema<ISalonInvite>(
     salonDraft: { type: Schema.Types.Mixed },
     status: { type: String, enum: ['pending', 'completed', 'expired'], default: 'pending' },
     expiresAt: { type: Date, required: true },
+    lastSentAt: { type: Date },
   },
   { timestamps: true },
 );

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env';
 
@@ -19,6 +20,11 @@ export interface StorageProvider {
   save(file: Express.Multer.File): Promise<StoredFile>;
   /** Build a publicly servable URL for a stored key. */
   getUrl(storedPath: string): string;
+  /**
+   * Best-effort delete of a PUBLIC stored key (e.g. removing a portfolio image).
+   * Path-traversal guarded; a missing file is a silent no-op.
+   */
+  delete(storedPath: string): Promise<void>;
   /** Persist a PRIVATE file (written by a private uploader) → key under the private root. */
   savePrivate(file: Express.Multer.File): Promise<StoredFile>;
   /**
@@ -42,6 +48,14 @@ export class LocalStorageProvider implements StorageProvider {
   getUrl(storedPath: string): string {
     const normalized = storedPath.split(path.sep).join('/');
     return `${config.baseUrl}/uploads/${normalized}`;
+  }
+
+  async delete(storedPath: string): Promise<void> {
+    const root = path.resolve(config.uploadDir);
+    const resolved = path.resolve(root, storedPath);
+    // Defense against path traversal (e.g. key = "../../etc/passwd").
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) return;
+    await fs.promises.rm(resolved, { force: true }).catch(() => undefined);
   }
 
   async savePrivate(file: Express.Multer.File): Promise<StoredFile> {

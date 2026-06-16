@@ -34,6 +34,9 @@ import {
   workingHoursSchema,
   updateWorkingHourSchema,
   workingHourIdParamsSchema,
+  inviteIdParamsSchema,
+  salonRequestIdParamsSchema,
+  salonRequestsQuerySchema,
 } from './stylist.validators';
 
 const router = Router();
@@ -90,10 +93,38 @@ router.post(
   asyncHandler(controller.setFreelance),
 );
 router.post('/salons', validate(joinSalonSchema), asyncHandler(controller.joinSalon));
+// Finalize the workplace step (advances onboarding once the stylist is done).
+router.post('/workplace/complete', asyncHandler(controller.completeWorkplace));
+
+// ── Collaboration requests an owner sent to this stylist (owner-initiated) ──
+router.get('/salon-requests', validate(salonRequestsQuerySchema), asyncHandler(controller.listSalonRequests));
+router.post(
+  '/salon-requests/:id/accept',
+  validate(salonRequestIdParamsSchema),
+  asyncHandler(controller.acceptSalonRequest),
+);
+router.post(
+  '/salon-requests/:id/reject',
+  validate(salonRequestIdParamsSchema),
+  asyncHandler(controller.rejectSalonRequest),
+);
 // All salons the stylist is linked to (active + pending) — supports multi-salon.
 router.get('/salons', asyncHandler(controller.listSalons));
 // Leave a salon (?force=true cancels future confirmed reservations there).
 router.delete('/salons/:salonId', validate(leaveSalonSchema), asyncHandler(controller.leaveSalon));
+
+// ── Invite tracking — the stylist follows up on salon invites they created ──
+router.get('/invites', asyncHandler(controller.listInvites));
+router.post(
+  '/invites/:id/resend',
+  validate(inviteIdParamsSchema),
+  asyncHandler(controller.resendInvite),
+);
+router.post(
+  '/invites/:id/cancel',
+  validate(inviteIdParamsSchema),
+  asyncHandler(controller.cancelInvite),
+);
 
 // Pause / resume accepting new reservations (does not affect existing ones).
 router.patch(

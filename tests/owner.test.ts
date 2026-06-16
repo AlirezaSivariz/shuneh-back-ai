@@ -1,4 +1,5 @@
 import { api, auth, login, createStylist, randomPhone, allDayOpeningHours } from "./helpers";
+import { Salon } from "../src/models/Salon";
 
 /**
  * Owner + invite flow.
@@ -46,12 +47,11 @@ describe("owner + invite flow", () => {
     expect(invite.inviteUrl).toContain(`/invite/${invite.invite.token}`);
     expect(invite.link).toBe(invite.inviteUrl);
 
-    // The stylist S has a pending membership for this (pending) salon — it is
-    // visible to nobody via /owner yet (the salon has no owner). We assert the
-    // membership indirectly after the owner accepts (below). Here we only sanity
-    // check that S is not yet an owner of anything.
-    const sState = await api().get("/me/state").set(...auth(S.token));
-    expect(sState.body.data.roles).not.toContain("owner");
+    // The stylist S has a pending membership for this (pending) salon, which
+    // nobody owns yet — S must NOT be the owner of the invited salon (even though
+    // S owns their own helper-created salon).
+    const pendingSalon = await Salon.findById(invite.salon.id);
+    expect(pendingSalon?.ownerId).toBeNull();
     expect(ownerPhone).toMatch(/^09\d{9}$/);
   });
 

@@ -58,7 +58,7 @@ describe("onboarding — step progression", () => {
     expect(await onboardingStep(st.token)).toBe("workplace");
   });
 
-  it("POST /salons (create own salon) advances the step past 'workplace' to 'workingHours'", async () => {
+  it("adding a workplace does NOT advance the step; only POST /stylist/workplace/complete does", async () => {
     const st = await freshStylist();
     const ids = await catalogueServiceIds(st.token, 2);
     await api()
@@ -82,9 +82,50 @@ describe("onboarding — step progression", () => {
       });
 
     expect(salonRes.status).toBe(201);
-    // The create-salon response reports the advanced step directly.
-    expect(salonRes.body.data.onboardingStep).toBe("workingHours");
+    // Adding a workplace must NOT skip the stylist ahead — they may add more.
+    expect(salonRes.body.data.onboardingStep).toBe("workplace");
+    expect(await onboardingStep(st.token)).toBe("workplace");
+
+    // Explicit finalize advances the step.
+    const done = await api().post("/stylist/workplace/complete").set(...auth(st.token));
+    expect(done.status).toBe(200);
+    expect(done.body.data.onboardingStep).toBe("workingHours");
     expect(await onboardingStep(st.token)).toBe("workingHours");
+  });
+
+  it("collecting MULTIPLE workplaces then finalizing once keeps them all", async () => {
+    const st = await freshStylist();
+    const ids = await catalogueServiceIds(st.token, 2);
+    await api().post("/stylist/services").set(...auth(st.token)).send({ items: ids.map((id) => ({ serviceId: id })) });
+
+    // Two invites to two different owners — both should persist.
+    const r1 = await api().post("/salons/invite").set(...auth(st.token))
+      .send({ targetPhone: "09120000001", salonDraft: { name: "سالن الف" } });
+    const r2 = await api().post("/salons/invite").set(...auth(st.token))
+      .send({ targetPhone: "09120000002", salonDraft: { name: "سالن ب" } });
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    // Still on workplace after both adds.
+    expect(await onboardingStep(st.token)).toBe("workplace");
+
+    const invites = await api().get("/stylist/invites").set(...auth(st.token));
+    expect(invites.body.data.invites.length).toBe(2);
+
+    const done = await api().post("/stylist/workplace/complete").set(...auth(st.token));
+    expect(done.status).toBe(200);
+    expect(await onboardingStep(st.token)).toBe("workingHours");
+  });
+
+  it("finalizing the workplace step with NO workplace → 400 NO_WORKPLACE", async () => {
+    const st = await freshStylist();
+    const ids = await catalogueServiceIds(st.token, 2);
+    await api().post("/stylist/services").set(...auth(st.token)).send({ items: ids.map((id) => ({ serviceId: id })) });
+    expect(await onboardingStep(st.token)).toBe("workplace");
+
+    const res = await api().post("/stylist/workplace/complete").set(...auth(st.token));
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("NO_WORKPLACE");
+    expect(await onboardingStep(st.token)).toBe("workplace"); // unchanged
   });
 });
 

@@ -93,7 +93,9 @@ export async function setFreelance(
     location: toGeoPoint(data.lng, data.lat),
   };
   await profile.save();
-  await advanceStep(profile, 'workplace');
+  // NOTE: the onboarding step is NOT advanced here — a stylist may add several
+  // workplaces; the 'workplace' step is finalized explicitly via
+  // completeWorkplaceStep so adding one place never skips them ahead.
   return profile;
 }
 
@@ -116,9 +118,35 @@ export async function joinSalon(stylistId: string, salonId: string) {
   const profile = await ensureStylistProfile(stylistId);
   profile.workplaceType = 'salon';
   await profile.save();
-  await advanceStep(profile, 'workplace');
+  // Step advancement deferred to completeWorkplaceStep (multi-workplace support).
 
   return link;
+}
+
+/**
+ * Finalize the workplace step. The stylist may have added several workplaces
+ * (salon memberships, an own salon, pending invites, or freelance); only this
+ * explicit call advances onboarding past 'workplace'. Requires at least one
+ * workplace so they can't continue empty-handed.
+ */
+export async function completeWorkplaceStep(stylistId: string) {
+  const profile = await ensureStylistProfile(stylistId);
+
+  const links = await StylistSalon.countDocuments({
+    stylistId,
+    status: { $ne: 'rejected' },
+  });
+  const hasFreelance = profile.workplaceType === 'freelance' && !!profile.freelance;
+
+  if (links === 0 && !hasFreelance) {
+    throw AppError.badRequest(
+      'حداقل یک محل کار (سالن یا فریلنس) اضافه کن',
+      'NO_WORKPLACE',
+    );
+  }
+
+  await advanceStep(profile, 'workplace');
+  return { onboardingStep: profile.onboardingStep };
 }
 
 /**

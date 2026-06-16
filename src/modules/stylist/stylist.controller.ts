@@ -1,7 +1,49 @@
 import fs from 'fs';
 import { Request, Response } from 'express';
 import * as service from './stylist.service';
+import * as inviteService from '../invite/invite.service';
+import * as salonService from '../salon/salon.service';
 import { sendSuccess } from '../../utils/response';
+import { StylistSalonStatus } from '../../models/StylistSalon';
+
+// ── Collaboration requests an owner sent to this stylist (requestedBy='owner') ──
+export async function listSalonRequests(req: Request, res: Response): Promise<void> {
+  const status = req.query.status as StylistSalonStatus | undefined;
+  const requests = await salonService.listStylistSalonRequests(req.user!.id, status);
+  sendSuccess(res, { requests });
+}
+
+export async function acceptSalonRequest(req: Request, res: Response): Promise<void> {
+  const result = await salonService.respondToSalonRequest(req.user!.id, req.params.id, 'accept');
+  sendSuccess(res, result);
+}
+
+export async function rejectSalonRequest(req: Request, res: Response): Promise<void> {
+  const result = await salonService.respondToSalonRequest(req.user!.id, req.params.id, 'reject');
+  sendSuccess(res, result);
+}
+
+// ── Invite tracking (the stylist who created the invites manages them) ──
+export async function listInvites(req: Request, res: Response): Promise<void> {
+  const invites = await inviteService.listStylistInvites(req.user!.id);
+  sendSuccess(res, { invites });
+}
+
+export async function resendInvite(req: Request, res: Response): Promise<void> {
+  const result = await inviteService.resendInvite(req.user!.id, req.params.id);
+  sendSuccess(res, result);
+}
+
+export async function cancelInvite(req: Request, res: Response): Promise<void> {
+  const result = await inviteService.cancelInvite(req.user!.id, req.params.id);
+  sendSuccess(res, result);
+}
+
+/** Finalize the workplace step (advances onboarding only once, on user request). */
+export async function completeWorkplace(req: Request, res: Response): Promise<void> {
+  const result = await service.completeWorkplaceStep(req.user!.id);
+  sendSuccess(res, result);
+}
 
 export async function submitVerification(req: Request, res: Response): Promise<void> {
   const result = await service.submitVerification(req.user!.id);

@@ -18,6 +18,12 @@ export async function createSalon(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { salon, onboardingStep }, 201);
 }
 
+export async function byOwnerPhone(req: Request, res: Response): Promise<void> {
+  const { phone } = req.query as unknown as { phone: string };
+  const result = await service.findSalonsByOwnerPhone(phone);
+  sendSuccess(res, result);
+}
+
 export async function createInvite(req: Request, res: Response): Promise<void> {
   const { salon, invite, inviteUrl, onboardingStep } = await service.createSalonInvite(
     req.user!.id,
@@ -44,6 +50,18 @@ export async function listOwnerSalons(req: Request, res: Response): Promise<void
 export async function listSalonStylists(req: Request, res: Response): Promise<void> {
   const status = req.query.status as 'pending' | 'active' | 'rejected' | undefined;
   const stylists = await service.listSalonStylists(req.params.salonId, status);
+  sendSuccess(res, { stylists });
+}
+
+export async function inviteStylist(req: Request, res: Response): Promise<void> {
+  // res.locals.salon was loaded + ownership-verified by requireSalonOwner.
+  const result = await service.inviteStylistToSalon(res.locals.salon, req.body.stylistId);
+  sendSuccess(res, { membership: result }, 201);
+}
+
+export async function searchStylistsForInvite(req: Request, res: Response): Promise<void> {
+  const { q } = req.query as unknown as { q: string };
+  const stylists = await service.searchStylistsForInvite(q);
   sendSuccess(res, { stylists });
 }
 
