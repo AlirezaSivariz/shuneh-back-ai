@@ -3,6 +3,7 @@ import * as controller from './stylist.controller';
 import * as reservationController from '../reservation/reservation.customer.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate, authorize } from '../../middlewares/auth';
+import { createUploader } from '../../middlewares/upload';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
   listReservationsSchema,
@@ -29,6 +30,7 @@ import {
   joinSalonSchema,
   leaveSalonSchema,
   availabilityStatusSchema,
+  verificationSideSchema,
   workingHoursSchema,
   updateWorkingHourSchema,
   workingHourIdParamsSchema,
@@ -141,6 +143,23 @@ router.get('/tips', asyncHandler(reservationController.stylistTips));
 
 // Submit the profile for admin verification (blue tick).
 router.post('/profile/submit-verification', asyncHandler(controller.submitVerification));
+
+// National-ID documents (PRIVATE uploader — stored outside the public mount).
+const verificationUploader = createUploader('verification', { private: true });
+router.post(
+  '/verification/documents',
+  verificationUploader.fields([
+    { name: 'nationalCardFront', maxCount: 1 },
+    { name: 'nationalCardBack', maxCount: 1 },
+  ]),
+  asyncHandler(controller.uploadVerificationDocuments),
+);
+// Stream the stylist's OWN ID image (owner-only; never a public URL).
+router.get(
+  '/verification/documents/:side',
+  validate(verificationSideSchema),
+  asyncHandler(controller.streamOwnVerificationDocument),
+);
 
 // Stylist earnings/activity report + analytics (services ranking + weekday).
 router.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.stylistReport));

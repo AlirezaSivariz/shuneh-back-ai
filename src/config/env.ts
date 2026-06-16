@@ -46,6 +46,11 @@ export interface AppConfig {
   };
   otpTtl: number; // seconds
   uploadDir: string;
+  /**
+   * Storage root for PRIVATE files (ID documents). MUST be outside `uploadDir`
+   * so it is never served by the public /uploads static mount.
+   */
+  privateUploadDir: string;
   /** When true, no scheduled jobs are registered (tests / one-off scripts). */
   disableCron: boolean;
   /** How often the reservation auto-complete job runs, in minutes. */
@@ -75,6 +80,7 @@ export const config: AppConfig = {
   },
   otpTtl: asNumber('OTP_TTL', 300),
   uploadDir: required('UPLOAD_DIR', 'uploads'),
+  privateUploadDir: required('PRIVATE_UPLOAD_DIR', 'uploads-private'),
   disableCron: asBool('DISABLE_CRON', false),
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),

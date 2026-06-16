@@ -19,6 +19,14 @@ export interface StorageProvider {
   save(file: Express.Multer.File): Promise<StoredFile>;
   /** Build a publicly servable URL for a stored key. */
   getUrl(storedPath: string): string;
+  /** Persist a PRIVATE file (written by a private uploader) → key under the private root. */
+  savePrivate(file: Express.Multer.File): Promise<StoredFile>;
+  /**
+   * Absolute on-disk path for a PRIVATE key, for streaming behind auth. Throws
+   * if the resolved path escapes the private root (path-traversal protection).
+   * NEVER expose this path or build a public URL from it.
+   */
+  getPrivateAbsolutePath(key: string): string;
 }
 
 export class LocalStorageProvider implements StorageProvider {
@@ -34,6 +42,24 @@ export class LocalStorageProvider implements StorageProvider {
   getUrl(storedPath: string): string {
     const normalized = storedPath.split(path.sep).join('/');
     return `${config.baseUrl}/uploads/${normalized}`;
+  }
+
+  async savePrivate(file: Express.Multer.File): Promise<StoredFile> {
+    const relative = path
+      .relative(path.resolve(config.privateUploadDir), file.path)
+      .split(path.sep)
+      .join('/');
+    return { path: relative };
+  }
+
+  getPrivateAbsolutePath(key: string): string {
+    const root = path.resolve(config.privateUploadDir);
+    const resolved = path.resolve(root, key);
+    // Defense against path traversal (e.g. key = "../../etc/passwd").
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw new Error('Invalid private storage key');
+    }
+    return resolved;
   }
 }
 

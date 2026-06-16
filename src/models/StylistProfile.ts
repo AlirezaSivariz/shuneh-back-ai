@@ -56,6 +56,15 @@ export interface IStylistProfile extends Document {
   verifiedAt: Date | null;
   verifiedBy: Types.ObjectId | null;
   rejectionReason: string | null;
+  /**
+   * National-ID card images — SENSITIVE. Stored as keys in PRIVATE storage
+   * (never under the public /uploads static mount). Only the owner and admins
+   * may view them, via the protected streaming endpoints. Never serialized to
+   * any public output.
+   */
+  nationalCardFront: string | null;
+  nationalCardBack: string | null;
+  documentsSubmittedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,6 +116,10 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     verifiedAt: { type: Date, default: null },
     verifiedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     rejectionReason: { type: String, default: null },
+    // Sensitive ID documents (PRIVATE storage keys; never publicly served).
+    nationalCardFront: { type: String, default: null },
+    nationalCardBack: { type: String, default: null },
+    documentsSubmittedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

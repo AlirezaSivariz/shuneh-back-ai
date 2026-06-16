@@ -11,9 +11,13 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 /**
  * Build a multer instance that stores images on disk under UPLOAD_DIR/<subdir>.
  * Only image files within the size limit are accepted.
+ *
+ * Pass `{ private: true }` to store under PRIVATE_UPLOAD_DIR (never served by
+ * the public /uploads mount) — for sensitive files such as ID documents.
  */
-export function createUploader(subdir: string) {
-  const destination = path.resolve(config.uploadDir, subdir);
+export function createUploader(subdir: string, opts: { private?: boolean } = {}) {
+  const root = opts.private ? config.privateUploadDir : config.uploadDir;
+  const destination = path.resolve(root, subdir);
   fs.mkdirSync(destination, { recursive: true });
 
   const storage = multer.diskStorage({

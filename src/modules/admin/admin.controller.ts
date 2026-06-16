@@ -1,5 +1,7 @@
+import fs from 'fs';
 import { Request, Response } from 'express';
 import * as service from './admin.service';
+import * as stylistService from '../stylist/stylist.service';
 import { sendSuccess } from '../../utils/response';
 import { Role } from '../../models/User';
 import { ReservationStatus } from '../../models/Reservation';
@@ -98,6 +100,18 @@ export async function verifyStylist(req: Request, res: Response): Promise<void> 
 export async function rejectVerification(req: Request, res: Response): Promise<void> {
   const result = await service.rejectVerification(req.user!.id, req.params.id, req.body?.reason);
   sendSuccess(res, { verification: result });
+}
+
+/** Stream a stylist's national-ID image for review (admin-only; private). */
+export async function getStylistDocument(req: Request, res: Response): Promise<void> {
+  const side = req.params.side as 'front' | 'back';
+  const { absolutePath, contentType } = await stylistService.resolveVerificationDocument(
+    req.params.id,
+    side,
+  );
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, no-store');
+  fs.createReadStream(absolutePath).pipe(res);
 }
 
 // ── Reports & audit ──

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Request, Response } from 'express';
 import * as service from './stylist.service';
 import { sendSuccess } from '../../utils/response';
@@ -5,6 +6,27 @@ import { sendSuccess } from '../../utils/response';
 export async function submitVerification(req: Request, res: Response): Promise<void> {
   const result = await service.submitVerification(req.user!.id);
   sendSuccess(res, result);
+}
+
+export async function uploadVerificationDocuments(req: Request, res: Response): Promise<void> {
+  const files = (req.files ?? {}) as {
+    nationalCardFront?: Express.Multer.File[];
+    nationalCardBack?: Express.Multer.File[];
+  };
+  const result = await service.saveVerificationDocuments(req.user!.id, files);
+  sendSuccess(res, result, 201);
+}
+
+/** Stream the stylist's OWN national-ID image (private; behind stylist auth). */
+export async function streamOwnVerificationDocument(req: Request, res: Response): Promise<void> {
+  const side = req.params.side as 'front' | 'back';
+  const { absolutePath, contentType } = await service.resolveVerificationDocument(
+    req.user!.id,
+    side,
+  );
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, no-store');
+  fs.createReadStream(absolutePath).pipe(res);
 }
 
 export async function setServices(req: Request, res: Response): Promise<void> {

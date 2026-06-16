@@ -103,6 +103,10 @@ export const availabilityStatusSchema = {
   }),
 };
 
+export const verificationSideSchema = {
+  params: z.object({ side: z.enum(['front', 'back']) }),
+};
+
 export const workingHoursSchema = {
   body: z.object({
     entries: z

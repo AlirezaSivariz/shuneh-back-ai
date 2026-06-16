@@ -4,3 +4,4 @@ dist/
 uploads/
 *.log
 web
+uploads-private/

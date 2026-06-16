@@ -520,6 +520,9 @@ export async function listVerifications(
         nationalCode: u?.nationalCode ?? null, // admin-only
         profilePhoto: u?.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
         portfolio: (p.portfolio ?? []).map((k) => storageProvider.getUrl(k)),
+        // Presence flags only — ID images are streamed via the protected
+        // /admin/stylists/:id/documents/:side endpoint, never as a URL here.
+        hasDocuments: { front: !!p.nationalCardFront, back: !!p.nationalCardBack },
         verificationStatus: p.verificationStatus,
         profileSubmittedAt: p.profileSubmittedAt,
       };
@@ -532,6 +535,11 @@ export async function verifyStylist(adminId: string, stylistId: string) {
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
 
+  // TODO(privacy/retention): decide whether the sensitive national-ID images
+  // (profile.nationalCardFront / nationalCardBack) should be DELETED or moved to
+  // secure cold archive after a verification decision, to minimize how long we
+  // retain identity documents. Intentionally NOT deleting them now — only the
+  // structure/policy hook is in place.
   profile.isVerified = true;
   profile.verificationStatus = 'verified';
   profile.verifiedAt = new Date();

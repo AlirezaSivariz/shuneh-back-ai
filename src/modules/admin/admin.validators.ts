@@ -86,3 +86,7 @@ export const rejectVerificationSchema = {
   params: z.object({ id: objectId }),
   body: z.object({ reason: z.string().trim().max(500).optional() }),
 };
+
+export const stylistDocumentSchema = {
+  params: z.object({ id: objectId, side: z.enum(['front', 'back']) }),
+};

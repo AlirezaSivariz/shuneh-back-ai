@@ -105,6 +105,11 @@ export async function getOnboardingState(userId: string) {
       isVerified: profile?.isVerified ?? false,
       rejectionReason: profile?.rejectionReason ?? null,
       profileSubmittedAt: profile?.profileSubmittedAt ?? null,
+      // Presence only — the private images themselves are never returned here.
+      documents: {
+        front: !!profile?.nationalCardFront,
+        back: !!profile?.nationalCardBack,
+      },
     },
     workplaceType: profile?.workplaceType ?? null,
     freelance: profile?.freelance ?? null,

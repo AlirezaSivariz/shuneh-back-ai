@@ -18,6 +18,7 @@ import {
   paginationSchema,
   listVerificationsSchema,
   rejectVerificationSchema,
+  stylistDocumentSchema,
 } from './admin.validators';
 
 /**
@@ -36,6 +37,8 @@ adminRouter.get('/reservations/:id', validate(idParamsSchema), asyncHandler(cont
 adminRouter.get('/salons', validate(listSalonsSchema), asyncHandler(controller.listSalons));
 adminRouter.get('/stylists', validate(listStylistsSchema), asyncHandler(controller.listStylists));
 adminRouter.get('/verifications', validate(listVerificationsSchema), asyncHandler(controller.listVerifications));
+// Stream a stylist's national-ID image for review (admin-only; private).
+adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema), asyncHandler(controller.getStylistDocument));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
 
 // ── Write (conservative; audited) ──

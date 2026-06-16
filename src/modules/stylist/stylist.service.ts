@@ -5,13 +5,16 @@ import { StylistService } from '../../models/StylistService';
 import { Salon, ISalon } from '../../models/Salon';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
-import { WorkplaceType } from '../../models/StylistProfile';
+import { WorkplaceType, StylistProfile } from '../../models/StylistProfile';
 import { Reservation } from '../../models/Reservation';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toGeoPoint } from '../../utils/geo';
 import { Interval, isOrdered, overlaps, contains } from '../../utils/time';
 import { notificationService } from '../../utils/notification';
+import { storageProvider } from '../../utils/storage';
+import fs from 'fs';
+import path from 'path';
 import {
   ensureStylistProfile,
   advanceStep,
@@ -704,6 +707,7 @@ export async function submitVerification(stylistId: string) {
   if (!user?.nationalCode) missing.push('کد ملی');
   if (!user?.profilePhoto) missing.push('عکس پروفایل');
   if (!(profile.portfolio && profile.portfolio.length > 0)) missing.push('حداقل یک نمونه‌کار');
+  if (!profile.nationalCardFront || !profile.nationalCardBack) missing.push('تصاویر روی و پشت کارت ملی');
   if (profile.status !== 'active') missing.push('تکمیل آنبوردینگ');
 
   if (missing.length > 0) {
@@ -729,6 +733,58 @@ export async function submitVerification(stylistId: string) {
     verificationStatus: profile.verificationStatus,
     profileSubmittedAt: profile.profileSubmittedAt,
   };
+}
+
+/**
+ * Save the (PRIVATE) national-ID card images. Both sides are required. The
+ * files are written by a PRIVATE uploader (outside the public mount); only the
+ * storage KEYS are kept on the profile — never a public URL.
+ */
+export async function saveVerificationDocuments(
+  stylistId: string,
+  files: { nationalCardFront?: Express.Multer.File[]; nationalCardBack?: Express.Multer.File[] },
+) {
+  const front = files.nationalCardFront?.[0];
+  const back = files.nationalCardBack?.[0];
+  if (!front || !back) {
+    throw AppError.badRequest('هر دو تصویر روی و پشت کارت ملی لازم است', 'DOCUMENTS_REQUIRED');
+  }
+
+  const profile = await ensureStylistProfile(stylistId);
+  const f = await storageProvider.savePrivate(front);
+  const b = await storageProvider.savePrivate(back);
+  profile.nationalCardFront = f.path;
+  profile.nationalCardBack = b.path;
+  profile.documentsSubmittedAt = new Date();
+  await profile.save();
+
+  // NOTE: keys are private; the response only confirms presence, no URLs.
+  return {
+    nationalCardFront: true,
+    nationalCardBack: true,
+    documentsSubmittedAt: profile.documentsSubmittedAt,
+  };
+}
+
+/**
+ * Resolve a national-ID image for STREAMING behind auth. Caller MUST enforce
+ * access (owner or admin) before calling. Returns the absolute path + mime;
+ * never build a public URL from this.
+ */
+export async function resolveVerificationDocument(stylistId: string, side: 'front' | 'back') {
+  const profile = await StylistProfile.findOne({ userId: stylistId })
+    .select('nationalCardFront nationalCardBack')
+    .lean();
+  const key = side === 'front' ? profile?.nationalCardFront : profile?.nationalCardBack;
+  if (!key) throw AppError.notFound('سند یافت نشد', 'DOCUMENT_NOT_FOUND');
+
+  const absolutePath = storageProvider.getPrivateAbsolutePath(key);
+  if (!fs.existsSync(absolutePath)) throw AppError.notFound('فایل یافت نشد', 'FILE_NOT_FOUND');
+
+  const ext = path.extname(key).toLowerCase();
+  const contentType =
+    ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  return { absolutePath, contentType };
 }
 
 /** Read the stylist profile (used by the media step and others). */
