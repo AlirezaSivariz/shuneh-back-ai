@@ -482,6 +482,13 @@ describe("Verification (blue tick)", () => {
     expect(verify.status).toBe(200);
     expect(verify.body.data.verification.isVerified).toBe(true);
 
+    // Privacy: the sensitive national-ID images are deleted after verification,
+    // and a marker records that the documents were reviewed + removed.
+    const cleared = await StylistProfile.findOne({ userId: stylist.id }).lean();
+    expect(cleared?.nationalCardFront).toBeNull();
+    expect(cleared?.nationalCardBack).toBeNull();
+    expect(cleared?.documentsDeletedAt).toBeTruthy();
+
     // Public profile reflects the blue tick.
     const profile = await api().get(`/stylists/${stylist.id}`);
     expect(profile.body.data.stylist.isVerified).toBe(true);

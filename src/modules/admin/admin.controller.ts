@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { Request, Response } from 'express';
 import * as service from './admin.service';
 import * as stylistService from '../stylist/stylist.service';
@@ -105,13 +104,13 @@ export async function rejectVerification(req: Request, res: Response): Promise<v
 /** Stream a stylist's national-ID image for review (admin-only; private). */
 export async function getStylistDocument(req: Request, res: Response): Promise<void> {
   const side = req.params.side as 'front' | 'back';
-  const { absolutePath, contentType } = await stylistService.resolveVerificationDocument(
+  const { data, contentType } = await stylistService.resolveVerificationDocument(
     req.params.id,
     side,
   );
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'private, no-store');
-  fs.createReadStream(absolutePath).pipe(res);
+  res.send(data);
 }
 
 // ── Reports & audit ──

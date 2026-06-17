@@ -16,18 +16,24 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
  * the public /uploads mount) — for sensitive files such as ID documents.
  */
 export function createUploader(subdir: string, opts: { private?: boolean } = {}) {
-  const root = opts.private ? config.privateUploadDir : config.uploadDir;
-  const destination = path.resolve(root, subdir);
-  fs.mkdirSync(destination, { recursive: true });
-
-  const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, destination),
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
-      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-      cb(null, unique);
-    },
-  });
+  // The Mongo driver needs raw bytes in memory (file.buffer) to re-encode to
+  // webp; disk drivers stream to UPLOAD_DIR/<subdir> as before.
+  let storage: multer.StorageEngine;
+  if (config.storageDriver === 'mongo') {
+    storage = multer.memoryStorage();
+  } else {
+    const root = opts.private ? config.privateUploadDir : config.uploadDir;
+    const destination = path.resolve(root, subdir);
+    fs.mkdirSync(destination, { recursive: true });
+    storage = multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, destination),
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+        cb(null, unique);
+      },
+    });
+  }
 
   return multer({
     storage,

@@ -17,6 +17,7 @@ import serviceRoutes from "./modules/service/service.routes";
 import stylistRoutes from "./modules/stylist/stylist.routes";
 import stylistsPublicRoutes from "./modules/stylist/public.routes";
 import mediaRoutes from "./modules/media/media.routes";
+import imageRoutes from "./modules/media/image.routes";
 import salonRoutes from "./modules/salon/salon.routes";
 import { ownerRouter } from "./modules/salon/owner.routes";
 import inviteRoutes from "./modules/invite/invite.routes";
@@ -34,8 +35,10 @@ export function createApp(): Application {
   app.use(express.urlencoded({ extended: true }));
   if (config.isDev) app.use(morgan("dev"));
 
-  // Static serving of uploaded files.
+  // Static serving of uploaded files (local driver).
   app.use("/uploads", express.static(path.resolve(config.uploadDir)));
+  // Stable public image URLs (served from whichever store is active).
+  app.use("/images", imageRoutes);
 
   // Health check.
   app.get("/health", (_req: Request, res: Response) => {

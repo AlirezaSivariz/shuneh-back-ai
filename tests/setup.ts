@@ -1,3 +1,10 @@
+// Integration tests attach tiny non-image buffers and use an in-memory Mongo, so
+// force the disk storage driver here (set before config's dotenv runs; dotenv
+// won't override an already-set var). The Mongo image pipeline is covered
+// directly in storage.test.ts. Also drop the Atlas URI so nothing points at it.
+process.env.STORAGE_DRIVER = "local";
+delete process.env.MONGODB_URI;
+
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 

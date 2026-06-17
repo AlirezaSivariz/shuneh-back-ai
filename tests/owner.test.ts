@@ -1,4 +1,4 @@
-import { api, auth, login, createStylist, randomPhone, allDayOpeningHours } from "./helpers";
+import { api, auth, login, createStylist, createCustomer, randomPhone, allDayOpeningHours } from "./helpers";
 import { Salon } from "../src/models/Salon";
 
 /**
@@ -228,8 +228,10 @@ describe("owner + invite flow", () => {
   });
 
   it("a user without the 'owner' role cannot reach /owner routes", async () => {
-    const S = await createStylist(); // stylist only, no owner role
-    const res = await api().get("/owner/salons").set(...auth(S.token));
+    // A plain customer has no 'owner' role (a stylist who builds their own salon
+    // becomes an owner, so that is no longer a non-owner case).
+    const c = await createCustomer();
+    const res = await api().get("/owner/salons").set(...auth(c.token));
     expect(res.status).toBe(403);
   });
 });

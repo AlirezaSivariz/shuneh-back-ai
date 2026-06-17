@@ -8,7 +8,7 @@
  */
 import { Types } from 'mongoose';
 import { User, Role, ROLES } from '../../models/User';
-import { StylistProfile } from '../../models/StylistProfile';
+import { StylistProfile, IStylistProfile } from '../../models/StylistProfile';
 import { StylistSalon } from '../../models/StylistSalon';
 import { StylistService } from '../../models/StylistService';
 import { Salon } from '../../models/Salon';
@@ -531,22 +531,43 @@ export async function listVerifications(
   };
 }
 
+/**
+ * Clear the national-ID references on the profile (caller persists with save).
+ * Returns the storage keys that were referenced so the bytes can be purged.
+ */
+function clearNationalCardRefs(profile: IStylistProfile): string[] {
+  const keys = [profile.nationalCardFront, profile.nationalCardBack].filter(Boolean) as string[];
+  if (keys.length > 0) {
+    profile.nationalCardFront = null;
+    profile.nationalCardBack = null;
+    profile.documentsDeletedAt = new Date();
+  }
+  return keys;
+}
+
+/** Best-effort deletion of national-ID bytes (references already cleared). */
+async function purgeNationalCardBytes(keys: string[]): Promise<void> {
+  for (const key of keys) await storageProvider.delete(key).catch(() => undefined);
+}
+
 export async function verifyStylist(adminId: string, stylistId: string) {
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
 
-  // TODO(privacy/retention): decide whether the sensitive national-ID images
-  // (profile.nationalCardFront / nationalCardBack) should be DELETED or moved to
-  // secure cold archive after a verification decision, to minimize how long we
-  // retain identity documents. Intentionally NOT deleting them now — only the
-  // structure/policy hook is in place.
+  // Privacy/retention: the sensitive national-ID images are only needed for the
+  // verification decision — drop them now. Clearing the references is persisted
+  // atomically with the verify; the bytes are then deleted best-effort.
+  const cardKeys = clearNationalCardRefs(profile);
   profile.isVerified = true;
   profile.verificationStatus = 'verified';
   profile.verifiedAt = new Date();
   profile.verifiedBy = new Types.ObjectId(adminId);
   profile.rejectionReason = null;
   await profile.save();
-  await audit(adminId, 'stylist.verify', 'stylist', stylistId, {});
+  await purgeNationalCardBytes(cardKeys);
+  await audit(adminId, 'stylist.verify', 'stylist', stylistId, {
+    documentsDeleted: cardKeys.length > 0,
+  });
 
   void (async () => {
     const u = await User.findById(stylistId).select('phone').lean();
@@ -560,12 +581,19 @@ export async function rejectVerification(adminId: string, stylistId: string, rea
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
 
+  // Safe default: don't retain ID documents after a decision. On resubmit the
+  // stylist re-uploads them; on eventual verify they'd be cleared anyway.
+  const cardKeys = clearNationalCardRefs(profile);
   profile.isVerified = false;
   profile.verificationStatus = 'rejected';
   profile.rejectionReason = reason ?? null;
   profile.verifiedBy = new Types.ObjectId(adminId);
   await profile.save();
-  await audit(adminId, 'stylist.rejectVerification', 'stylist', stylistId, { reason: reason ?? null });
+  await purgeNationalCardBytes(cardKeys);
+  await audit(adminId, 'stylist.rejectVerification', 'stylist', stylistId, {
+    reason: reason ?? null,
+    documentsDeleted: cardKeys.length > 0,
+  });
 
   void (async () => {
     const u = await User.findById(stylistId).select('phone').lean();

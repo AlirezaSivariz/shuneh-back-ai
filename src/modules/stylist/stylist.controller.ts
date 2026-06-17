@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { Request, Response } from 'express';
 import * as service from './stylist.service';
 import * as inviteService from '../invite/invite.service';
@@ -62,13 +61,10 @@ export async function uploadVerificationDocuments(req: Request, res: Response): 
 /** Stream the stylist's OWN national-ID image (private; behind stylist auth). */
 export async function streamOwnVerificationDocument(req: Request, res: Response): Promise<void> {
   const side = req.params.side as 'front' | 'back';
-  const { absolutePath, contentType } = await service.resolveVerificationDocument(
-    req.user!.id,
-    side,
-  );
+  const { data, contentType } = await service.resolveVerificationDocument(req.user!.id, side);
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'private, no-store');
-  fs.createReadStream(absolutePath).pipe(res);
+  res.send(data);
 }
 
 export async function setServices(req: Request, res: Response): Promise<void> {

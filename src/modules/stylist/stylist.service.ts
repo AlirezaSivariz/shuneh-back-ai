@@ -13,8 +13,6 @@ import { toGeoPoint } from '../../utils/geo';
 import { Interval, isOrdered, overlaps, contains } from '../../utils/time';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
-import fs from 'fs';
-import path from 'path';
 import {
   ensureStylistProfile,
   advanceStep,
@@ -779,8 +777,9 @@ export async function saveVerificationDocuments(
   }
 
   const profile = await ensureStylistProfile(stylistId);
-  const f = await storageProvider.savePrivate(front);
-  const b = await storageProvider.savePrivate(back);
+  const meta = { ownerType: 'stylist', ownerId: stylistId, kind: 'national_card' as const };
+  const f = await storageProvider.savePrivate(front, meta);
+  const b = await storageProvider.savePrivate(back, meta);
   profile.nationalCardFront = f.path;
   profile.nationalCardBack = b.path;
   profile.documentsSubmittedAt = new Date();
@@ -795,9 +794,9 @@ export async function saveVerificationDocuments(
 }
 
 /**
- * Resolve a national-ID image for STREAMING behind auth. Caller MUST enforce
- * access (owner or admin) before calling. Returns the absolute path + mime;
- * never build a public URL from this.
+ * Resolve a national-ID image for SERVING behind auth. Caller MUST enforce
+ * access (owner or admin) before calling. Returns the raw bytes + mime from the
+ * private store (disk or Mongo); never build a public URL from this.
  */
 export async function resolveVerificationDocument(stylistId: string, side: 'front' | 'back') {
   const profile = await StylistProfile.findOne({ userId: stylistId })
@@ -806,13 +805,10 @@ export async function resolveVerificationDocument(stylistId: string, side: 'fron
   const key = side === 'front' ? profile?.nationalCardFront : profile?.nationalCardBack;
   if (!key) throw AppError.notFound('سند یافت نشد', 'DOCUMENT_NOT_FOUND');
 
-  const absolutePath = storageProvider.getPrivateAbsolutePath(key);
-  if (!fs.existsSync(absolutePath)) throw AppError.notFound('فایل یافت نشد', 'FILE_NOT_FOUND');
+  const image = await storageProvider.getPrivateImage(key);
+  if (!image) throw AppError.notFound('فایل یافت نشد', 'FILE_NOT_FOUND');
 
-  const ext = path.extname(key).toLowerCase();
-  const contentType =
-    ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-  return { absolutePath, contentType };
+  return { data: image.data, contentType: image.mime };
 }
 
 /** Read the stylist profile (used by the media step and others). */

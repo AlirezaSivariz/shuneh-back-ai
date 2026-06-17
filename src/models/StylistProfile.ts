@@ -65,6 +65,8 @@ export interface IStylistProfile extends Document {
   nationalCardFront: string | null;
   nationalCardBack: string | null;
   documentsSubmittedAt: Date | null;
+  /** When the sensitive ID images were deleted after a verification decision. */
+  documentsDeletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -120,6 +122,7 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     nationalCardFront: { type: String, default: null },
     nationalCardBack: { type: String, default: null },
     documentsSubmittedAt: { type: Date, default: null },
+    documentsDeletedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

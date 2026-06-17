@@ -380,9 +380,13 @@ export async function getAvailability(
 
   // Only ACTIVE workplaces are bookable: freelance intervals (no salon) count
   // only if the stylist is a freelancer; salon intervals only for active salons.
+  // NB: h.salonId is POPULATED here (a Salon doc), so read its _id, not String(h.salonId).
   const activeSalonSet = new Set(book.activeSalonIds);
   const working: WorkingInterval[] = hours
-    .filter((h) => (h.salonId ? activeSalonSet.has(String(h.salonId)) : book.freelance))
+    .filter((h) => {
+      const salon = h.salonId as unknown as ISalon | null;
+      return salon ? activeSalonSet.has(String(salon._id)) : book.freelance;
+    })
     .map((h) => {
       const salon = h.salonId as unknown as ISalon | null;
       return {

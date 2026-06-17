@@ -21,14 +21,22 @@ export async function saveStylistMedia(
   }
 
   if (profilePhotoFile) {
-    const stored = await storageProvider.save(profilePhotoFile);
+    const stored = await storageProvider.save(profilePhotoFile, {
+      ownerType: 'user',
+      ownerId: stylistId,
+      kind: 'profile',
+    });
     await User.updateOne({ _id: stylistId }, { profilePhoto: stored.path });
   }
 
   if (portfolioFiles.length > 0) {
     const storedPaths: string[] = [];
     for (const file of portfolioFiles) {
-      const stored = await storageProvider.save(file);
+      const stored = await storageProvider.save(file, {
+        ownerType: 'stylist',
+        ownerId: stylistId,
+        kind: 'portfolio',
+      });
       storedPaths.push(stored.path);
     }
     profile.portfolio = [...profile.portfolio, ...storedPaths];

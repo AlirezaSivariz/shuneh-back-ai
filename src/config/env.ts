@@ -45,6 +45,8 @@ export interface AppConfig {
     refreshTtl: string;
   };
   otpTtl: number; // seconds
+  /** Where uploaded images live: 'local' (disk) | 'mongo' (BinData) | 's3'. */
+  storageDriver: 'local' | 'mongo' | 's3';
   uploadDir: string;
   /**
    * Storage root for PRIVATE files (ID documents). MUST be outside `uploadDir`
@@ -71,7 +73,10 @@ export const config: AppConfig = {
   port: asNumber('PORT', 4000),
   baseUrl: required('BASE_URL', 'http://localhost:4000'),
   webBaseUrl: required('WEB_BASE_URL', 'http://localhost:3000'),
-  mongoUri: required('MONGO_URI', 'mongodb://127.0.0.1:27017/salon_reservation'),
+  // Prefer MONGODB_URI (the Atlas-standard name); fall back to legacy MONGO_URI.
+  mongoUri:
+    process.env.MONGODB_URI ||
+    required('MONGO_URI', 'mongodb://127.0.0.1:27017/salon_reservation'),
   jwt: {
     accessSecret: required('JWT_ACCESS_SECRET', 'dev_access_secret'),
     refreshSecret: required('JWT_REFRESH_SECRET', 'dev_refresh_secret'),
@@ -79,6 +84,7 @@ export const config: AppConfig = {
     refreshTtl: required('REFRESH_TTL', '7d'),
   },
   otpTtl: asNumber('OTP_TTL', 300),
+  storageDriver: ((process.env.STORAGE_DRIVER || 'local').toLowerCase() as AppConfig['storageDriver']),
   uploadDir: required('UPLOAD_DIR', 'uploads'),
   privateUploadDir: required('PRIVATE_UPLOAD_DIR', 'uploads-private'),
   disableCron: asBool('DISABLE_CRON', false),
