@@ -12,6 +12,7 @@ import { Salon } from '../../models/Salon';
 import { AppError } from '../../utils/AppError';
 import { hasPendingInvitesForPhone } from '../invite/invite.service';
 import { getBookability } from '../stylist/bookability';
+import { accountStatus } from '../../utils/foreignApproval';
 
 /** Ensure a (draft) StylistProfile exists for a stylist user. */
 export async function ensureStylistProfile(userId: string): Promise<IStylistProfile> {
@@ -104,6 +105,10 @@ export async function getOnboardingState(userId: string) {
       nationalCode: user.nationalCode,
       birthDate: user.birthDate,
       profilePhoto: user.profilePhoto,
+      isForeignNational: user.isForeignNational ?? false,
+      foreignId: user.foreignId ?? null,
+      foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
+      foreignRejectionReason: user.foreignRejectionReason ?? null,
     },
     onboardingStep: profile?.onboardingStep ?? 'role',
     status: profile?.status ?? 'draft',
@@ -146,7 +151,7 @@ export async function getUserState(userId: string) {
   const user = await User.findById(userId);
   if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
 
-  const hasPersonalInfo = !!user.firstName && !!user.nationalCode;
+  const hasPersonalInfo = !!user.firstName && (!!user.nationalCode || !!user.foreignId);
   const isStylist = user.roles.includes('stylist');
   const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
     isStylist
@@ -184,6 +189,10 @@ export async function getUserState(userId: string) {
     };
   }
 
+  // Effective account status (admin-disable + foreign-approval gate), so the
+  // client can show a single "panel disabled" message with the right reason.
+  const status = accountStatus(user);
+
   return {
     user: {
       id: String(user._id),
@@ -194,9 +203,17 @@ export async function getUserState(userId: string) {
       nationalCode: user.nationalCode ?? null,
       birthDate: user.birthDate ?? null,
       profilePhoto: user.profilePhoto ?? null,
+      isForeignNational: user.isForeignNational ?? false,
+      foreignId: user.foreignId ?? null,
+      foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
+      foreignRejectionReason: user.foreignRejectionReason ?? null,
     },
     roles: user.roles,
     hasPersonalInfo,
+    // Effective active flag (false for a not-yet-approved foreign national or an
+    // admin-blocked account) + the reason, for the client's panel-disabled UI.
+    isActive: status.active,
+    inactiveReason: status.reason,
     // True when an owner-invite (by phone) is waiting — lets the client offer the
     // "continue as salon owner" path instead of the generic role question.
     hasPendingOwnerInvites,
@@ -207,35 +224,70 @@ export async function getUserState(userId: string) {
   };
 }
 
-/** Step 1 — personal info. */
+/** Step 1 — personal info. Iranian users set nationalCode; foreign nationals
+ * set a 12-digit foreignId and enter the admin-approval gate. */
 export async function updatePersonal(
   userId: string,
   data: {
     firstName: string;
     lastName: string;
-    nationalCode: string;
+    isForeignNational?: boolean;
+    nationalCode?: string;
+    foreignId?: string;
     birthDate: Date;
   },
 ): Promise<void> {
   const user = await User.findById(userId);
   if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
 
-  // A national code may belong to exactly one account.
-  const nationalCode = data.nationalCode.trim();
-  const dup = await User.findOne({ nationalCode, _id: { $ne: user._id } }).select('_id').lean();
-  if (dup) {
-    throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
-  }
-
   user.firstName = data.firstName;
   user.lastName = data.lastName;
-  user.nationalCode = nationalCode;
   user.birthDate = data.birthDate;
+
+  if (data.isForeignNational) {
+    const foreignId = (data.foreignId ?? '').trim();
+    // A foreign id may belong to exactly one account.
+    const dup = await User.findOne({ foreignId, _id: { $ne: user._id } })
+      .select('_id')
+      .lean();
+    if (dup) {
+      throw AppError.conflict('این کد اختصاصی قبلاً ثبت شده است', 'FOREIGN_ID_TAKEN');
+    }
+
+    const changedId = user.foreignId !== foreignId;
+    user.isForeignNational = true;
+    user.foreignId = foreignId;
+    user.nationalCode = undefined; // mutually exclusive with a national code
+    // Enter (or re-enter) the approval gate when newly foreign or the id changed;
+    // never downgrade an already-approved user on an unrelated re-save.
+    if (user.foreignApprovalStatus === 'not_required' || changedId) {
+      user.foreignApprovalStatus = 'pending';
+      user.foreignRejectionReason = null;
+    }
+  } else {
+    const nationalCode = (data.nationalCode ?? '').trim();
+    const dup = await User.findOne({ nationalCode, _id: { $ne: user._id } })
+      .select('_id')
+      .lean();
+    if (dup) {
+      throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+    }
+    user.isForeignNational = false;
+    user.nationalCode = nationalCode;
+    user.foreignId = null;
+    user.foreignApprovalStatus = 'not_required';
+    user.foreignRejectionReason = null;
+  }
+
   try {
     await user.save();
   } catch (err) {
-    // Safety net for the unique index (concurrent writes).
+    // Safety net for the unique indexes (concurrent writes).
     if ((err as { code?: number }).code === 11000) {
+      const dupKey = (err as { keyPattern?: Record<string, unknown> }).keyPattern ?? {};
+      if ('foreignId' in dupKey) {
+        throw AppError.conflict('این کد اختصاصی قبلاً ثبت شده است', 'FOREIGN_ID_TAKEN');
+      }
       throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
     }
     throw err;

@@ -10,6 +10,21 @@ export const ROLES: Role[] = ['owner', 'stylist', 'customer', 'admin'];
  */
 export const SELF_ASSIGNABLE_ROLES: Role[] = ['owner', 'stylist', 'customer'];
 
+/**
+ * Foreign-national approval lifecycle.
+ *  - not_required : Iranian user (has a nationalCode) — no approval gate.
+ *  - pending      : foreign user awaiting admin (support) approval — RESTRICTED.
+ *  - approved     : foreign user cleared by an admin — full access.
+ *  - rejected     : foreign user declined — stays restricted (reason stored).
+ */
+export type ForeignApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
+export const FOREIGN_APPROVAL_STATUSES: ForeignApprovalStatus[] = [
+  'not_required',
+  'pending',
+  'approved',
+  'rejected',
+];
+
 export interface IUser extends Document {
   _id: Types.ObjectId;
   phone: string;
@@ -21,6 +36,14 @@ export interface IUser extends Document {
   nationalCode?: string;
   birthDate?: Date;
   profilePhoto?: string; // storage key
+  /** True when the user has no Iranian national code (uses foreignId instead). */
+  isForeignNational: boolean;
+  /** Foreign user's 12-digit assigned id (unique). Null for Iranian users. */
+  foreignId?: string | null;
+  /** Approval gate for foreign users (see ForeignApprovalStatus). */
+  foreignApprovalStatus: ForeignApprovalStatus;
+  /** Why a foreign user's approval was rejected (shown back to them). */
+  foreignRejectionReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +62,15 @@ const userSchema = new Schema<IUser>(
     nationalCode: { type: String, trim: true },
     birthDate: { type: Date },
     profilePhoto: { type: String },
+    isForeignNational: { type: Boolean, default: false },
+    foreignId: { type: String, trim: true, default: null },
+    foreignApprovalStatus: {
+      type: String,
+      enum: FOREIGN_APPROVAL_STATUSES,
+      default: 'not_required',
+      index: true,
+    },
+    foreignRejectionReason: { type: String, default: null },
   },
   { timestamps: true },
 );
@@ -48,6 +80,13 @@ const userSchema = new Schema<IUser>(
 userSchema.index(
   { nationalCode: 1 },
   { unique: true, partialFilterExpression: { nationalCode: { $type: 'string' } } },
+);
+
+// A foreign id likewise identifies one account (same partial-unique strategy so
+// users without a foreignId — most of them — never collide on null).
+userSchema.index(
+  { foreignId: 1 },
+  { unique: true, partialFilterExpression: { foreignId: { $type: 'string' } } },
 );
 
 export const User = model<IUser>('User', userSchema);

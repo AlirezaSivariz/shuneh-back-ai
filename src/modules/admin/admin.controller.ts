@@ -26,6 +26,27 @@ export async function setUserStatus(req: Request, res: Response): Promise<void> 
   sendSuccess(res, result);
 }
 
+// ── Foreign-national approvals ──
+export async function listForeignApprovals(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string>;
+  sendSuccess(
+    res,
+    await service.listForeignApprovals({
+      status: q.status as 'pending' | 'approved' | 'rejected' | undefined,
+      page: Number(q.page),
+      limit: Number(q.limit),
+    }),
+  );
+}
+
+export async function approveForeign(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.approveForeign(req.user!.id, req.params.id));
+}
+
+export async function rejectForeign(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.rejectForeign(req.user!.id, req.params.id, req.body?.reason));
+}
+
 // ── Reservations ──
 export async function listReservations(req: Request, res: Response): Promise<void> {
   const q = req.query as Record<string, string>;

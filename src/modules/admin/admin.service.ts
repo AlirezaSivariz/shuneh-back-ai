@@ -19,6 +19,7 @@ import { AuditLog } from '../../models/AuditLog';
 import { AppError } from '../../utils/AppError';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
+import { accountStatus } from '../../utils/foreignApproval';
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -91,14 +92,24 @@ export async function listUsers(filter: { role?: Role; search?: string } & PageQ
   ]);
 
   return {
-    items: items.map((u) => ({
-      id: String(u._id),
-      phone: u.phone,
-      roles: u.roles,
-      isActive: u.isActive !== false,
-      fullName: fullName(u),
-      createdAt: u.createdAt,
-    })),
+    items: items.map((u) => {
+      const status = accountStatus(u);
+      return {
+        id: String(u._id),
+        phone: u.phone,
+        roles: u.roles,
+        // The admin-disable flag (drives the enable/disable toggle).
+        isActive: u.isActive !== false,
+        // Effective status: a not-yet-approved foreign national is NOT active,
+        // even though the admin-disable flag is still true.
+        accountActive: status.active,
+        inactiveReason: status.reason,
+        isForeignNational: u.isForeignNational ?? false,
+        foreignApprovalStatus: u.foreignApprovalStatus ?? 'not_required',
+        fullName: fullName(u),
+        createdAt: u.createdAt,
+      };
+    }),
     ...pageMeta(page, limit, total),
   };
 }
@@ -121,10 +132,16 @@ export async function getUser(id: string) {
       phone: user.phone,
       roles: user.roles,
       isActive: user.isActive !== false,
+      accountActive: accountStatus(user).active,
+      inactiveReason: accountStatus(user).reason,
       firstName: user.firstName ?? null,
       lastName: user.lastName ?? null,
       nationalCode: user.nationalCode ?? null, // admin-only sensitive field
       birthDate: user.birthDate ?? null,
+      isForeignNational: user.isForeignNational ?? false,
+      foreignId: user.foreignId ?? null, // admin-only sensitive field
+      foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
+      foreignRejectionReason: user.foreignRejectionReason ?? null,
       createdAt: user.createdAt,
     },
     stylistProfile: profile
@@ -172,6 +189,77 @@ export async function setUserStatus(adminId: string, id: string, isActive: boole
   await user.save();
   await audit(adminId, 'user.setStatus', 'user', id, { isActive });
   return { id, isActive };
+}
+
+// ─────────────────── foreign-national approvals ───────────────────
+
+/** List foreign-national users by approval status (default: pending). */
+export async function listForeignApprovals(
+  filter: { status?: 'pending' | 'approved' | 'rejected' } & PageQuery,
+) {
+  const { page, limit, skip } = paginate(filter);
+  const status = filter.status ?? 'pending';
+  const q = { isForeignNational: true, foreignApprovalStatus: status };
+
+  const [items, total] = await Promise.all([
+    User.find(q).sort({ updatedAt: -1 }).skip(skip).limit(limit).lean(),
+    User.countDocuments(q),
+  ]);
+
+  return {
+    items: items.map((u) => ({
+      id: String(u._id),
+      fullName: fullName(u),
+      phone: u.phone,
+      roles: u.roles,
+      foreignId: u.foreignId ?? null,
+      foreignApprovalStatus: u.foreignApprovalStatus,
+      foreignRejectionReason: u.foreignRejectionReason ?? null,
+      createdAt: u.createdAt,
+    })),
+    ...pageMeta(page, limit, total),
+  };
+}
+
+/** Load a foreign user for an approval decision (validates they ARE foreign). */
+async function loadForeignUser(id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(id);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  if (!user.isForeignNational) {
+    throw AppError.badRequest('این کاربر از اتباع نیست', 'NOT_FOREIGN_NATIONAL');
+  }
+  return user;
+}
+
+export async function approveForeign(adminId: string, id: string) {
+  const user = await loadForeignUser(id);
+  user.foreignApprovalStatus = 'approved';
+  user.foreignRejectionReason = null;
+  await user.save();
+  await audit(adminId, 'foreignNational.approve', 'user', id);
+
+  void (async () => {
+    if (user.phone) void notificationService.foreignApprovalDecided(user.phone, { approved: true });
+  })();
+
+  return { id, foreignApprovalStatus: user.foreignApprovalStatus };
+}
+
+export async function rejectForeign(adminId: string, id: string, reason?: string) {
+  const user = await loadForeignUser(id);
+  user.foreignApprovalStatus = 'rejected';
+  user.foreignRejectionReason = reason ?? null;
+  await user.save();
+  await audit(adminId, 'foreignNational.reject', 'user', id, { reason: reason ?? null });
+
+  void (async () => {
+    if (user.phone) {
+      void notificationService.foreignApprovalDecided(user.phone, { approved: false, reason });
+    }
+  })();
+
+  return { id, foreignApprovalStatus: user.foreignApprovalStatus };
 }
 
 // ───────────────────────── reservations ─────────────────────────

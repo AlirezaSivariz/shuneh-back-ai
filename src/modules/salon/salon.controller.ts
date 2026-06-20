@@ -3,13 +3,14 @@ import * as service from './salon.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function search(req: Request, res: Response): Promise<void> {
-  const { name, lng, lat, radius } = req.query as unknown as {
+  const { name, lng, lat, radius, gender } = req.query as unknown as {
     name?: string;
     lng?: number;
     lat?: number;
     radius?: number;
+    gender?: 'women' | 'men' | 'unisex';
   };
-  const salons = await service.searchSalons({ name, lng, lat, radius });
+  const salons = await service.searchSalons({ name, lng, lat, radius, gender });
   sendSuccess(res, { salons });
 }
 
@@ -98,6 +99,7 @@ export async function updateSalon(req: Request, res: Response): Promise<void> {
       address: salon.address,
       location: salon.location,
       status: salon.status,
+      serviceGender: salon.serviceGender,
       openingHours: salon.openingHours,
     },
   });

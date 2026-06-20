@@ -10,6 +10,7 @@ export const searchStylistsSchema = {
     lng: z.coerce.number().min(-180).max(180).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(),
     radius: z.coerce.number().int().min(1).max(100000).optional(),
+    gender: z.enum(['women', 'men', 'unisex']).optional(),
   }),
 };
 

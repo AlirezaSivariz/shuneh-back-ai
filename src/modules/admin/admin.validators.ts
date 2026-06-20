@@ -87,6 +87,18 @@ export const rejectVerificationSchema = {
   body: z.object({ reason: z.string().trim().max(500).optional() }),
 };
 
+export const listForeignApprovalsSchema = {
+  query: z.object({
+    status: z.enum(['pending', 'approved', 'rejected']).optional(),
+    ...pageQuery,
+  }),
+};
+
+export const rejectForeignSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};
+
 export const stylistDocumentSchema = {
   params: z.object({ id: objectId, side: z.enum(['front', 'back']) }),
 };

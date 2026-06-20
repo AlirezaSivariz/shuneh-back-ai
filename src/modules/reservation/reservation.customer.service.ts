@@ -20,6 +20,7 @@ import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveActiveSalons } from '../stylist/bookability';
 import { affectedReservationIds } from '../stylist/hoursReconcile';
+import { isForeignRestricted } from '../../utils/foreignApproval';
 import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
 import { config } from '../../config/env';
 import { Tip } from '../../models/Tip';
@@ -55,8 +56,26 @@ export async function createReservation(customerId: string, input: CreateInput) 
     throw AppError.badRequest('نمی‌توانید برای خودتان رزرو ثبت کنید', 'SELF_BOOKING');
   }
 
+  // A foreign customer awaiting admin approval cannot book yet.
+  const customer = await User.findById(customerId)
+    .select('isForeignNational foreignApprovalStatus')
+    .lean();
+  if (isForeignRestricted(customer)) {
+    throw AppError.forbidden(
+      'حساب شما در انتظار تأیید پشتیبانی است؛ پس از تأیید می‌توانید نوبت رزرو کنید.',
+      'FOREIGN_NOT_APPROVED',
+    );
+  }
+
   const profile = await StylistProfile.findOne({ userId: stylistId }).lean();
   if (!profile || profile.status !== 'active') {
+    throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  }
+  // A foreign stylist awaiting approval can't receive bookings either.
+  const stylistUser = await User.findById(stylistId)
+    .select('isForeignNational foreignApprovalStatus')
+    .lean();
+  if (isForeignRestricted(stylistUser)) {
     throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
   }
   if (profile.isAcceptingReservations === false) {

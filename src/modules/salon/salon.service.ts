@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { Types } from 'mongoose';
-import { Salon, ISalon, IOpeningHours } from '../../models/Salon';
+import { Salon, ISalon, IOpeningHours, ServiceGender, genderQuery } from '../../models/Salon';
 import { StylistSalon, StylistSalonStatus } from '../../models/StylistSalon';
 import { SalonInvite } from '../../models/SalonInvite';
 import { User } from '../../models/User';
@@ -31,11 +31,16 @@ export async function searchSalons(params: {
   lng?: number;
   lat?: number;
   radius?: number; // meters
+  gender?: ServiceGender;
 }) {
   const query: Record<string, unknown> = {};
 
   if (params.name) {
     query.name = { $regex: params.name, $options: 'i' };
+  }
+  const gq = genderQuery(params.gender);
+  if (gq !== undefined) {
+    query.serviceGender = gq;
   }
 
   if (params.lng !== undefined && params.lat !== undefined) {
@@ -48,15 +53,36 @@ export async function searchSalons(params: {
   }
 
   const salons = await Salon.find(query).limit(50).lean();
-  return salons.map((s) => ({
-    id: String(s._id),
-    name: s.name,
-    description: s.description,
-    address: s.address,
-    location: s.location,
-    status: s.status,
-    openingHours: s.openingHours,
-  }));
+  // Hide salons whose owner is a foreign national still awaiting approval.
+  const blockedOwners = await restrictedOwnerIds(salons.map((s) => s.ownerId));
+  return salons
+    .filter((s) => !s.ownerId || !blockedOwners.has(String(s.ownerId)))
+    .map((s) => ({
+      id: String(s._id),
+      name: s.name,
+      description: s.description,
+      address: s.address,
+      location: s.location,
+      status: s.status,
+      serviceGender: s.serviceGender ?? 'unisex',
+      openingHours: s.openingHours,
+    }));
+}
+
+/** Owner ids (of the given salons) that belong to not-yet-approved foreign users. */
+async function restrictedOwnerIds(
+  ownerIds: (Types.ObjectId | null)[],
+): Promise<Set<string>> {
+  const distinct = [...new Set(ownerIds.filter(Boolean).map((id) => String(id)))];
+  if (distinct.length === 0) return new Set();
+  const owners = await User.find({
+    _id: { $in: distinct },
+    isForeignNational: true,
+    foreignApprovalStatus: { $ne: 'approved' },
+  })
+    .select('_id')
+    .lean();
+  return new Set(owners.map((u) => String(u._id)));
 }
 
 /**
@@ -71,6 +97,7 @@ export async function createOwnSalon(
     address: string;
     lng: number;
     lat: number;
+    serviceGender?: ServiceGender;
     openingHours: OpeningHoursInput[];
   },
 ): Promise<{ salon: ISalon; onboardingStep: string }> {
@@ -81,6 +108,7 @@ export async function createOwnSalon(
     location: toGeoPoint(data.lng, data.lat),
     ownerId: new Types.ObjectId(userId),
     status: 'active',
+    serviceGender: data.serviceGender ?? 'unisex',
     openingHours: validateOpeningHours(data.openingHours),
     createdBy: new Types.ObjectId(userId),
   });
@@ -457,6 +485,7 @@ export async function updateSalon(
     address?: string;
     lng?: number;
     lat?: number;
+    serviceGender?: ServiceGender;
     openingHours?: OpeningHoursInput[];
   },
 ): Promise<ISalon> {
@@ -466,6 +495,7 @@ export async function updateSalon(
   if (data.name !== undefined) salon.name = data.name;
   if (data.description !== undefined) salon.description = data.description;
   if (data.address !== undefined) salon.address = data.address;
+  if (data.serviceGender !== undefined) salon.serviceGender = data.serviceGender;
   if (data.lng !== undefined && data.lat !== undefined) {
     salon.location = toGeoPoint(data.lng, data.lat);
   }

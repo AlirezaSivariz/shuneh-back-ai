@@ -19,6 +19,8 @@ import {
   listVerificationsSchema,
   rejectVerificationSchema,
   stylistDocumentSchema,
+  listForeignApprovalsSchema,
+  rejectForeignSchema,
 } from './admin.validators';
 
 /**
@@ -37,6 +39,7 @@ adminRouter.get('/reservations/:id', validate(idParamsSchema), asyncHandler(cont
 adminRouter.get('/salons', validate(listSalonsSchema), asyncHandler(controller.listSalons));
 adminRouter.get('/stylists', validate(listStylistsSchema), asyncHandler(controller.listStylists));
 adminRouter.get('/verifications', validate(listVerificationsSchema), asyncHandler(controller.listVerifications));
+adminRouter.get('/foreign-approvals', validate(listForeignApprovalsSchema), asyncHandler(controller.listForeignApprovals));
 // Stream a stylist's national-ID image for review (admin-only; private).
 adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema), asyncHandler(controller.getStylistDocument));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
@@ -48,3 +51,5 @@ adminRouter.post('/stylists/:id/promote', validate(promoteSchema), asyncHandler(
 adminRouter.post('/stylists/:id/unpromote', validate(stylistIdParamsSchema), asyncHandler(controller.unpromote));
 adminRouter.post('/stylists/:id/verify', validate(stylistIdParamsSchema), asyncHandler(controller.verifyStylist));
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
+adminRouter.post('/users/:id/approve-foreign', validate(idParamsSchema), asyncHandler(controller.approveForeign));
+adminRouter.post('/users/:id/reject-foreign', validate(rejectForeignSchema), asyncHandler(controller.rejectForeign));

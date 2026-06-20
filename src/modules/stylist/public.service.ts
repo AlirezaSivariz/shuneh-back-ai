@@ -9,7 +9,7 @@ import { ServiceCategory } from '../../models/ServiceCategory';
 import { StylistProfile } from '../../models/StylistProfile';
 import { StylistService } from '../../models/StylistService';
 import { StylistSalon } from '../../models/StylistSalon';
-import { Salon, ISalon } from '../../models/Salon';
+import { Salon, ISalon, salonMatchesGender } from '../../models/Salon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Reservation } from '../../models/Reservation';
 import { AppError } from '../../utils/AppError';
@@ -60,6 +60,7 @@ interface SearchParams {
   lng?: number;
   lat?: number;
   radius?: number; // meters
+  gender?: 'women' | 'men' | 'unisex';
 }
 
 /**
@@ -169,6 +170,12 @@ export async function searchStylists(params: SearchParams) {
       if (d > (params.radius ?? 5000)) continue;
     }
 
+    // gender filter: the stylist must work at a salon serving that gender. A
+    // freelancer (no salon) has no gender and is excluded when a filter is set.
+    if (params.gender) {
+      if (!loc.salon || !salonMatchesGender(loc.salon.serviceGender, params.gender)) continue;
+    }
+
     const services = myServices
       .map((ss) => {
         const svc = serviceById.get(String(ss.serviceId));
@@ -192,7 +199,12 @@ export async function searchStylists(params: SearchParams) {
       location: loc.location,
       address: loc.address,
       salon: loc.salon
-        ? { id: String(loc.salon._id), name: loc.salon.name, status: loc.salonStatus }
+        ? {
+            id: String(loc.salon._id),
+            name: loc.salon.name,
+            status: loc.salonStatus,
+            serviceGender: loc.salon.serviceGender ?? 'unisex',
+          }
         : null,
       services,
       portfolio: (profile.portfolio ?? []).slice(0, 4).map((p) => storageProvider.getUrl(p)),

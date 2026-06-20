@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { isValidHHmm } from '../../utils/time';
+import { SERVICE_GENDERS } from '../../models/Salon';
 
 const hhmm = z.string().refine(isValidHHmm, 'Time must be in HH:mm format');
+const serviceGender = z.enum(SERVICE_GENDERS as [string, ...string[]]);
 
 const openingHoursSchema = z.array(
   z.object({
@@ -18,6 +20,7 @@ export const searchSalonsSchema = {
     lng: z.coerce.number().min(-180).max(180).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(),
     radius: z.coerce.number().positive().optional(),
+    gender: serviceGender.optional(),
   }),
 };
 
@@ -28,6 +31,7 @@ export const createSalonSchema = {
     address: z.string().trim().min(1),
     lng: z.number().min(-180).max(180),
     lat: z.number().min(-90).max(90),
+    serviceGender: serviceGender.optional(),
     openingHours: openingHoursSchema.default([]),
   }),
 };
@@ -78,6 +82,7 @@ export const updateSalonSchema = {
       address: z.string().trim().min(1).optional(),
       lng: z.number().min(-180).max(180).optional(),
       lat: z.number().min(-90).max(90).optional(),
+      serviceGender: serviceGender.optional(),
       openingHours: openingHoursSchema.optional(),
     })
     .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update')

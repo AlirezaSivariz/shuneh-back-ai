@@ -27,6 +27,8 @@ export interface NotificationService {
    * their current working hours and need their attention (no auto-cancel).
    */
   workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
+  /** Tell a foreign-national user the result of their account approval review. */
+  foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string) {
@@ -85,6 +87,15 @@ class StubNotificationService implements NotificationService {
       phone,
       `با تغییر ساعت کاری، ${info.count} نوبت آینده‌ی شما خارج از ساعت کاری فعلی قرار گرفت. این نوبت‌ها لغو نشده‌اند؛ لطفاً در پنل شونه بررسی و ساعت کاری را به‌روزرسانی کنید.`,
     );
+  }
+
+  async foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }) {
+    if (info.approved) {
+      await safeSend(phone, 'حساب شما توسط پشتیبانی تأیید شد و اکنون فعال است. ✅');
+    } else {
+      const reason = info.reason ? ` علت: ${info.reason}` : '';
+      await safeSend(phone, `درخواست تأیید حساب شما رد شد.${reason}`);
+    }
   }
 }
 

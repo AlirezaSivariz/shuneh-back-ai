@@ -10,8 +10,14 @@
  */
 import { StylistSalon } from '../../models/StylistSalon';
 import { Salon } from '../../models/Salon';
+import { User } from '../../models/User';
+import { isForeignRestricted } from '../../utils/foreignApproval';
 
-export type BookabilityReason = 'no_active_workplace' | 'pending_salons' | 'not_accepting';
+export type BookabilityReason =
+  | 'no_active_workplace'
+  | 'pending_salons'
+  | 'not_accepting'
+  | 'foreign_pending';
 
 export interface Bookability {
   bookable: boolean;
@@ -28,15 +34,35 @@ export interface BookabilityProfile {
   isAcceptingReservations?: boolean;
 }
 
+/** The subset of `ids` that belong to foreign users NOT yet approved (restricted). */
+async function restrictedUserIds(ids: (unknown | null | undefined)[]): Promise<Set<string>> {
+  const distinct = [...new Set(ids.filter(Boolean).map((x) => String(x)))];
+  if (distinct.length === 0) return new Set();
+  const users = await User.find({
+    _id: { $in: distinct },
+    isForeignNational: true,
+    foreignApprovalStatus: { $ne: 'approved' },
+  })
+    .select('_id')
+    .lean();
+  return new Set(users.map((u) => String(u._id)));
+}
+
 /** Pure decision given a profile + its resolved active-salon set. */
 export function decideBookability(
   profile: BookabilityProfile,
   activeSalonIds: string[],
   hasPendingMembership: boolean,
+  foreignRestricted = false,
 ): Bookability {
   const freelance = profile.workplaceType === 'freelance' && !!profile.freelance?.location;
-  const hasActiveWorkplace = freelance || activeSalonIds.length > 0;
 
+  // A foreign stylist awaiting approval is never bookable (nor listed).
+  if (foreignRestricted) {
+    return { bookable: false, reason: 'foreign_pending', freelance, activeSalonIds: [] };
+  }
+
+  const hasActiveWorkplace = freelance || activeSalonIds.length > 0;
   if (!hasActiveWorkplace) {
     return {
       bookable: false,
@@ -51,7 +77,11 @@ export function decideBookability(
   return { bookable: true, reason: null, freelance, activeSalonIds };
 }
 
-/** Resolve a single stylist's active-salon ids (+ whether any membership is pending). */
+/**
+ * Resolve a single stylist's active-salon ids (+ whether any membership is
+ * pending). A salon owned by a foreign owner who isn't approved yet is NOT an
+ * active workplace (their salons are hidden until approval).
+ */
 export async function resolveActiveSalons(
   stylistId: string,
 ): Promise<{ activeSalonIds: string[]; hasPendingMembership: boolean }> {
@@ -63,9 +93,13 @@ export async function resolveActiveSalons(
   if (activeLinkSalonIds.length === 0) return { activeSalonIds: [], hasPendingMembership };
 
   const activeSalons = await Salon.find({ _id: { $in: activeLinkSalonIds }, status: 'active' })
-    .select('_id')
+    .select('_id ownerId')
     .lean();
-  return { activeSalonIds: activeSalons.map((s) => String(s._id)), hasPendingMembership };
+  const blockedOwners = await restrictedUserIds(activeSalons.map((s) => s.ownerId));
+  const visible = activeSalons.filter(
+    (s) => !s.ownerId || !blockedOwners.has(String(s.ownerId)),
+  );
+  return { activeSalonIds: visible.map((s) => String(s._id)), hasPendingMembership };
 }
 
 /** Bookability for one stylist. */
@@ -73,8 +107,11 @@ export async function getBookability(
   stylistId: string,
   profile: BookabilityProfile,
 ): Promise<Bookability> {
-  const { activeSalonIds, hasPendingMembership } = await resolveActiveSalons(stylistId);
-  return decideBookability(profile, activeSalonIds, hasPendingMembership);
+  const [{ activeSalonIds, hasPendingMembership }, user] = await Promise.all([
+    resolveActiveSalons(stylistId),
+    User.findById(stylistId).select('isForeignNational foreignApprovalStatus').lean(),
+  ]);
+  return decideBookability(profile, activeSalonIds, hasPendingMembership, isForeignRestricted(user));
 }
 
 /** Bulk bookability for many stylists — one query set (for search/featured). */
@@ -90,9 +127,18 @@ export async function getBookabilityMap(
     ...new Set(links.filter((l) => l.status === 'active').map((l) => String(l.salonId))),
   ];
   const activeSalons = await Salon.find({ _id: { $in: activeLinkSalonIds }, status: 'active' })
-    .select('_id')
+    .select('_id ownerId')
     .lean();
-  const activeSalonSet = new Set(activeSalons.map((s) => String(s._id)));
+  // Drop salons whose owner is a not-yet-approved foreign national.
+  const blockedOwners = await restrictedUserIds(activeSalons.map((s) => s.ownerId));
+  const activeSalonSet = new Set(
+    activeSalons
+      .filter((s) => !s.ownerId || !blockedOwners.has(String(s.ownerId)))
+      .map((s) => String(s._id)),
+  );
+
+  // The stylists who are themselves restricted foreign nationals.
+  const restrictedStylists = await restrictedUserIds(ids);
 
   const perStylist = new Map<string, { active: string[]; pending: boolean }>();
   for (const id of ids) perStylist.set(id, { active: [], pending: false });
@@ -109,7 +155,7 @@ export async function getBookabilityMap(
   for (const p of profiles) {
     const id = String(p.userId);
     const entry = perStylist.get(id) ?? { active: [], pending: false };
-    map.set(id, decideBookability(p, entry.active, entry.pending));
+    map.set(id, decideBookability(p, entry.active, entry.pending, restrictedStylists.has(id)));
   }
   return map;
 }
