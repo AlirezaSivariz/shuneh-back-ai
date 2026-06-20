@@ -7,8 +7,14 @@
  * user should never fail a domain operation.
  */
 import { smsProvider } from './sms';
+import { toJalaliLabel } from './jalali';
 
 export interface NotificationService {
+  /** Tell the stylist a new reservation was booked. */
+  reservationCreated(
+    phone: string,
+    info: { date: string; startTime: string; audience: 'customer' | 'stylist'; hasNote?: boolean },
+  ): Promise<void>;
   reservationCancelled(phone: string, info: { date: string; startTime: string; reason?: string }): Promise<void>;
   reservationRescheduled(
     phone: string,
@@ -20,6 +26,8 @@ export interface NotificationService {
   verificationRejected(phone: string, info: { reason?: string }): Promise<void>;
   /** Tell a stylist their request to join a salon was declined by the owner. */
   salonMembershipRejected(phone: string, info: { salonName?: string }): Promise<void>;
+  /** Tell a stylist their request to join a salon was APPROVED by the owner. */
+  salonMembershipApproved(phone: string, info: { salonName?: string }): Promise<void>;
   /** Tell a stylist that a salon owner invited them to work there. */
   salonInviteFromOwner(phone: string, info: { salonName?: string }): Promise<void>;
   /**
@@ -39,10 +47,26 @@ async function safeSend(phone: string, message: string) {
   }
 }
 
-class StubNotificationService implements NotificationService {
+class SmsNotificationService implements NotificationService {
+  async reservationCreated(
+    phone: string,
+    info: { date: string; startTime: string; audience: 'customer' | 'stylist'; hasNote?: boolean },
+  ) {
+    const when = `ساعت ${info.startTime} ${toJalaliLabel(info.date)}`;
+    if (info.audience === 'stylist') {
+      const note = info.hasNote ? ' (یادداشت مشتری را ببین)' : '';
+      await safeSend(phone, `یک رزرو جدید برای ${when} داری.${note}`);
+    } else {
+      await safeSend(phone, `رزرو تو برای ${when} ثبت شد.`);
+    }
+  }
+
   async reservationCancelled(phone: string, info: { date: string; startTime: string; reason?: string }) {
     const reason = info.reason ? ` علت: ${info.reason}.` : '';
-    await safeSend(phone, `نوبت شما در تاریخ ${info.date} ساعت ${info.startTime} لغو شد.${reason}`);
+    await safeSend(
+      phone,
+      `نوبت شما ساعت ${info.startTime} ${toJalaliLabel(info.date)} لغو شد.${reason}`,
+    );
   }
 
   async reservationRescheduled(
@@ -52,7 +76,7 @@ class StubNotificationService implements NotificationService {
     const who = info.by === 'stylist' ? 'متخصص' : 'مشتری';
     await safeSend(
       phone,
-      `نوبت شما توسط ${who} به تاریخ ${info.date} ساعت ${info.startTime} جابه‌جا شد.`,
+      `نوبت تو توسط ${who} به ساعت ${info.startTime} ${toJalaliLabel(info.date)} منتقل شد.`,
     );
   }
 
@@ -77,6 +101,11 @@ class StubNotificationService implements NotificationService {
     await safeSend(phone, `درخواست عضویت تو${where} پذیرفته نشد.`);
   }
 
+  async salonMembershipApproved(phone: string, info: { salonName?: string }) {
+    const where = info.salonName ? ` در سالن «${info.salonName}»` : '';
+    await safeSend(phone, `درخواست عضویت تو${where} تأیید شد.`);
+  }
+
   async salonInviteFromOwner(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` سالن «${info.salonName}»` : ' یک سالن';
     await safeSend(phone, `صاحب${where} از تو دعوت کرده تا در آن همکاری کنی. در پنل شونه آن را ببین.`);
@@ -99,4 +128,4 @@ class StubNotificationService implements NotificationService {
   }
 }
 
-export const notificationService: NotificationService = new StubNotificationService();
+export const notificationService: NotificationService = new SmsNotificationService();

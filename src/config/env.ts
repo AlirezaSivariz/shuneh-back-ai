@@ -67,8 +67,10 @@ export interface AppConfig {
   smsDriver: 'stub' | 'limosms';
   /** LimoSMS API key (only read from env; never hardcoded). */
   limoSmsApiKey?: string;
-  /** Footer/brand suffix sent with LimoSMS messages. */
+  /** Footer/brand suffix sent with LimoSMS OTP messages. */
   limoSmsFooter: string;
+  /** LimoSMS sender line number for notification SMS (sendsms). From env only. */
+  limoSmsSenderNumber?: string;
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -101,4 +103,7 @@ export const config: AppConfig = {
   smsDriver: (process.env.SMS_DRIVER || 'stub').toLowerCase() as AppConfig['smsDriver'],
   limoSmsApiKey: process.env.LIMOSMS_API_KEY || undefined,
   limoSmsFooter: process.env.LIMOSMS_FOOTER || 'شونه',
+  // LimoSMS expects the literal string "vip" as the sender (per their support),
+  // not a line number. Overridable via env if that ever changes.
+  limoSmsSenderNumber: process.env.LIMOSMS_SENDER_NUMBER || 'vip',
 };

@@ -304,6 +304,18 @@ export async function approveStylist(salonId: string, stylistId: string) {
 
   link.status = 'active';
   await link.save();
+
+  // Notify the stylist their membership was approved (best-effort; never fails).
+  void (async () => {
+    const [stylist, salon] = await Promise.all([
+      User.findById(stylistId).select('phone').lean(),
+      Salon.findById(salonId).select('name').lean(),
+    ]);
+    if (stylist?.phone) {
+      void notificationService.salonMembershipApproved(stylist.phone, { salonName: salon?.name });
+    }
+  })();
+
   return link;
 }
 

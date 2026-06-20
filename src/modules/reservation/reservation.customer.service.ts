@@ -16,7 +16,6 @@ import { AppError } from '../../utils/AppError';
 import { toMinutes, overlaps, contains } from '../../utils/time';
 import { iranWallClockToUtc } from '../../utils/timezone';
 import { storageProvider } from '../../utils/storage';
-import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveActiveSalons } from '../stylist/bookability';
 import { affectedReservationIds } from '../stylist/hoursReconcile';
@@ -245,20 +244,26 @@ export async function createReservation(customerId: string, input: CreateInput) 
     }
   }
 
-  // Notify the stylist of the new booking (best-effort; never blocks the flow).
-  // If the customer left a note, the stylist is told to check it.
+  // Notify both parties of the new booking (best-effort; never blocks the flow).
   void (async () => {
-    try {
-      const stylistUser = await User.findById(stylistId).select('phone').lean();
-      if (stylistUser?.phone) {
-        const noteHint = customerNote ? ' (مشتری توضیحاتی ثبت کرده است)' : '';
-        await smsProvider.send(
-          stylistUser.phone,
-          `نوبت جدید در تاریخ ${date} ساعت ${startTime} برای شما ثبت شد.${noteHint}`,
-        );
-      }
-    } catch {
-      /* swallow SMS errors */
+    const [stylistUser, customerUser] = await Promise.all([
+      User.findById(stylistId).select('phone').lean(),
+      User.findById(customerId).select('phone').lean(),
+    ]);
+    if (stylistUser?.phone) {
+      void notificationService.reservationCreated(stylistUser.phone, {
+        date,
+        startTime,
+        audience: 'stylist',
+        hasNote: !!customerNote,
+      });
+    }
+    if (customerUser?.phone) {
+      void notificationService.reservationCreated(customerUser.phone, {
+        date,
+        startTime,
+        audience: 'customer',
+      });
     }
   })();
 
@@ -374,16 +379,13 @@ export async function cancelByStylist(
 
   // Notify the customer (best-effort; SMS failure must not fail the cancel).
   void (async () => {
-    try {
-      const customer = await User.findById(reservation.customerId).select('phone').lean();
-      if (customer?.phone) {
-        await smsProvider.send(
-          customer.phone,
-          `نوبت شما در تاریخ ${reservation.date.toISOString().slice(0, 10)} ساعت ${reservation.startTime} توسط متخصص لغو شد.${reason ? ` علت: ${reason}` : ''}`,
-        );
-      }
-    } catch {
-      /* swallow SMS errors */
+    const customer = await User.findById(reservation.customerId).select('phone').lean();
+    if (customer?.phone) {
+      void notificationService.reservationCancelled(customer.phone, {
+        date: reservation.date.toISOString().slice(0, 10),
+        startTime: reservation.startTime,
+        reason: reason ?? undefined,
+      });
     }
   })();
 

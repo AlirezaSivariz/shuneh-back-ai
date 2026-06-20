@@ -63,6 +63,7 @@ export function toLimoMobile(input: string): string {
 interface LimoResponse {
   success: boolean | undefined;
   message: string | undefined;
+  messageId: unknown;
 }
 
 /**
@@ -100,10 +101,11 @@ export class LimoSmsProvider implements SmsProvider {
     } catch {
       /* non-JSON body — keep raw for the log */
     }
-    // LimoSMS documents PascalCase {Success, Message}; accept other casings too.
+    // LimoSMS documents PascalCase {Success, Message, MessageId}; accept other casings.
     const success = (json.Success ?? json.success ?? json.IsSuccess) as boolean | undefined;
     const message = (json.Message ?? json.message ?? json.Error) as string | undefined;
-    return { status: res.status, raw, parsed: { success, message } };
+    const messageId = json.MessageId ?? json.messageId ?? json.MessageID;
+    return { status: res.status, raw, parsed: { success, message, messageId } };
   }
 
   async sendOtp(phone: string): Promise<{ devCode?: string }> {
@@ -154,11 +156,44 @@ export class LimoSmsProvider implements SmsProvider {
     return parsed.success === true;
   }
 
-  async send(phone: string, _message: string): Promise<void> {
-    // LimoSMS sendcode is OTP-only; generic notification SMS would need a separate
-    // endpoint. Kept as a non-throwing no-op so best-effort notifications never fail.
-    // eslint-disable-next-line no-console
-    console.warn(`[limosms] generic SMS skipped (no generic endpoint) for ${maskMobile(phone)}`);
+  /**
+   * Generic notification SMS via LimoSMS `sendsms` (separate from OTP's
+   * sendcode/checkcode). Best-effort: NEVER throws — a failed notification must
+   * not break the domain operation. Logs the gateway's MessageId on success and
+   * its real Message on failure, so delivery can be traced later.
+   */
+  async send(phone: string, message: string): Promise<void> {
+    const mobile = toLimoMobile(phone);
+    if (!config.limoSmsApiKey || !config.limoSmsSenderNumber) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[limosms] sendsms skipped for ${maskMobile(mobile)} — ` +
+          'LIMOSMS_API_KEY / LIMOSMS_SENDER_NUMBER not set',
+      );
+      return;
+    }
+    try {
+      const { status, raw, parsed } = await this.post('/sendsms', {
+        SenderNumber: config.limoSmsSenderNumber,
+        Message: message,
+        // The recipient list — an array even for a single number. Empty
+        // SendTimeSpan (omitted) means "send immediately".
+        MobileNumber: [mobile],
+        SendToBlocksNumber: false,
+      });
+      const ok = status >= 200 && status < 300 && parsed.success === true;
+      // eslint-disable-next-line no-console
+      console[ok ? 'log' : 'error'](
+        `[limosms] sendsms mobile=${maskMobile(mobile)} http=${status} ` +
+          `Success=${parsed.success}` +
+          (ok
+            ? ` MessageId=${JSON.stringify(parsed.messageId ?? null)}`
+            : ` Message=${JSON.stringify(parsed.message ?? null)} raw=${raw.slice(0, 300)}`),
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[limosms] sendsms failed for ${maskMobile(mobile)}:`, (err as Error).message);
+    }
   }
 }
 
