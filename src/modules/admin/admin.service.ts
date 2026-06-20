@@ -193,13 +193,15 @@ export async function setUserStatus(adminId: string, id: string, isActive: boole
 
 // ─────────────────── foreign-national approvals ───────────────────
 
-/** List foreign-national users by approval status (default: pending). */
+/** List foreign-national users by approval status (default: pending; 'all' = any). */
 export async function listForeignApprovals(
-  filter: { status?: 'pending' | 'approved' | 'rejected' } & PageQuery,
+  filter: { status?: 'pending' | 'approved' | 'rejected' | 'all' } & PageQuery,
 ) {
   const { page, limit, skip } = paginate(filter);
   const status = filter.status ?? 'pending';
-  const q = { isForeignNational: true, foreignApprovalStatus: status };
+  // 'all' lists every foreign user (so the admin can revisit a past decision).
+  const q: Record<string, unknown> = { isForeignNational: true };
+  if (status !== 'all') q.foreignApprovalStatus = status;
 
   const [items, total] = await Promise.all([
     User.find(q).sort({ updatedAt: -1 }).skip(skip).limit(limit).lean(),

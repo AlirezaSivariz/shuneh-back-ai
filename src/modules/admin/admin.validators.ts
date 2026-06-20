@@ -89,7 +89,7 @@ export const rejectVerificationSchema = {
 
 export const listForeignApprovalsSchema = {
   query: z.object({
-    status: z.enum(['pending', 'approved', 'rejected']).optional(),
+    status: z.enum(['pending', 'approved', 'rejected', 'all']).optional(),
     ...pageQuery,
   }),
 };

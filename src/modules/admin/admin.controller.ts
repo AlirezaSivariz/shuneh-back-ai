@@ -32,7 +32,7 @@ export async function listForeignApprovals(req: Request, res: Response): Promise
   sendSuccess(
     res,
     await service.listForeignApprovals({
-      status: q.status as 'pending' | 'approved' | 'rejected' | undefined,
+      status: q.status as 'pending' | 'approved' | 'rejected' | 'all' | undefined,
       page: Number(q.page),
       limit: Number(q.limit),
     }),

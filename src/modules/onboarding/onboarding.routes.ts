@@ -2,9 +2,11 @@ import { Router } from 'express';
 import * as controller from './onboarding.controller';
 import * as reportsController from '../reports/reports.controller';
 import * as reservationController from '../reservation/reservation.customer.controller';
+import * as mediaController from '../media/media.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { createUploader } from '../../middlewares/upload';
 import { setRolesSchema, personalSchema } from './onboarding.validators';
 import { reportRangeSchema } from '../reports/reports.validators';
 
@@ -22,6 +24,13 @@ meRouter.get('/state', asyncHandler(controller.getUserState));
 // Pending owner-invites by phone (discoverable without opening the magic link).
 meRouter.get('/pending-invites', asyncHandler(controller.getPendingInvites));
 meRouter.patch('/personal', validate(personalSchema), asyncHandler(controller.updatePersonal));
+// Profile photo for ANY authenticated user (customer/stylist/owner) — multipart 'photo'.
+const profilePhotoUploader = createUploader('profile');
+meRouter.post(
+  '/profile-photo',
+  profilePhotoUploader.single('photo'),
+  asyncHandler(mediaController.uploadProfilePhoto),
+);
 // Customer activity/spending report (scoped to the authenticated user).
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));
 // Quick-rebook suggestions from the customer's own completed history.

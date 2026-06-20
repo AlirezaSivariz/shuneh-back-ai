@@ -183,6 +183,51 @@ describe("Foreign national — admin endpoints", () => {
     expect(state.body.data.user.foreignRejectionReason).toBe("مدارک ناقص");
   });
 
+  it("an admin can change a past decision (reject an approved user, then re-approve)", async () => {
+    const admin = await createAdmin();
+    const c = await login();
+    await setForeignPersonal(c.token, "100000000050");
+    const id = (await api().get("/me/state").set(...auth(c.token))).body.data.user.id as string;
+
+    // Approve → then reject the now-approved user → then approve again.
+    await api().post(`/admin/users/${id}/approve-foreign`).set(...auth(admin.token));
+    const reReject = await api()
+      .post(`/admin/users/${id}/reject-foreign`)
+      .set(...auth(admin.token))
+      .send({ reason: "بازبینی مجدد" });
+    expect(reReject.status).toBe(200);
+    expect(reReject.body.data.foreignApprovalStatus).toBe("rejected");
+    expect((await api().get("/me/state").set(...auth(c.token))).body.data.isActive).toBe(false);
+
+    const reApprove = await api()
+      .post(`/admin/users/${id}/approve-foreign`)
+      .set(...auth(admin.token));
+    expect(reApprove.body.data.foreignApprovalStatus).toBe("approved");
+    expect((await api().get("/me/state").set(...auth(c.token))).body.data.isActive).toBe(true);
+  });
+
+  it("the list supports status filters incl. 'all' (approved users stay findable)", async () => {
+    const admin = await createAdmin();
+    const c = await login();
+    await setForeignPersonal(c.token, "100000000060");
+    const id = (await api().get("/me/state").set(...auth(c.token))).body.data.user.id as string;
+    await api().post(`/admin/users/${id}/approve-foreign`).set(...auth(admin.token));
+
+    // Not in the pending list anymore…
+    const pending = await api()
+      .get("/admin/foreign-approvals?status=pending")
+      .set(...auth(admin.token));
+    expect(pending.body.data.items.some((u: any) => u.id === id)).toBe(false);
+
+    // …but found under approved AND under 'all'.
+    const approved = await api()
+      .get("/admin/foreign-approvals?status=approved")
+      .set(...auth(admin.token));
+    expect(approved.body.data.items.some((u: any) => u.id === id)).toBe(true);
+    const all = await api().get("/admin/foreign-approvals?status=all").set(...auth(admin.token));
+    expect(all.body.data.items.some((u: any) => u.id === id)).toBe(true);
+  });
+
   it("the admin users list reports a pending foreign user as not-active (not 'فعال')", async () => {
     const admin = await createAdmin();
     const c = await login();

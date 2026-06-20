@@ -13,6 +13,12 @@ import { AppError } from '../../utils/AppError';
 import { hasPendingInvitesForPhone } from '../invite/invite.service';
 import { getBookability } from '../stylist/bookability';
 import { accountStatus } from '../../utils/foreignApproval';
+import { storageProvider } from '../../utils/storage';
+
+/** Stored image key → absolute URL (the convention used across all API outputs). */
+function photoUrl(key?: string | null): string | null {
+  return key ? storageProvider.getUrl(key) : null;
+}
 
 /** Ensure a (draft) StylistProfile exists for a stylist user. */
 export async function ensureStylistProfile(userId: string): Promise<IStylistProfile> {
@@ -104,7 +110,7 @@ export async function getOnboardingState(userId: string) {
       lastName: user.lastName,
       nationalCode: user.nationalCode,
       birthDate: user.birthDate,
-      profilePhoto: user.profilePhoto,
+      profilePhoto: photoUrl(user.profilePhoto),
       isForeignNational: user.isForeignNational ?? false,
       foreignId: user.foreignId ?? null,
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
@@ -202,7 +208,7 @@ export async function getUserState(userId: string) {
       lastName: user.lastName ?? null,
       nationalCode: user.nationalCode ?? null,
       birthDate: user.birthDate ?? null,
-      profilePhoto: user.profilePhoto ?? null,
+      profilePhoto: photoUrl(user.profilePhoto),
       isForeignNational: user.isForeignNational ?? false,
       foreignId: user.foreignId ?? null,
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',

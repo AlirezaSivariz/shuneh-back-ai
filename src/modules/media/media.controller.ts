@@ -12,6 +12,11 @@ export async function uploadStylistMedia(req: Request, res: Response): Promise<v
   sendSuccess(res, result);
 }
 
+export async function uploadProfilePhoto(req: Request, res: Response): Promise<void> {
+  const result = await service.saveProfilePhoto(req.user!.id, req.file);
+  sendSuccess(res, result);
+}
+
 export async function deletePortfolioItem(req: Request, res: Response): Promise<void> {
   const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
   if (!key) throw AppError.badRequest('A portfolio item key is required', 'KEY_REQUIRED');

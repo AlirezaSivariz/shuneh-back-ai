@@ -58,6 +58,21 @@ export async function saveStylistMedia(
 }
 
 /**
+ * Set/replace the authenticated user's profile photo (any role). Stores the
+ * image and saves its key on User.profilePhoto; returns the absolute URL.
+ */
+export async function saveProfilePhoto(userId: string, file?: Express.Multer.File) {
+  if (!file) throw AppError.badRequest('عکسی انتخاب نشده است', 'NO_FILE');
+  const stored = await storageProvider.save(file, {
+    ownerType: 'user',
+    ownerId: userId,
+    kind: 'profile',
+  });
+  await User.updateOne({ _id: userId }, { profilePhoto: stored.path });
+  return { profilePhoto: storageProvider.getUrl(stored.path) };
+}
+
+/**
  * Remove a single portfolio image (post-onboarding management). `key` is the
  * stored key as held in the profile (the value the client received from the
  * onboarding state). The image file is deleted best-effort.
