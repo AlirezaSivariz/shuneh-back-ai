@@ -319,6 +319,33 @@ export async function getReservation(userId: string, reservationId: string) {
   return serializeReservation(reservation);
 }
 
+/**
+ * Notify BOTH parties (customer + stylist) that a reservation was cancelled —
+ * one SMS each, best-effort, never blocks the cancel. Used by every cancel path
+ * (customer/stylist/admin) so neither side is ever left uninformed.
+ */
+function notifyReservationCancelled(
+  reservation: { customerId: Types.ObjectId; stylistId: Types.ObjectId; date: Date; startTime: string },
+  reason?: string | null,
+) {
+  void (async () => {
+    const parties = await User.find({
+      _id: { $in: [reservation.customerId, reservation.stylistId] },
+    })
+      .select('phone')
+      .lean();
+    for (const p of parties) {
+      if (p.phone) {
+        void notificationService.reservationCancelled(p.phone, {
+          date: reservation.date.toISOString().slice(0, 10),
+          startTime: reservation.startTime,
+          reason: reason ?? undefined,
+        });
+      }
+    }
+  })();
+}
+
 export async function cancelReservation(customerId: string, reservationId: string) {
   if (!Types.ObjectId.isValid(reservationId)) {
     throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
@@ -341,6 +368,9 @@ export async function cancelReservation(customerId: string, reservationId: strin
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'customer';
   await reservation.save();
+
+  // Inform BOTH the customer (confirmation) and the stylist (the gap before).
+  notifyReservationCancelled(reservation);
   return serializeReservation(reservation);
 }
 
@@ -377,17 +407,8 @@ export async function cancelByStylist(
   reservation.cancelReason = reason ?? null;
   await reservation.save();
 
-  // Notify the customer (best-effort; SMS failure must not fail the cancel).
-  void (async () => {
-    const customer = await User.findById(reservation.customerId).select('phone').lean();
-    if (customer?.phone) {
-      void notificationService.reservationCancelled(customer.phone, {
-        date: reservation.date.toISOString().slice(0, 10),
-        startTime: reservation.startTime,
-        reason: reason ?? undefined,
-      });
-    }
-  })();
+  // Inform BOTH parties (customer + the stylist who cancelled).
+  notifyReservationCancelled(reservation, reason);
 
   return serializeReservation(reservation, 'stylist');
 }
@@ -489,12 +510,16 @@ export async function rescheduleReservation(
   ];
   await reservation.save();
 
-  // Notify the OTHER party (best-effort).
+  // Notify BOTH parties (best-effort): the other side is informed and the actor
+  // gets a confirmation.
   void (async () => {
-    const otherId = by === 'customer' ? reservation.stylistId : reservation.customerId;
-    const other = await User.findById(otherId).select('phone').lean();
-    if (other?.phone) {
-      void notificationService.reservationRescheduled(other.phone, { date, startTime, by });
+    const parties = await User.find({
+      _id: { $in: [reservation.customerId, reservation.stylistId] },
+    })
+      .select('phone')
+      .lean();
+    for (const p of parties) {
+      if (p.phone) void notificationService.reservationRescheduled(p.phone, { date, startTime, by });
     }
   })();
 

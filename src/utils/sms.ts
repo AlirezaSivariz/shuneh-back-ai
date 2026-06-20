@@ -1,4 +1,11 @@
 import { config } from '../config/env';
+import { SmsLog } from '../models/SmsLog';
+
+/** Context for a notification SMS (used for the delivery log). */
+export interface SmsMeta {
+  /** Business event label, e.g. 'reservation_created', 'salon_invite'. */
+  event?: string;
+}
 
 /**
  * SMS / OTP gateway abstraction. Selected via SMS_DRIVER.
@@ -13,7 +20,30 @@ export interface SmsProvider {
   /** Ask the gateway whether a code is valid. true = correct (and not expired). */
   verifyOtp(phone: string, code: string): Promise<boolean>;
   /** Generic transactional SMS (best-effort; used by NotificationService). */
-  send(phone: string, message: string): Promise<void>;
+  send(phone: string, message: string, meta?: SmsMeta): Promise<void>;
+}
+
+/** Persist a notification-SMS delivery record (best-effort; never throws). */
+async function recordSmsLog(entry: {
+  recipientMasked: string;
+  event: string;
+  provider: 'limosms' | 'stub';
+  success: boolean;
+  messageId?: unknown;
+  error?: string | null;
+}): Promise<void> {
+  try {
+    await SmsLog.create({
+      recipientMasked: entry.recipientMasked,
+      event: entry.event,
+      provider: entry.provider,
+      success: entry.success,
+      messageId: entry.messageId != null ? String(entry.messageId) : null,
+      error: entry.error ?? null,
+    });
+  } catch {
+    /* logging must never break the send path */
+  }
 }
 
 /** Fixed code used by the dev/test stub only. */
@@ -31,14 +61,20 @@ export class ConsoleSmsProvider implements SmsProvider {
     return code === DEV_OTP_CODE;
   }
 
-  async send(phone: string, message: string): Promise<void> {
+  async send(phone: string, message: string, meta?: SmsMeta): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[sms] -> ${phone}: ${message}`);
+    await recordSmsLog({
+      recipientMasked: maskMobile(phone),
+      event: meta?.event ?? 'notification',
+      provider: 'stub',
+      success: true,
+    });
   }
 }
 
 /** Mask a phone for logs (0912***6789) — never log the full subscriber number. */
-function maskMobile(phone: string): string {
+export function maskMobile(phone: string): string {
   const d = phone.replace(/\D/g, '');
   return d.length < 8 ? '***' : `${d.slice(0, 4)}***${d.slice(-4)}`;
 }
@@ -162,14 +198,23 @@ export class LimoSmsProvider implements SmsProvider {
    * not break the domain operation. Logs the gateway's MessageId on success and
    * its real Message on failure, so delivery can be traced later.
    */
-  async send(phone: string, message: string): Promise<void> {
+  async send(phone: string, message: string, meta?: SmsMeta): Promise<void> {
     const mobile = toLimoMobile(phone);
+    const event = meta?.event ?? 'notification';
+    const masked = maskMobile(mobile);
     if (!config.limoSmsApiKey || !config.limoSmsSenderNumber) {
       // eslint-disable-next-line no-console
       console.warn(
-        `[limosms] sendsms skipped for ${maskMobile(mobile)} — ` +
+        `[limosms] sendsms skipped for ${masked} — ` +
           'LIMOSMS_API_KEY / LIMOSMS_SENDER_NUMBER not set',
       );
+      await recordSmsLog({
+        recipientMasked: masked,
+        event,
+        provider: 'limosms',
+        success: false,
+        error: 'sender/apikey not configured',
+      });
       return;
     }
     try {
@@ -184,15 +229,30 @@ export class LimoSmsProvider implements SmsProvider {
       const ok = status >= 200 && status < 300 && parsed.success === true;
       // eslint-disable-next-line no-console
       console[ok ? 'log' : 'error'](
-        `[limosms] sendsms mobile=${maskMobile(mobile)} http=${status} ` +
+        `[limosms] sendsms event=${event} mobile=${masked} http=${status} ` +
           `Success=${parsed.success}` +
           (ok
             ? ` MessageId=${JSON.stringify(parsed.messageId ?? null)}`
             : ` Message=${JSON.stringify(parsed.message ?? null)} raw=${raw.slice(0, 300)}`),
       );
+      await recordSmsLog({
+        recipientMasked: masked,
+        event,
+        provider: 'limosms',
+        success: ok,
+        messageId: ok ? parsed.messageId : null,
+        error: ok ? null : parsed.message ?? raw.slice(0, 200) ?? `http ${status}`,
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(`[limosms] sendsms failed for ${maskMobile(mobile)}:`, (err as Error).message);
+      console.error(`[limosms] sendsms failed for ${masked}:`, (err as Error).message);
+      await recordSmsLog({
+        recipientMasked: masked,
+        event,
+        provider: 'limosms',
+        success: false,
+        error: (err as Error).message,
+      });
     }
   }
 }

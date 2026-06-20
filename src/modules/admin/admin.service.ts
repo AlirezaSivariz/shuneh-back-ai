@@ -16,6 +16,7 @@ import { Service } from '../../models/Service';
 import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } from '../../models/Reservation';
 import { DiscountCode } from '../../models/DiscountCode';
 import { AuditLog } from '../../models/AuditLog';
+import { SmsLog } from '../../models/SmsLog';
 import { AppError } from '../../utils/AppError';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
@@ -82,8 +83,15 @@ export async function listUsers(filter: { role?: Role; search?: string } & PageQ
   const q: Record<string, unknown> = {};
   if (filter.role) q.roles = filter.role;
   if (filter.search) {
+    // Search by name, phone, national code, OR foreign id.
     const rx = new RegExp(escapeRegex(filter.search), 'i');
-    q.$or = [{ phone: rx }, { firstName: rx }, { lastName: rx }];
+    q.$or = [
+      { phone: rx },
+      { firstName: rx },
+      { lastName: rx },
+      { nationalCode: rx },
+      { foreignId: rx },
+    ];
   }
 
   const [items, total] = await Promise.all([
@@ -119,12 +127,18 @@ export async function getUser(id: string) {
   const user = await User.findById(id).lean();
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
-  const [profile, ownedSalons, memberships, services] = await Promise.all([
+  const [profile, ownedSalons, memberships, services, reservationRows] = await Promise.all([
     StylistProfile.findOne({ userId: id }).lean(),
     Salon.find({ ownerId: id }).select('name address status').lean(),
     StylistSalon.find({ stylistId: id }).populate('salonId', 'name status').lean(),
     StylistService.find({ stylistId: id }).populate('serviceId', 'name').lean(),
+    // The user's reservations (as customer OR stylist), most recent first.
+    Reservation.find({ $or: [{ customerId: id }, { stylistId: id }] })
+      .sort({ startAt: -1 })
+      .limit(20)
+      .lean(),
   ]);
+  const reservations = await enrichReservations(reservationRows as unknown as IReservation[]);
 
   return {
     user: {
@@ -134,6 +148,7 @@ export async function getUser(id: string) {
       isActive: user.isActive !== false,
       accountActive: accountStatus(user).active,
       inactiveReason: accountStatus(user).reason,
+      suspendedReason: user.suspendedReason ?? null,
       firstName: user.firstName ?? null,
       lastName: user.lastName ?? null,
       nationalCode: user.nationalCode ?? null, // admin-only sensitive field
@@ -144,6 +159,7 @@ export async function getUser(id: string) {
       foreignRejectionReason: user.foreignRejectionReason ?? null,
       createdAt: user.createdAt,
     },
+    reservations,
     stylistProfile: profile
       ? {
           status: profile.status,
@@ -177,7 +193,12 @@ export async function getUser(id: string) {
   };
 }
 
-export async function setUserStatus(adminId: string, id: string, isActive: boolean) {
+export async function setUserStatus(
+  adminId: string,
+  id: string,
+  isActive: boolean,
+  reason?: string,
+) {
   if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   if (id === adminId) {
     throw AppError.badRequest('نمی‌توانید حساب خودتان را غیرفعال کنید', 'CANNOT_DISABLE_SELF');
@@ -186,9 +207,11 @@ export async function setUserStatus(adminId: string, id: string, isActive: boole
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
   user.isActive = isActive;
+  // Keep the suspension reason while suspended; clear it on re-activation.
+  user.suspendedReason = isActive ? null : reason ?? null;
   await user.save();
-  await audit(adminId, 'user.setStatus', 'user', id, { isActive });
-  return { id, isActive };
+  await audit(adminId, 'user.setStatus', 'user', id, { isActive, reason: reason ?? null });
+  return { id, isActive, suspendedReason: user.suspendedReason };
 }
 
 // ─────────────────── foreign-national approvals ───────────────────
@@ -517,6 +540,36 @@ export async function getReports() {
     },
     usersByRole,
     reservationsByStatus,
+  };
+}
+
+// ───────────────────────── sms delivery log ─────────────────────────
+
+export async function listSmsLogs(
+  filter: { event?: string; success?: 'true' | 'false' } & PageQuery,
+) {
+  const { page, limit, skip } = paginate(filter);
+  const q: Record<string, unknown> = {};
+  if (filter.event) q.event = filter.event;
+  if (filter.success === 'true') q.success = true;
+  if (filter.success === 'false') q.success = false;
+
+  const [rows, total] = await Promise.all([
+    SmsLog.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    SmsLog.countDocuments(q),
+  ]);
+  return {
+    items: rows.map((r) => ({
+      id: String(r._id),
+      recipientMasked: r.recipientMasked,
+      event: r.event,
+      provider: r.provider,
+      success: r.success,
+      messageId: r.messageId ?? null,
+      error: r.error ?? null,
+      createdAt: r.createdAt,
+    })),
+    ...pageMeta(page, limit, total),
   };
 }
 

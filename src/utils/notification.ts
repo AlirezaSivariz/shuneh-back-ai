@@ -39,9 +39,9 @@ export interface NotificationService {
   foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
 }
 
-async function safeSend(phone: string, message: string) {
+async function safeSend(phone: string, message: string, event: string) {
   try {
-    await smsProvider.send(phone, message);
+    await smsProvider.send(phone, message, { event });
   } catch {
     /* swallow — notifications are best-effort */
   }
@@ -55,9 +55,9 @@ class SmsNotificationService implements NotificationService {
     const when = `ساعت ${info.startTime} ${toJalaliLabel(info.date)}`;
     if (info.audience === 'stylist') {
       const note = info.hasNote ? ' (یادداشت مشتری را ببین)' : '';
-      await safeSend(phone, `یک رزرو جدید برای ${when} داری.${note}`);
+      await safeSend(phone, `یک رزرو جدید برای ${when} داری.${note}`, 'reservation_created');
     } else {
-      await safeSend(phone, `رزرو تو برای ${when} ثبت شد.`);
+      await safeSend(phone, `رزرو تو برای ${when} ثبت شد.`, 'reservation_created');
     }
   }
 
@@ -66,6 +66,7 @@ class SmsNotificationService implements NotificationService {
     await safeSend(
       phone,
       `نوبت شما ساعت ${info.startTime} ${toJalaliLabel(info.date)} لغو شد.${reason}`,
+      'reservation_cancelled',
     );
   }
 
@@ -77,6 +78,7 @@ class SmsNotificationService implements NotificationService {
     await safeSend(
       phone,
       `نوبت تو توسط ${who} به ساعت ${info.startTime} ${toJalaliLabel(info.date)} منتقل شد.`,
+      'reservation_rescheduled',
     );
   }
 
@@ -84,46 +86,64 @@ class SmsNotificationService implements NotificationService {
     await safeSend(
       phone,
       `خدمت شما انجام شد 🌟 برای ثبت نظر و انعام وارد شوید: ${info.link}`,
+      'service_completed',
     );
   }
 
   async verificationApproved(phone: string) {
-    await safeSend(phone, 'تبریک! پروفایل شما تأیید شد و نشان تأیید (تیک آبی) فعال شد. ✅');
+    await safeSend(
+      phone,
+      'تبریک! پروفایل شما تأیید شد و نشان تأیید (تیک آبی) فعال شد. ✅',
+      'verification',
+    );
   }
 
   async verificationRejected(phone: string, info: { reason?: string }) {
     const reason = info.reason ? ` علت: ${info.reason}` : '';
-    await safeSend(phone, `درخواست تأیید پروفایل شما رد شد.${reason} می‌توانید پس از اصلاح، دوباره ارسال کنید.`);
+    await safeSend(
+      phone,
+      `درخواست تأیید پروفایل شما رد شد.${reason} می‌توانید پس از اصلاح، دوباره ارسال کنید.`,
+      'verification',
+    );
   }
 
   async salonMembershipRejected(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` در سالن «${info.salonName}»` : '';
-    await safeSend(phone, `درخواست عضویت تو${where} پذیرفته نشد.`);
+    await safeSend(phone, `درخواست عضویت تو${where} پذیرفته نشد.`, 'salon_membership');
   }
 
   async salonMembershipApproved(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` در سالن «${info.salonName}»` : '';
-    await safeSend(phone, `درخواست عضویت تو${where} تأیید شد.`);
+    await safeSend(phone, `درخواست عضویت تو${where} تأیید شد.`, 'salon_membership');
   }
 
   async salonInviteFromOwner(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` سالن «${info.salonName}»` : ' یک سالن';
-    await safeSend(phone, `صاحب${where} از تو دعوت کرده تا در آن همکاری کنی. در پنل شونه آن را ببین.`);
+    await safeSend(
+      phone,
+      `صاحب${where} از تو دعوت کرده تا در آن همکاری کنی. در پنل شونه آن را ببین.`,
+      'salon_invite_stylist',
+    );
   }
 
   async workingHoursNeedReview(phone: string, info: { count: number }) {
     await safeSend(
       phone,
       `با تغییر ساعت کاری، ${info.count} نوبت آینده‌ی شما خارج از ساعت کاری فعلی قرار گرفت. این نوبت‌ها لغو نشده‌اند؛ لطفاً در پنل شونه بررسی و ساعت کاری را به‌روزرسانی کنید.`,
+      'hours_review',
     );
   }
 
   async foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }) {
     if (info.approved) {
-      await safeSend(phone, 'حساب شما توسط پشتیبانی تأیید شد و اکنون فعال است. ✅');
+      await safeSend(
+        phone,
+        'حساب شما توسط پشتیبانی تأیید شد و اکنون فعال است. ✅',
+        'foreign_approval',
+      );
     } else {
       const reason = info.reason ? ` علت: ${info.reason}` : '';
-      await safeSend(phone, `درخواست تأیید حساب شما رد شد.${reason}`);
+      await safeSend(phone, `درخواست تأیید حساب شما رد شد.${reason}`, 'foreign_approval');
     }
   }
 }

@@ -1,27 +1,37 @@
-import { nanoid } from 'nanoid';
-import { Types } from 'mongoose';
-import { Salon, ISalon, IOpeningHours, ServiceGender, genderQuery } from '../../models/Salon';
-import { StylistSalon, StylistSalonStatus } from '../../models/StylistSalon';
-import { SalonInvite } from '../../models/SalonInvite';
-import { User } from '../../models/User';
-import { StylistProfile } from '../../models/StylistProfile';
-import { StylistService } from '../../models/StylistService';
-import { WorkingHour } from '../../models/WorkingHour';
-import { Reservation } from '../../models/Reservation';
-import { AppError } from '../../utils/AppError';
-import { toGeoPoint } from '../../utils/geo';
-import { storageProvider } from '../../utils/storage';
-import { assertValidOpeningHours, OpeningHoursInput } from '../../utils/openingHours';
-import { smsProvider } from '../../utils/sms';
-import { notificationService } from '../../utils/notification';
-import { config } from '../../config/env';
-import { ensureStylistProfile } from '../onboarding/onboarding.service';
-import { reconcileSalonHoursChange } from '../stylist/hoursReconcile';
+import { nanoid } from "nanoid";
+import { Types } from "mongoose";
+import {
+  Salon,
+  ISalon,
+  IOpeningHours,
+  ServiceGender,
+  genderQuery,
+} from "../../models/Salon";
+import { StylistSalon, StylistSalonStatus } from "../../models/StylistSalon";
+import { SalonInvite } from "../../models/SalonInvite";
+import { User } from "../../models/User";
+import { StylistProfile } from "../../models/StylistProfile";
+import { StylistService } from "../../models/StylistService";
+import { WorkingHour } from "../../models/WorkingHour";
+import { Reservation } from "../../models/Reservation";
+import { AppError } from "../../utils/AppError";
+import { toGeoPoint } from "../../utils/geo";
+import { storageProvider } from "../../utils/storage";
+import {
+  assertValidOpeningHours,
+  OpeningHoursInput,
+} from "../../utils/openingHours";
+import { smsProvider } from "../../utils/sms";
+import { notificationService } from "../../utils/notification";
+import { config } from "../../config/env";
+import { ensureStylistProfile } from "../onboarding/onboarding.service";
+import { reconcileSalonHoursChange } from "../stylist/hoursReconcile";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-const validateOpeningHours = (openingHours: OpeningHoursInput[]): IOpeningHours[] =>
-  assertValidOpeningHours(openingHours) as IOpeningHours[];
+const validateOpeningHours = (
+  openingHours: OpeningHoursInput[],
+): IOpeningHours[] => assertValidOpeningHours(openingHours) as IOpeningHours[];
 
 /**
  * Geo + name search for salons. Any combination of filters is allowed.
@@ -36,7 +46,7 @@ export async function searchSalons(params: {
   const query: Record<string, unknown> = {};
 
   if (params.name) {
-    query.name = { $regex: params.name, $options: 'i' };
+    query.name = { $regex: params.name, $options: "i" };
   }
   const gq = genderQuery(params.gender);
   if (gq !== undefined) {
@@ -64,7 +74,7 @@ export async function searchSalons(params: {
       address: s.address,
       location: s.location,
       status: s.status,
-      serviceGender: s.serviceGender ?? 'unisex',
+      serviceGender: s.serviceGender ?? "unisex",
       openingHours: s.openingHours,
     }));
 }
@@ -73,14 +83,16 @@ export async function searchSalons(params: {
 async function restrictedOwnerIds(
   ownerIds: (Types.ObjectId | null)[],
 ): Promise<Set<string>> {
-  const distinct = [...new Set(ownerIds.filter(Boolean).map((id) => String(id)))];
+  const distinct = [
+    ...new Set(ownerIds.filter(Boolean).map((id) => String(id))),
+  ];
   if (distinct.length === 0) return new Set();
   const owners = await User.find({
     _id: { $in: distinct },
     isForeignNational: true,
-    foreignApprovalStatus: { $ne: 'approved' },
+    foreignApprovalStatus: { $ne: "approved" },
   })
-    .select('_id')
+    .select("_id")
     .lean();
   return new Set(owners.map((u) => String(u._id)));
 }
@@ -107,8 +119,8 @@ export async function createOwnSalon(
     address: data.address,
     location: toGeoPoint(data.lng, data.lat),
     ownerId: new Types.ObjectId(userId),
-    status: 'active',
-    serviceGender: data.serviceGender ?? 'unisex',
+    status: "active",
+    serviceGender: data.serviceGender ?? "unisex",
     openingHours: validateOpeningHours(data.openingHours),
     createdBy: new Types.ObjectId(userId),
   });
@@ -116,17 +128,17 @@ export async function createOwnSalon(
   // The creator owns this salon AND works in it → grant the 'owner' role
   // (idempotent) so they get the full owner panel, and link them as an ACTIVE
   // member of their own salon (no self-approval needed).
-  await User.updateOne({ _id: userId }, { $addToSet: { roles: 'owner' } });
+  await User.updateOne({ _id: userId }, { $addToSet: { roles: "owner" } });
   await StylistSalon.updateOne(
     { stylistId: userId, salonId: salon._id },
-    { $setOnInsert: { status: 'active', requestedBy: 'stylist' } },
+    { $setOnInsert: { status: "active", requestedBy: "stylist" } },
     { upsert: true },
   );
 
   // Record the workplace type but do NOT advance onboarding here — the stylist
   // may add several workplaces; the step is finalized via completeWorkplaceStep.
   const profile = await ensureStylistProfile(userId);
-  profile.workplaceType = 'salon';
+  profile.workplaceType = "salon";
   await profile.save();
 
   return { salon, onboardingStep: profile.onboardingStep };
@@ -142,15 +154,15 @@ export async function createSalonInvite(
 ) {
   const draft = data.salonDraft;
   const salon = await Salon.create({
-    name: (draft.name as string) ?? 'Pending salon',
+    name: (draft.name as string) ?? "Pending salon",
     description: draft.description as string | undefined,
     address: draft.address as string | undefined,
     location:
-      typeof draft.lng === 'number' && typeof draft.lat === 'number'
+      typeof draft.lng === "number" && typeof draft.lat === "number"
         ? toGeoPoint(draft.lng as number, draft.lat as number)
         : undefined,
     ownerId: null,
-    status: 'pending',
+    status: "pending",
     openingHours: Array.isArray(draft.openingHours)
       ? validateOpeningHours(draft.openingHours as OpeningHoursInput[])
       : [],
@@ -166,7 +178,7 @@ export async function createSalonInvite(
     requestedBy: new Types.ObjectId(userId),
     salonId: salon._id,
     salonDraft: draft,
-    status: 'pending',
+    status: "pending",
     expiresAt: new Date(Date.now() + INVITE_TTL_MS),
     lastSentAt: new Date(),
   });
@@ -174,24 +186,27 @@ export async function createSalonInvite(
   // Stylist's membership stays pending until the owner accepts & approves.
   await StylistSalon.updateOne(
     { stylistId: userId, salonId: salon._id },
-    { $setOnInsert: { status: 'pending' } },
+    { $setOnInsert: { status: "pending" } },
     { upsert: true },
   );
 
   // Record the workplace type but do NOT advance onboarding — the stylist may
   // add several invites/salons; the step is finalized via completeWorkplaceStep.
   const profile = await ensureStylistProfile(userId);
-  profile.workplaceType = 'salon';
+  profile.workplaceType = "salon";
   await profile.save();
 
   // The invite link points to the FRONTEND page (/invite/:token), not the API.
+  // Kept clean (domain + token, no extra params) to reduce operator link-filtering.
   const inviteUrl = `${config.webBaseUrl}/invite/${token}`;
-  // Non-blocking SMS to the salon owner (stub provider just logs).
+  const salonName = (data.salonDraft?.name as string | undefined) ?? "";
+  const where = salonName ? `سالن «${salonName}»` : "سالن";
+  // Non-blocking SMS to the salon owner (the SmsLog records Success + MessageId
+  // so delivery of this link-bearing message is traceable).
   void smsProvider
-    .send(
-      data.targetPhone,
-      `از شما دعوت شده تا سالن خود را در شونه ثبت کنید. لینک دعوت: ${inviteUrl}`,
-    )
+    .send(data.targetPhone, `برای مدیریت ${where} در شونه دعوت شدی`, {
+      event: "salon_invite",
+    })
     .catch(() => {});
 
   return { salon, invite, inviteUrl, onboardingStep: profile.onboardingStep };
@@ -206,11 +221,21 @@ export async function createSalonInvite(
  * actually has at least one salon.
  */
 export async function findSalonsByOwnerPhone(phone: string) {
-  const owner = await User.findOne({ phone }).select('_id roles').lean();
-  if (!owner || !owner.roles.includes('owner')) {
-    return { found: false, salons: [] as { id: string; name: string; address?: string; status: string }[] };
+  const owner = await User.findOne({ phone }).select("_id roles").lean();
+  if (!owner || !owner.roles.includes("owner")) {
+    return {
+      found: false,
+      salons: [] as {
+        id: string;
+        name: string;
+        address?: string;
+        status: string;
+      }[],
+    };
   }
-  const salons = await Salon.find({ ownerId: owner._id }).sort({ createdAt: 1 }).lean();
+  const salons = await Salon.find({ ownerId: owner._id })
+    .sort({ createdAt: 1 })
+    .lean();
   return {
     found: salons.length > 0,
     salons: salons.map((s) => ({
@@ -242,7 +267,10 @@ export async function listOwnerSalons(ownerId: string) {
  * they proposed for THIS salon. Authorization (salon ownership) is enforced by
  * the requireSalonOwner middleware.
  */
-export async function listSalonStylists(salonId: string, status?: StylistSalonStatus) {
+export async function listSalonStylists(
+  salonId: string,
+  status?: StylistSalonStatus,
+) {
   const filter: Record<string, unknown> = { salonId };
   if (status) filter.status = status;
 
@@ -251,9 +279,11 @@ export async function listSalonStylists(salonId: string, status?: StylistSalonSt
 
   const [users, services, hours] = await Promise.all([
     User.find({ _id: { $in: stylistIds } })
-      .select('firstName lastName phone profilePhoto')
+      .select("firstName lastName phone profilePhoto")
       .lean(),
-    StylistService.find({ stylistId: { $in: stylistIds } }).populate('serviceId').lean(),
+    StylistService.find({ stylistId: { $in: stylistIds } })
+      .populate("serviceId")
+      .lean(),
     WorkingHour.find({ stylistId: { $in: stylistIds }, salonId }).lean(),
   ]);
 
@@ -278,10 +308,20 @@ export async function listSalonStylists(salonId: string, status?: StylistSalonSt
         : null,
       services: services
         .filter((s) => String(s.stylistId) === sid)
-        .map((s) => ({ id: String(s._id), service: s.serviceId, price: s.price, durationMin: s.durationMin })),
+        .map((s) => ({
+          id: String(s._id),
+          service: s.serviceId,
+          price: s.price,
+          durationMin: s.durationMin,
+        })),
       workingHours: hours
         .filter((h) => String(h.stylistId) === sid)
-        .map((h) => ({ id: String(h._id), dayOfWeek: h.dayOfWeek, start: h.start, end: h.end })),
+        .map((h) => ({
+          id: String(h._id),
+          dayOfWeek: h.dayOfWeek,
+          start: h.start,
+          end: h.end,
+        })),
     };
   });
 }
@@ -294,25 +334,27 @@ export async function approveStylist(salonId: string, stylistId: string) {
   const link = await StylistSalon.findOne({ salonId, stylistId });
   if (!link) {
     throw AppError.notFound(
-      'این متخصص درخواستی برای این سالن ثبت نکرده است',
-      'LINK_NOT_FOUND',
+      "این متخصص درخواستی برای این سالن ثبت نکرده است",
+      "LINK_NOT_FOUND",
     );
   }
-  if (link.status === 'active') {
-    throw AppError.conflict('این متخصص قبلاً تأیید شده است', 'ALREADY_ACTIVE');
+  if (link.status === "active") {
+    throw AppError.conflict("این متخصص قبلاً تأیید شده است", "ALREADY_ACTIVE");
   }
 
-  link.status = 'active';
+  link.status = "active";
   await link.save();
 
   // Notify the stylist their membership was approved (best-effort; never fails).
   void (async () => {
     const [stylist, salon] = await Promise.all([
-      User.findById(stylistId).select('phone').lean(),
-      Salon.findById(salonId).select('name').lean(),
+      User.findById(stylistId).select("phone").lean(),
+      Salon.findById(salonId).select("name").lean(),
     ]);
     if (stylist?.phone) {
-      void notificationService.salonMembershipApproved(stylist.phone, { salonName: salon?.name });
+      void notificationService.salonMembershipApproved(stylist.phone, {
+        salonName: salon?.name,
+      });
     }
   })();
 
@@ -329,18 +371,18 @@ export async function rejectStylist(salonId: string, stylistId: string) {
   const link = await StylistSalon.findOne({ salonId, stylistId });
   if (!link) {
     throw AppError.notFound(
-      'این متخصص درخواستی برای این سالن ثبت نکرده است',
-      'LINK_NOT_FOUND',
+      "این متخصص درخواستی برای این سالن ثبت نکرده است",
+      "LINK_NOT_FOUND",
     );
   }
 
-  link.status = 'rejected';
+  link.status = "rejected";
   await link.save();
 
   // Notify the stylist (best-effort; never fails the reject).
   const [stylist, salon] = await Promise.all([
-    User.findById(stylistId).select('phone').lean(),
-    Salon.findById(salonId).select('name').lean(),
+    User.findById(stylistId).select("phone").lean(),
+    Salon.findById(salonId).select("name").lean(),
   ]);
   if (stylist?.phone) {
     void notificationService
@@ -352,7 +394,7 @@ export async function rejectStylist(salonId: string, stylistId: string) {
   const affectedUpcomingReservations = await Reservation.countDocuments({
     salonId,
     stylistId,
-    status: { $in: ['pending', 'confirmed'] },
+    status: { $in: ["pending", "confirmed"] },
     startAt: { $gte: new Date() },
   });
 
@@ -365,39 +407,54 @@ export async function rejectStylist(salonId: string, stylistId: string) {
  * STYLIST must accept. Ownership of `salon` is pre-verified by requireSalonOwner.
  */
 export async function inviteStylistToSalon(salon: ISalon, stylistId: string) {
-  if (salon.status !== 'active') {
-    throw AppError.badRequest('فقط برای سالن فعال می‌توان متخصص دعوت کرد', 'SALON_NOT_ACTIVE');
+  if (salon.status !== "active") {
+    throw AppError.badRequest(
+      "فقط برای سالن فعال می‌توان متخصص دعوت کرد",
+      "SALON_NOT_ACTIVE",
+    );
   }
   if (String(salon.ownerId) === stylistId) {
-    throw AppError.badRequest('شما خودتان مالک این سالن هستید', 'OWNER_IS_STYLIST');
+    throw AppError.badRequest(
+      "شما خودتان مالک این سالن هستید",
+      "OWNER_IS_STYLIST",
+    );
   }
 
   const [target, profile] = await Promise.all([
-    User.findById(stylistId).select('phone roles').lean(),
-    StylistProfile.findOne({ userId: stylistId }).select('_id').lean(),
+    User.findById(stylistId).select("phone roles").lean(),
+    StylistProfile.findOne({ userId: stylistId }).select("_id").lean(),
   ]);
-  if (!target || !profile || !target.roles.includes('stylist')) {
-    throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  if (!target || !profile || !target.roles.includes("stylist")) {
+    throw AppError.notFound("متخصص یافت نشد", "STYLIST_NOT_FOUND");
   }
 
-  const existing = await StylistSalon.findOne({ stylistId, salonId: salon._id });
+  const existing = await StylistSalon.findOne({
+    stylistId,
+    salonId: salon._id,
+  });
   if (existing) {
-    if (existing.status === 'active') {
-      throw AppError.conflict('این متخصص از قبل عضو فعال سالن است', 'ALREADY_ACTIVE');
+    if (existing.status === "active") {
+      throw AppError.conflict(
+        "این متخصص از قبل عضو فعال سالن است",
+        "ALREADY_ACTIVE",
+      );
     }
-    if (existing.status === 'pending') {
-      throw AppError.conflict('برای این متخصص یک درخواست در انتظار وجود دارد', 'ALREADY_PENDING');
+    if (existing.status === "pending") {
+      throw AppError.conflict(
+        "برای این متخصص یک درخواست در انتظار وجود دارد",
+        "ALREADY_PENDING",
+      );
     }
     // Was rejected before → re-invite (owner-initiated, pending again).
-    existing.status = 'pending';
-    existing.requestedBy = 'owner';
+    existing.status = "pending";
+    existing.requestedBy = "owner";
     await existing.save();
   } else {
     await StylistSalon.create({
       stylistId: new Types.ObjectId(stylistId),
       salonId: salon._id,
-      status: 'pending',
-      requestedBy: 'owner',
+      status: "pending",
+      requestedBy: "owner",
     });
   }
 
@@ -407,23 +464,29 @@ export async function inviteStylistToSalon(salon: ISalon, stylistId: string) {
       .catch(() => undefined);
   }
 
-  return { stylistId, salonId: String(salon._id), status: 'pending' as const };
+  return { stylistId, salonId: String(salon._id), status: "pending" as const };
 }
 
 /** Active stylists matched by name — for an owner picking who to invite. */
 export async function searchStylistsForInvite(q: string) {
-  const profiles = await StylistProfile.find({ status: 'active' }).select('userId').lean();
+  const profiles = await StylistProfile.find({ status: "active" })
+    .select("userId")
+    .lean();
   const users = await User.find({ _id: { $in: profiles.map((p) => p.userId) } })
-    .select('firstName lastName profilePhoto')
+    .select("firstName lastName profilePhoto")
     .lean();
   const term = q.toLowerCase();
   return users
-    .filter((u) => `${u.firstName ?? ''} ${u.lastName ?? ''}`.toLowerCase().includes(term))
+    .filter((u) =>
+      `${u.firstName ?? ""} ${u.lastName ?? ""}`.toLowerCase().includes(term),
+    )
     .slice(0, 20)
     .map((u) => ({
       id: String(u._id),
-      fullName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || 'متخصص',
-      profilePhoto: u.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
+      fullName: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "متخصص",
+      profilePhoto: u.profilePhoto
+        ? storageProvider.getUrl(u.profilePhoto)
+        : null,
     }));
 }
 
@@ -431,19 +494,22 @@ export async function searchStylistsForInvite(q: string) {
  * Collaboration requests an OWNER sent to a stylist (requestedBy='owner'), which
  * the stylist must accept/reject. Scoped strictly to the requesting stylist.
  */
-export async function listStylistSalonRequests(stylistId: string, status?: StylistSalonStatus) {
-  const filter: Record<string, unknown> = { stylistId, requestedBy: 'owner' };
+export async function listStylistSalonRequests(
+  stylistId: string,
+  status?: StylistSalonStatus,
+) {
+  const filter: Record<string, unknown> = { stylistId, requestedBy: "owner" };
   if (status) filter.status = status;
 
   const links = await StylistSalon.find(filter)
-    .populate<{ salonId: ISalon }>('salonId')
+    .populate<{ salonId: ISalon }>("salonId")
     .sort({ createdAt: -1 });
 
   const ownerIds = links
     .map((l) => (l.salonId as unknown as ISalon | null)?.ownerId)
     .filter(Boolean) as Types.ObjectId[];
   const owners = await User.find({ _id: { $in: ownerIds } })
-    .select('firstName lastName')
+    .select("firstName lastName")
     .lean();
   const ownerById = new Map(owners.map((o) => [String(o._id), o]));
 
@@ -454,10 +520,17 @@ export async function listStylistSalonRequests(stylistId: string, status?: Styli
       id: String(link._id),
       status: link.status,
       salon: salon
-        ? { id: String(salon._id), name: salon.name, address: salon.address ?? null }
+        ? {
+            id: String(salon._id),
+            name: salon.name,
+            address: salon.address ?? null,
+          }
         : null,
       owner: owner
-        ? { firstName: owner.firstName ?? null, lastName: owner.lastName ?? null }
+        ? {
+            firstName: owner.firstName ?? null,
+            lastName: owner.lastName ?? null,
+          }
         : null,
       createdAt: link.createdAt,
     };
@@ -468,19 +541,22 @@ export async function listStylistSalonRequests(stylistId: string, status?: Styli
 export async function respondToSalonRequest(
   stylistId: string,
   requestId: string,
-  decision: 'accept' | 'reject',
+  decision: "accept" | "reject",
 ) {
   const link = await StylistSalon.findOne({
     _id: requestId,
     stylistId,
-    requestedBy: 'owner',
+    requestedBy: "owner",
   });
-  if (!link) throw AppError.notFound('درخواست یافت نشد', 'REQUEST_NOT_FOUND');
-  if (link.status !== 'pending') {
-    throw AppError.badRequest('این درخواست قبلاً پاسخ داده شده است', 'REQUEST_NOT_PENDING');
+  if (!link) throw AppError.notFound("درخواست یافت نشد", "REQUEST_NOT_FOUND");
+  if (link.status !== "pending") {
+    throw AppError.badRequest(
+      "این درخواست قبلاً پاسخ داده شده است",
+      "REQUEST_NOT_PENDING",
+    );
   }
 
-  link.status = decision === 'accept' ? 'active' : 'rejected';
+  link.status = decision === "accept" ? "active" : "rejected";
   await link.save();
   return { id: String(link._id), status: link.status };
 }
@@ -502,12 +578,13 @@ export async function updateSalon(
   },
 ): Promise<ISalon> {
   const salon = await Salon.findById(salonId);
-  if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
+  if (!salon) throw AppError.notFound("سالن یافت نشد", "SALON_NOT_FOUND");
 
   if (data.name !== undefined) salon.name = data.name;
   if (data.description !== undefined) salon.description = data.description;
   if (data.address !== undefined) salon.address = data.address;
-  if (data.serviceGender !== undefined) salon.serviceGender = data.serviceGender;
+  if (data.serviceGender !== undefined)
+    salon.serviceGender = data.serviceGender;
   if (data.lng !== undefined && data.lat !== undefined) {
     salon.location = toGeoPoint(data.lng, data.lat);
   }

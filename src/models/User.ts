@@ -31,6 +31,8 @@ export interface IUser extends Document {
   roles: Role[];
   /** When false the account is disabled (cannot authenticate). Admin-managed. */
   isActive: boolean;
+  /** Why an admin suspended the account (shown to support; set when isActive=false). */
+  suspendedReason?: string | null;
   firstName?: string;
   lastName?: string;
   nationalCode?: string;
@@ -57,6 +59,7 @@ const userSchema = new Schema<IUser>(
       default: [],
     },
     isActive: { type: Boolean, default: true, index: true },
+    suspendedReason: { type: String, default: null },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     nationalCode: { type: String, trim: true },

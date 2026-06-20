@@ -22,8 +22,26 @@ export async function getUser(req: Request, res: Response): Promise<void> {
 }
 
 export async function setUserStatus(req: Request, res: Response): Promise<void> {
-  const result = await service.setUserStatus(req.user!.id, req.params.id, req.body.isActive);
+  const result = await service.setUserStatus(
+    req.user!.id,
+    req.params.id,
+    req.body.isActive,
+    req.body?.reason,
+  );
   sendSuccess(res, result);
+}
+
+export async function smsLogs(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string>;
+  sendSuccess(
+    res,
+    await service.listSmsLogs({
+      event: q.event,
+      success: q.success as 'true' | 'false' | undefined,
+      page: Number(q.page),
+      limit: Number(q.limit),
+    }),
+  );
 }
 
 // ── Foreign-national approvals ──

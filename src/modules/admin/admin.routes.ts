@@ -21,6 +21,7 @@ import {
   stylistDocumentSchema,
   listForeignApprovalsSchema,
   rejectForeignSchema,
+  listSmsLogsSchema,
 } from './admin.validators';
 
 /**
@@ -43,6 +44,7 @@ adminRouter.get('/foreign-approvals', validate(listForeignApprovalsSchema), asyn
 // Stream a stylist's national-ID image for review (admin-only; private).
 adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema), asyncHandler(controller.getStylistDocument));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
+adminRouter.get('/sms-logs', validate(listSmsLogsSchema), asyncHandler(controller.smsLogs));
 
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));

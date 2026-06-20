@@ -23,7 +23,19 @@ export const listUsersSchema = {
 
 export const setUserStatusSchema = {
   params: z.object({ id: objectId }),
-  body: z.object({ isActive: z.boolean() }),
+  body: z.object({
+    isActive: z.boolean(),
+    // Optional reason when suspending (isActive=false); stored + audited.
+    reason: z.string().trim().max(500).optional(),
+  }),
+};
+
+export const listSmsLogsSchema = {
+  query: z.object({
+    event: z.string().trim().max(60).optional(),
+    success: z.enum(['true', 'false']).optional(),
+    ...pageQuery,
+  }),
 };
 
 export const listReservationsSchema = {
