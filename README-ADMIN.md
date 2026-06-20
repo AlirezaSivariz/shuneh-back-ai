@@ -25,7 +25,7 @@ ADMIN_PHONE=09120000001
 npm run seed:admin
 
 # روش ب) دادن شماره به‌صورت آرگومان (بدون نیاز به env)
-npm run seed:admin -- 09120000001
+npm run seed:admin -- 09369921986
 ```
 
 خروجی موفق:
@@ -53,7 +53,10 @@ curl -X POST http://localhost:4000/auth/otp/request \
 پاسخ (dev):
 
 ```json
-{ "success": true, "data": { "phone": "09120000001", "expiresAt": "…", "devCode": "123456" } }
+{
+  "success": true,
+  "data": { "phone": "09120000001", "expiresAt": "…", "devCode": "123456" }
+}
 ```
 
 ### ۲) تأیید کد و گرفتن توکن
@@ -67,10 +70,13 @@ curl -X POST http://localhost:4000/auth/otp/verify \
 پاسخ شامل `tokens.accessToken` و `user.roles` خواهد بود:
 
 ```json
-{ "success": true, "data": {
-  "user": { "id": "…", "phone": "09120000001", "roles": ["admin"] },
-  "tokens": { "accessToken": "eyJ…", "refreshToken": "…" }
-} }
+{
+  "success": true,
+  "data": {
+    "user": { "id": "…", "phone": "09120000001", "roles": ["admin"] },
+    "tokens": { "accessToken": "eyJ…", "refreshToken": "…" }
+  }
+}
 ```
 
 ### ۳) فراخوانی endpointهای ادمین با توکن
@@ -86,18 +92,18 @@ curl http://localhost:4000/admin/reports \
 
 نمونه endpointهای ادمین (همه زیر `requireAdmin`):
 
-| متد | مسیر | کار |
-|-----|------|-----|
-| GET | `/admin/reports` | آمار کلی پلتفرم |
-| GET | `/admin/users?search=&role=&page=` | لیست کاربران |
-| GET | `/admin/users/:id` | جزئیات کاربر |
-| GET | `/admin/reservations?status=&from=&to=&page=` | لیست رزروها |
-| GET | `/admin/reservations/:id` | جزئیات رزرو |
-| GET | `/admin/salons` ، `/admin/stylists` | سالن‌ها / متخصص‌ها |
-| GET | `/admin/audit-logs` | لاگ اقدامات ادمین |
-| PATCH | `/admin/users/:id/status` | فعال/غیرفعال‌سازی کاربر |
-| POST | `/admin/reservations/:id/cancel` | لغو رزرو توسط پشتیبانی |
-| POST | `/admin/stylists/:id/promote` ، `/unpromote` | مدیریت پروموشن |
+| متد   | مسیر                                          | کار                     |
+| ----- | --------------------------------------------- | ----------------------- |
+| GET   | `/admin/reports`                              | آمار کلی پلتفرم         |
+| GET   | `/admin/users?search=&role=&page=`            | لیست کاربران            |
+| GET   | `/admin/users/:id`                            | جزئیات کاربر            |
+| GET   | `/admin/reservations?status=&from=&to=&page=` | لیست رزروها             |
+| GET   | `/admin/reservations/:id`                     | جزئیات رزرو             |
+| GET   | `/admin/salons` ، `/admin/stylists`           | سالن‌ها / متخصص‌ها      |
+| GET   | `/admin/audit-logs`                           | لاگ اقدامات ادمین       |
+| PATCH | `/admin/users/:id/status`                     | فعال/غیرفعال‌سازی کاربر |
+| POST  | `/admin/reservations/:id/cancel`              | لغو رزرو توسط پشتیبانی  |
+| POST  | `/admin/stylists/:id/promote` ، `/unpromote`  | مدیریت پروموشن          |
 
 > هر کاربر غیرادمین این مسیرها را با `403 ADMIN_ONLY` و کاربر بدون توکن با `401` می‌گیرد.
 

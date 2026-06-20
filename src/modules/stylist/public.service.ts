@@ -18,6 +18,7 @@ import { storageProvider } from '../../utils/storage';
 import { Interval } from '../../utils/time';
 import { buildSlots, iranNow, WorkingInterval } from '../../utils/slots';
 import { getBookability, getBookabilityMap } from './bookability';
+import { clipToOpeningHours } from './hoursReconcile';
 
 /** Effective price/duration: stylist override falls back to the service default. */
 export function effectivePrice(override: number | null, svc: IService): number {
@@ -387,14 +388,17 @@ export async function getAvailability(
       const salon = h.salonId as unknown as ISalon | null;
       return salon ? activeSalonSet.has(String(salon._id)) : book.freelance;
     })
-    .map((h) => {
+    .flatMap((h) => {
       const salon = h.salonId as unknown as ISalon | null;
-      return {
-        start: h.start,
-        end: h.end,
-        salonId: salon ? String(salon._id) : null,
-        salon: salon ? { id: String(salon._id), name: salon.name } : null,
-      };
+      const salonId = salon ? String(salon._id) : null;
+      const label = salon ? { id: salonId as string, name: salon.name } : null;
+      // Re-validate against the salon's CURRENT opening hours: clip salon-bound
+      // intervals so a later narrowing of the salon's hours never surfaces (or
+      // lets anyone book) an out-of-hours slot. Freelance intervals pass through.
+      const parts = salon
+        ? clipToOpeningHours({ start: h.start, end: h.end }, dayOfWeek, salon.openingHours)
+        : [{ start: h.start, end: h.end }];
+      return parts.map((p) => ({ start: p.start, end: p.end, salonId, salon: label }));
     });
 
   // Already-booked intervals for the day (pending/confirmed block the slot).
@@ -466,14 +470,24 @@ export async function getAvailableDays(
   // Only ACTIVE workplaces produce bookable days.
   const activeSalonSet = new Set(book.activeSalonIds);
 
+  // Current opening hours of the active salons, to clip stale stylist hours
+  // (same re-validation as getAvailability — narrowed salon hours never leak).
+  const salonDocs = book.activeSalonIds.length
+    ? await Salon.find({ _id: { $in: book.activeSalonIds } }).select('openingHours').lean()
+    : [];
+  const openingBySalon = new Map(salonDocs.map((s) => [String(s._id), s.openingHours ?? []]));
+
   // Bulk-load working hours grouped by weekday.
   const hours = await WorkingHour.find({ stylistId }).lean();
   const workingByDay = new Map<number, WorkingInterval[]>();
   for (const h of hours) {
     const salonId = h.salonId ? String(h.salonId) : null;
     if (salonId ? !activeSalonSet.has(salonId) : !book.freelance) continue;
+    const parts = salonId
+      ? clipToOpeningHours({ start: h.start, end: h.end }, h.dayOfWeek, openingBySalon.get(salonId))
+      : [{ start: h.start, end: h.end }];
     const list = workingByDay.get(h.dayOfWeek) ?? [];
-    list.push({ start: h.start, end: h.end, salonId, salon: null });
+    for (const p of parts) list.push({ start: p.start, end: p.end, salonId, salon: null });
     workingByDay.set(h.dayOfWeek, list);
   }
 

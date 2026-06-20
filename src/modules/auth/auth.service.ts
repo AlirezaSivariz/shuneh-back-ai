@@ -1,15 +1,11 @@
 import { nanoid } from 'nanoid';
-import { Otp } from '../../models/Otp';
 import { User, IUser } from '../../models/User';
 import { RefreshToken } from '../../models/RefreshToken';
-import { generateOtp, otpExpiry } from '../../utils/otp';
 import { smsProvider } from '../../utils/sms';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt';
 import { AppError } from '../../utils/AppError';
 import { durationToMs } from '../../utils/duration';
 import { config } from '../../config/env';
-
-const MAX_OTP_ATTEMPTS = 5;
 
 export interface TokenPair {
   accessToken: string;
@@ -19,61 +15,58 @@ export interface TokenPair {
 export interface RequestOtpResult {
   phone: string;
   expiresAt: Date;
-  /** Echoed back only in development for convenience. */
+  /** Echoed back only by the dev stub for convenience. */
   devCode?: string;
 }
 
 /**
- * Create and store an OTP for a phone number. In development the fixed code is
- * returned to the caller; in production it is only sent via SMS.
+ * Ask the SMS gateway to send a verification code. The gateway owns generation +
+ * delivery (and later verification) — we don't store or compare codes ourselves.
  */
 export async function requestOtp(phone: string): Promise<RequestOtpResult> {
-  const code = generateOtp();
-  const expiresAt = otpExpiry();
-
-  // Invalidate any previous unused OTPs for this phone.
-  await Otp.updateMany({ phone, used: false }, { used: true });
-  await Otp.create({ phone, code, expiresAt, attempts: 0, used: false });
-
-  await smsProvider.send(phone, `Your verification code is ${code}`);
-
+  let result: { devCode?: string };
+  try {
+    result = await smsProvider.sendOtp(phone);
+  } catch (err) {
+    // Never crash the request — surface a clear, retryable error to the user, but
+    // always log the gateway's REAL reason, and (outside production) echo it back
+    // in `details` so it's visible without digging through logs.
+    const reason = (err as Error).message;
+    // eslint-disable-next-line no-console
+    console.error('[otp] send failed:', reason);
+    throw AppError.badRequest(
+      'ارسال پیامک کد ناموفق بود. لطفاً دوباره تلاش کن.',
+      'SMS_SEND_FAILED',
+      config.isDev ? { reason } : undefined,
+    );
+  }
+  // Nominal expiry for the client countdown (the gateway enforces real expiry).
   return {
     phone,
-    expiresAt,
-    ...(config.isDev ? { devCode: code } : {}),
+    expiresAt: new Date(Date.now() + config.otpTtl * 1000),
+    ...(result.devCode ? { devCode: result.devCode } : {}),
   };
 }
 
 /**
- * Verify an OTP, creating the user if needed, and issue a fresh token pair.
+ * Verify a code via the gateway. On success, create the user if needed and issue
+ * a fresh token pair. The gateway enforces expiry / attempts / single-use.
  */
 export async function verifyOtp(
   phone: string,
   code: string,
 ): Promise<{ user: IUser; tokens: TokenPair; isNewUser: boolean }> {
-  const otp = await Otp.findOne({ phone, used: false }).sort({ createdAt: -1 });
-  if (!otp) throw AppError.badRequest('No active OTP for this phone', 'OTP_NOT_FOUND');
-
-  if (otp.expiresAt.getTime() < Date.now()) {
-    otp.used = true;
-    await otp.save();
-    throw AppError.badRequest('OTP has expired', 'OTP_EXPIRED');
+  let valid: boolean;
+  try {
+    valid = await smsProvider.verifyOtp(phone, code);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[otp] verify failed:', (err as Error).message);
+    throw AppError.badRequest('بررسی کد ناموفق بود. لطفاً دوباره تلاش کن.', 'OTP_VERIFY_FAILED');
   }
-
-  if (otp.attempts >= MAX_OTP_ATTEMPTS) {
-    otp.used = true;
-    await otp.save();
-    throw AppError.badRequest('Too many attempts, request a new code', 'OTP_TOO_MANY_ATTEMPTS');
+  if (!valid) {
+    throw AppError.badRequest('کد واردشده نادرست یا منقضی شده است.', 'OTP_INCORRECT');
   }
-
-  if (otp.code !== code) {
-    otp.attempts += 1;
-    await otp.save();
-    throw AppError.badRequest('Incorrect OTP code', 'OTP_INCORRECT');
-  }
-
-  otp.used = true;
-  await otp.save();
 
   let user = await User.findOne({ phone });
   let isNewUser = false;

@@ -19,6 +19,7 @@ import { storageProvider } from '../../utils/storage';
 import { smsProvider } from '../../utils/sms';
 import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveActiveSalons } from '../stylist/bookability';
+import { affectedReservationIds } from '../stylist/hoursReconcile';
 import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
 import { config } from '../../config/env';
 import { Tip } from '../../models/Tip';
@@ -272,7 +273,14 @@ export async function listStylistReservations(stylistId: string, filter: Filter)
   const reservations = await Reservation.find(filterQuery({ stylistId }, filter)).sort({
     startAt: filter === 'past' ? -1 : 1,
   });
-  return Promise.all(reservations.map((r) => serializeReservation(r, 'stylist')));
+  // Flag future reservations that an hours change pushed outside the stylist's
+  // current working hours (computed once for the whole list).
+  const affected = await affectedReservationIds(stylistId);
+  return Promise.all(
+    reservations.map((r) =>
+      serializeReservation(r, 'stylist', { outOfHours: affected.has(String(r._id)) }),
+    ),
+  );
 }
 
 export async function getReservation(userId: string, reservationId: string) {
@@ -645,7 +653,11 @@ export async function getQuickRebookSuggestions(customerId: string) {
 }
 
 /** Build the public reservation DTO, enriching with service/stylist/salon info. */
-async function serializeReservation(r: IReservation, viewer: 'customer' | 'stylist' = 'customer') {
+async function serializeReservation(
+  r: IReservation,
+  viewer: 'customer' | 'stylist' = 'customer',
+  extra: { outOfHours?: boolean } = {},
+) {
   const ids = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
   const [services, stylist, customer, salon, tip] = await Promise.all([
     Service.find({ _id: { $in: ids } }).select('name durationMin').lean(),
@@ -708,6 +720,12 @@ async function serializeReservation(r: IReservation, viewer: 'customer' | 'styli
       at: h.at,
     })),
     tip: tip ? { amount: tip.amount, status: tip.status } : null,
+    /**
+     * For the stylist view: this future reservation no longer falls inside the
+     * stylist's current (post-change) working hours. It is NOT cancelled — the
+     * panel marks it so the stylist can reschedule / fix their hours.
+     */
+    outOfHours: extra.outOfHours ?? false,
     canCancel:
       ['pending', 'confirmed'].includes(r.status) &&
       r.startAt.getTime() - Date.now() >= CANCEL_WINDOW_MS,

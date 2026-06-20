@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "seed": "ts-node-dev --transpile-only src/seed/index.ts",
     "seed:admin": "ts-node-dev --transpile-only src/seed/admin.ts",
+    "diag:limosms": "ts-node-dev --transpile-only src/scripts/limosmsDiagnose.ts",
     "test": "jest --runInBand",
     "test:coverage": "jest --coverage --runInBand"
   },

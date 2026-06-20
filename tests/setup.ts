@@ -8,10 +8,14 @@ delete process.env.MONGODB_URI;
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
-// Silence the SMS gateway (NotificationService delegates to it). Keeps test
-// output clean and removes any external dependency.
+// Mock the SMS gateway: no external calls. OTP uses a fixed code (123456) so the
+// existing auth tests keep working; generic send is a no-op.
 jest.mock("../src/utils/sms", () => ({
-  smsProvider: { send: jest.fn().mockResolvedValue(undefined) },
+  smsProvider: {
+    send: jest.fn().mockResolvedValue(undefined),
+    sendOtp: jest.fn().mockResolvedValue({ devCode: "123456" }),
+    verifyOtp: jest.fn(async (_phone: string, code: string) => code === "123456"),
+  },
 }));
 
 // Silence the HTTP request logger (morgan) during tests.

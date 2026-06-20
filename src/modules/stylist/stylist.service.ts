@@ -18,6 +18,7 @@ import {
   advanceStep,
   getStylistProfile,
 } from '../onboarding/onboarding.service';
+import { reconcileStylistHours } from './hoursReconcile';
 
 interface ServiceItem {
   serviceId: string;
@@ -437,6 +438,10 @@ export async function setWorkingHours(stylistId: string, entries: WorkingHourEnt
   const profile = await ensureStylistProfile(stylistId);
   await advanceStep(profile, 'workingHours');
 
+  // Hours just changed → re-check future reservations (never cancels; flags +
+  // warns if any now fall outside the new hours, and clears the flag if not).
+  await reconcileStylistHours(stylistId);
+
   return getWorkingHours(stylistId);
 }
 
@@ -519,6 +524,8 @@ export async function updateWorkingHour(
   current.end = merged.end;
   await current.save();
 
+  await reconcileStylistHours(stylistId);
+
   return getWorkingHours(stylistId);
 }
 
@@ -528,6 +535,9 @@ export async function deleteWorkingHour(stylistId: string, workingHourId: string
   if (result.deletedCount === 0) {
     throw AppError.notFound('Working-hours entry not found', 'WORKING_HOUR_NOT_FOUND');
   }
+
+  await reconcileStylistHours(stylistId);
+
   return getWorkingHours(stylistId);
 }
 

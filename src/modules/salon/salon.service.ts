@@ -16,6 +16,7 @@ import { smsProvider } from '../../utils/sms';
 import { notificationService } from '../../utils/notification';
 import { config } from '../../config/env';
 import { ensureStylistProfile } from '../onboarding/onboarding.service';
+import { reconcileSalonHoursChange } from '../stylist/hoursReconcile';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -468,10 +469,19 @@ export async function updateSalon(
   if (data.lng !== undefined && data.lat !== undefined) {
     salon.location = toGeoPoint(data.lng, data.lat);
   }
+  const openingHoursChanged = data.openingHours !== undefined;
   if (data.openingHours !== undefined) {
     salon.openingHours = validateOpeningHours(data.openingHours);
   }
 
   await salon.save();
+
+  // Changing opening hours can push existing future reservations of the salon's
+  // stylists outside their (now-clipped) working hours. Never auto-cancel — flag
+  // & warn the affected stylists so they reconcile.
+  if (openingHoursChanged) {
+    await reconcileSalonHoursChange(salonId);
+  }
+
   return salon;
 }

@@ -43,4 +43,11 @@ const userSchema = new Schema<IUser>(
   { timestamps: true },
 );
 
+// A national code identifies one account. Partial index so the many users who
+// have NOT set a national code yet (field absent) don't collide on null.
+userSchema.index(
+  { nationalCode: 1 },
+  { unique: true, partialFilterExpression: { nationalCode: { $type: 'string' } } },
+);
+
 export const User = model<IUser>('User', userSchema);

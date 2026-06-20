@@ -1,5 +1,4 @@
 export * from './User';
-export * from './Otp';
 export * from './RefreshToken';
 export * from './StylistProfile';
 export * from './ServiceCategory';

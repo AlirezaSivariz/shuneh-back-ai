@@ -14,6 +14,13 @@ export function toMinutes(value: string): number {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+/** "HH:mm" for a minute-of-day value. */
+export function toHHmm(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 export interface Interval {
   start: string; // HH:mm
   end: string; // HH:mm
@@ -35,4 +42,11 @@ export function contains(outer: Interval, inner: Interval): boolean {
     toMinutes(inner.start) >= toMinutes(outer.start) &&
     toMinutes(inner.end) <= toMinutes(outer.end)
   );
+}
+
+/** The overlapping portion of two intervals, or null when they don't overlap. */
+export function intersect(a: Interval, b: Interval): Interval | null {
+  const start = Math.max(toMinutes(a.start), toMinutes(b.start));
+  const end = Math.min(toMinutes(a.end), toMinutes(b.end));
+  return start < end ? { start: toHHmm(start), end: toHHmm(end) } : null;
 }

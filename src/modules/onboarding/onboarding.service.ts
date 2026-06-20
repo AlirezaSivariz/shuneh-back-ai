@@ -88,6 +88,12 @@ export async function getOnboardingState(userId: string) {
       ])
     : [[], [], []];
 
+  // Salons this user OWNS (independent of any stylist membership) — lets the
+  // owner onboarding flow know whether the "create first salon" step is done.
+  const ownedSalonsCount = user.roles.includes('owner')
+    ? await Salon.countDocuments({ ownerId: userId })
+    : 0;
+
   return {
     user: {
       id: String(user._id),
@@ -118,6 +124,7 @@ export async function getOnboardingState(userId: string) {
     portfolio: profile?.portfolio ?? [],
     services,
     salons: salonLinks,
+    ownedSalonsCount,
     workingHours,
   };
 }
@@ -144,7 +151,7 @@ export async function getUserState(userId: string) {
   const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
     isStylist
       ? StylistProfile.findOne({ userId })
-          .select('onboardingStep status workplaceType freelance isAcceptingReservations')
+          .select('onboardingStep status workplaceType freelance isAcceptingReservations needsHoursUpdate')
           .lean()
       : Promise.resolve(null),
     user.roles.includes('owner') ? Salon.countDocuments({ ownerId: userId }) : Promise.resolve(0),
@@ -159,6 +166,7 @@ export async function getUserState(userId: string) {
         status: string;
         bookable: boolean;
         bookableReason: string | null;
+        needsHoursUpdate: boolean;
       }
     | null = null;
   if (stylistProfile) {
@@ -171,6 +179,8 @@ export async function getUserState(userId: string) {
       status: stylistProfile.status,
       bookable: book?.bookable ?? false,
       bookableReason: book?.reason ?? null,
+      // Hours change left future reservations out-of-hours → panel shows a banner.
+      needsHoursUpdate: stylistProfile.needsHoursUpdate ?? false,
     };
   }
 
@@ -210,11 +220,26 @@ export async function updatePersonal(
   const user = await User.findById(userId);
   if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
 
+  // A national code may belong to exactly one account.
+  const nationalCode = data.nationalCode.trim();
+  const dup = await User.findOne({ nationalCode, _id: { $ne: user._id } }).select('_id').lean();
+  if (dup) {
+    throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+  }
+
   user.firstName = data.firstName;
   user.lastName = data.lastName;
-  user.nationalCode = data.nationalCode;
+  user.nationalCode = nationalCode;
   user.birthDate = data.birthDate;
-  await user.save();
+  try {
+    await user.save();
+  } catch (err) {
+    // Safety net for the unique index (concurrent writes).
+    if ((err as { code?: number }).code === 11000) {
+      throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+    }
+    throw err;
+  }
 
   if (user.roles.includes('stylist')) {
     const profile = await ensureStylistProfile(userId);

@@ -63,6 +63,12 @@ export interface AppConfig {
   internalApiKey?: string;
   /** Phone of the bootstrap admin (used by the admin seed script only). */
   adminPhone?: string;
+  /** SMS gateway: 'stub' (console log) | 'limosms' (real). */
+  smsDriver: 'stub' | 'limosms';
+  /** LimoSMS API key (only read from env; never hardcoded). */
+  limoSmsApiKey?: string;
+  /** Footer/brand suffix sent with LimoSMS messages. */
+  limoSmsFooter: string;
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -92,4 +98,7 @@ export const config: AppConfig = {
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),
   internalApiKey: process.env.INTERNAL_API_KEY || undefined,
   adminPhone: process.env.ADMIN_PHONE || undefined,
+  smsDriver: (process.env.SMS_DRIVER || 'stub').toLowerCase() as AppConfig['smsDriver'],
+  limoSmsApiKey: process.env.LIMOSMS_API_KEY || undefined,
+  limoSmsFooter: process.env.LIMOSMS_FOOTER || 'شونه',
 };

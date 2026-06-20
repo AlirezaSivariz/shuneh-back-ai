@@ -42,6 +42,14 @@ export interface IStylistProfile extends Document {
    * touching existing reservations.
    */
   isAcceptingReservations: boolean;
+  /**
+   * Raised when a working-hours / salon opening-hours change left one or more
+   * FUTURE reservations falling outside the stylist's current effective hours.
+   * Existing reservations are never auto-cancelled (the commitment stands); this
+   * flag tells the panel to surface a banner so the stylist reconciles them.
+   * Cleared automatically once no future reservation is out-of-hours.
+   */
+  needsHoursUpdate: boolean;
   /** Aggregate rating, updated incrementally on each new review. */
   ratingAverage: number;
   ratingCount: number;
@@ -99,6 +107,9 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     onboardingStep: { type: String, enum: ONBOARDING_STEPS, default: 'role' },
     status: { type: String, enum: ['draft', 'active'], default: 'draft' },
     isAcceptingReservations: { type: Boolean, default: true },
+    // Raised when an hours change orphaned future reservations (default keeps
+    // existing docs valid).
+    needsHoursUpdate: { type: Boolean, default: false },
     // Ratings (defaults keep existing docs valid).
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
     ratingCount: { type: Number, default: 0, min: 0 },

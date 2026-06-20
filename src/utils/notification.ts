@@ -22,6 +22,11 @@ export interface NotificationService {
   salonMembershipRejected(phone: string, info: { salonName?: string }): Promise<void>;
   /** Tell a stylist that a salon owner invited them to work there. */
   salonInviteFromOwner(phone: string, info: { salonName?: string }): Promise<void>;
+  /**
+   * Warn a stylist that an hours change left some future reservations outside
+   * their current working hours and need their attention (no auto-cancel).
+   */
+  workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string) {
@@ -73,6 +78,13 @@ class StubNotificationService implements NotificationService {
   async salonInviteFromOwner(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` سالن «${info.salonName}»` : ' یک سالن';
     await safeSend(phone, `صاحب${where} از تو دعوت کرده تا در آن همکاری کنی. در پنل شونه آن را ببین.`);
+  }
+
+  async workingHoursNeedReview(phone: string, info: { count: number }) {
+    await safeSend(
+      phone,
+      `با تغییر ساعت کاری، ${info.count} نوبت آینده‌ی شما خارج از ساعت کاری فعلی قرار گرفت. این نوبت‌ها لغو نشده‌اند؛ لطفاً در پنل شونه بررسی و ساعت کاری را به‌روزرسانی کنید.`,
+    );
   }
 }
 
