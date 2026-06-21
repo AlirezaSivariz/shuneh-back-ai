@@ -47,20 +47,13 @@ export async function seedServiceCatalogue(): Promise<{ categories: number; serv
 }
 
 /**
- * Auto-seed used on server startup: only seeds when the catalogue is empty,
- * so existing/customized data is never touched.
+ * Auto-seed on server startup. The upsert is idempotent (match by slug /
+ * (categoryId, name)), so this runs on EVERY boot to make sure the full default
+ * catalogue is present — including categories/services added later — WITHOUT
+ * ever creating duplicates. Stylist-created custom services are untouched.
  */
 export async function autoSeedIfEmpty(): Promise<void> {
-  const existing = await ServiceCategory.estimatedDocumentCount();
-  if (existing > 0) {
-    // eslint-disable-next-line no-console
-    console.log(`[seed] catalogue present (${existing} categories) — skipping auto-seed`);
-    return;
-  }
-
-  // eslint-disable-next-line no-console
-  console.log('[seed] empty catalogue detected — running auto-seed');
   const result = await seedServiceCatalogue();
   // eslint-disable-next-line no-console
-  console.log(`[seed] auto-seed done: ${result.categories} categories, ${result.services} services`);
+  console.log(`[seed] catalogue ensured: ${result.categories} categories, ${result.services} services`);
 }

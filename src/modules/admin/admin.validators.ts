@@ -37,9 +37,37 @@ export const listReviewsSchema = {
   }),
 };
 
+// An optional admin note to the user, delivered as an in-app message.
+const adminMessage = z.string().trim().max(2000).optional();
+
 export const rejectReviewSchema = {
   params: z.object({ id: objectId }),
-  body: z.object({ reason: z.string().trim().max(500).optional() }),
+  body: z.object({ reason: z.string().trim().max(500).optional(), message: adminMessage }),
+};
+
+// Shared shape for an approve-style action that may carry an optional admin note.
+export const idWithMessageSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ message: adminMessage }).optional(),
+};
+
+export const sendMessageSchema = {
+  body: z.object({
+    recipientId: objectId,
+    title: z.string().trim().max(120).optional(),
+    body: z.string().trim().min(1, 'متن پیام الزامی است').max(2000),
+    relatedType: z.string().trim().max(60).optional(),
+  }),
+};
+
+export const deleteImageSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ message: adminMessage }).optional(),
+};
+
+export const deletePortfolioImageSchema = {
+  params: z.object({ id: objectId, imageId: z.string().trim().min(1) }),
+  body: z.object({ message: adminMessage }).optional(),
 };
 
 export const listSmsLogsSchema = {
@@ -108,7 +136,7 @@ export const listVerificationsSchema = {
 
 export const rejectVerificationSchema = {
   params: z.object({ id: objectId }),
-  body: z.object({ reason: z.string().trim().max(500).optional() }),
+  body: z.object({ reason: z.string().trim().max(500).optional(), message: adminMessage }),
 };
 
 export const listForeignApprovalsSchema = {
@@ -120,7 +148,7 @@ export const listForeignApprovalsSchema = {
 
 export const rejectForeignSchema = {
   params: z.object({ id: objectId }),
-  body: z.object({ reason: z.string().trim().max(500).optional() }),
+  body: z.object({ reason: z.string().trim().max(500).optional(), message: adminMessage }),
 };
 
 export const stylistDocumentSchema = {

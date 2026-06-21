@@ -22,8 +22,6 @@ export interface NotificationService {
   ): Promise<void>;
   /** Invite the customer to review + tip after a completed service. */
   serviceCompleted(phone: string, info: { link: string }): Promise<void>;
-  verificationApproved(phone: string): Promise<void>;
-  verificationRejected(phone: string, info: { reason?: string }): Promise<void>;
   /** Tell a stylist their request to join a salon was declined by the owner. */
   salonMembershipRejected(phone: string, info: { salonName?: string }): Promise<void>;
   /** Tell a stylist their request to join a salon was APPROVED by the owner. */
@@ -35,10 +33,6 @@ export interface NotificationService {
    * their current working hours and need their attention (no auto-cancel).
    */
   workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
-  /** Tell a foreign-national user the result of their account approval review. */
-  foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
-  /** Tell a review's author whether it was approved or rejected by an admin. */
-  reviewModerated(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -92,23 +86,6 @@ class SmsNotificationService implements NotificationService {
     );
   }
 
-  async verificationApproved(phone: string) {
-    await safeSend(
-      phone,
-      'تبریک! پروفایل شما تأیید شد و نشان تأیید (تیک آبی) فعال شد. ✅',
-      'verification',
-    );
-  }
-
-  async verificationRejected(phone: string, info: { reason?: string }) {
-    const reason = info.reason ? ` علت: ${info.reason}` : '';
-    await safeSend(
-      phone,
-      `درخواست تأیید پروفایل شما رد شد.${reason} می‌توانید پس از اصلاح، دوباره ارسال کنید.`,
-      'verification',
-    );
-  }
-
   async salonMembershipRejected(phone: string, info: { salonName?: string }) {
     const where = info.salonName ? ` در سالن «${info.salonName}»` : '';
     await safeSend(phone, `درخواست عضویت تو${where} پذیرفته نشد.`, 'salon_membership');
@@ -136,27 +113,6 @@ class SmsNotificationService implements NotificationService {
     );
   }
 
-  async foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }) {
-    if (info.approved) {
-      await safeSend(
-        phone,
-        'حساب شما توسط پشتیبانی تأیید شد و اکنون فعال است. ✅',
-        'foreign_approval',
-      );
-    } else {
-      const reason = info.reason ? ` علت: ${info.reason}` : '';
-      await safeSend(phone, `درخواست تأیید حساب شما رد شد.${reason}`, 'foreign_approval');
-    }
-  }
-
-  async reviewModerated(phone: string, info: { approved: boolean; reason?: string }) {
-    if (info.approved) {
-      await safeSend(phone, 'نظر شما تأیید شد و در پروفایل متخصص نمایش داده می‌شود. ✅', 'review_moderation');
-    } else {
-      const reason = info.reason ? ` علت: ${info.reason}` : '';
-      await safeSend(phone, `نظر شما تأیید نشد.${reason}`, 'review_moderation');
-    }
-  }
 }
 
 export const notificationService: NotificationService = new SmsNotificationService();

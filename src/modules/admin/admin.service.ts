@@ -19,6 +19,7 @@ import { AuditLog } from '../../models/AuditLog';
 import { SmsLog } from '../../models/SmsLog';
 import { Review } from '../../models/Review';
 import { recomputeStylistRating, VISIBLE_REVIEW_FILTER } from '../review/review.service';
+import { createMessage } from '../message/message.service';
 import { AppError } from '../../utils/AppError';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
@@ -75,6 +76,27 @@ async function audit(
     });
   } catch {
     /* auditing must not break the action */
+  }
+}
+
+/**
+ * Create an in-app message for a user IF the admin provided text. Used by the
+ * moderation/delete actions: approval/rejection no longer sends SMS — the user
+ * sees the status in-panel, plus this optional custom note. Best-effort.
+ */
+async function maybeSendMessage(
+  adminId: string,
+  recipientId: string,
+  message: string | undefined,
+  relatedType: string,
+  title?: string,
+): Promise<void> {
+  const body = message?.trim();
+  if (!body) return;
+  try {
+    await createMessage({ recipientId, body, title, relatedType, createdBy: adminId });
+  } catch {
+    /* messaging must not break the primary action */
   }
 }
 
@@ -159,8 +181,14 @@ export async function getUser(id: string) {
       foreignId: user.foreignId ?? null, // admin-only sensitive field
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
+      profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
       createdAt: user.createdAt,
     },
+    // Portfolio with stable keys (the key IS the delete id).
+    portfolio: (profile?.portfolio ?? []).map((key) => ({
+      id: key,
+      url: storageProvider.getUrl(key),
+    })),
     reservations,
     stylistProfile: profile
       ? {
@@ -216,6 +244,70 @@ export async function setUserStatus(
   return { id, isActive, suspendedReason: user.suspendedReason };
 }
 
+// ──────────────── messages + image moderation ────────────────
+
+/** Admin sends a standalone in-app message to a user. */
+export async function sendMessageToUser(
+  adminId: string,
+  input: { recipientId: string; title?: string; body: string; relatedType?: string },
+) {
+  if (!Types.ObjectId.isValid(input.recipientId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  const user = await User.findById(input.recipientId).select('_id').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const message = await createMessage({
+    recipientId: input.recipientId,
+    body: input.body,
+    title: input.title,
+    relatedType: input.relatedType ?? 'admin_message',
+    createdBy: adminId,
+  });
+  await audit(adminId, 'message.send', 'user', input.recipientId, {
+    relatedType: input.relatedType ?? 'admin_message',
+  });
+  return { id: String(message._id) };
+}
+
+/** Admin removes a user's profile photo (any role). Optional message to the user. */
+export async function deleteUserProfilePhoto(adminId: string, id: string, message?: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(id);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  if (!user.profilePhoto) throw AppError.badRequest('این کاربر عکس پروفایل ندارد', 'NO_PROFILE_PHOTO');
+
+  const key = user.profilePhoto;
+  user.profilePhoto = undefined;
+  await user.save();
+  await storageProvider.delete(key);
+  await audit(adminId, 'user.deleteProfilePhoto', 'user', id);
+  await maybeSendMessage(adminId, id, message, 'image_removed', 'عکس پروفایل');
+  return { id, profilePhoto: null };
+}
+
+/** Admin removes a single portfolio image of a stylist. Optional message. */
+export async function deleteUserPortfolioItem(
+  adminId: string,
+  id: string,
+  imageId: string,
+  message?: string,
+) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: id });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'STYLIST_PROFILE_NOT_FOUND');
+
+  const idx = profile.portfolio.indexOf(imageId);
+  if (idx === -1) throw AppError.notFound('نمونه‌کار یافت نشد', 'PORTFOLIO_ITEM_NOT_FOUND');
+
+  profile.portfolio.splice(idx, 1);
+  await profile.save();
+  await storageProvider.delete(imageId);
+  await audit(adminId, 'user.deletePortfolioItem', 'user', id, { imageId });
+  await maybeSendMessage(adminId, id, message, 'image_removed', 'نمونه‌کار');
+  return { id, portfolio: profile.portfolio.map((p) => storageProvider.getUrl(p)) };
+}
+
 // ─────────────────── foreign-national approvals ───────────────────
 
 /** List foreign-national users by approval status (default: pending; 'all' = any). */
@@ -259,33 +351,24 @@ async function loadForeignUser(id: string) {
   return user;
 }
 
-export async function approveForeign(adminId: string, id: string) {
+export async function approveForeign(adminId: string, id: string, message?: string) {
   const user = await loadForeignUser(id);
   user.foreignApprovalStatus = 'approved';
   user.foreignRejectionReason = null;
   await user.save();
   await audit(adminId, 'foreignNational.approve', 'user', id);
-
-  void (async () => {
-    if (user.phone) void notificationService.foreignApprovalDecided(user.phone, { approved: true });
-  })();
-
+  // No SMS — status shows in-panel; optional in-app message.
+  await maybeSendMessage(adminId, id, message, 'foreign_approved', 'تأیید حساب');
   return { id, foreignApprovalStatus: user.foreignApprovalStatus };
 }
 
-export async function rejectForeign(adminId: string, id: string, reason?: string) {
+export async function rejectForeign(adminId: string, id: string, reason?: string, message?: string) {
   const user = await loadForeignUser(id);
   user.foreignApprovalStatus = 'rejected';
   user.foreignRejectionReason = reason ?? null;
   await user.save();
   await audit(adminId, 'foreignNational.reject', 'user', id, { reason: reason ?? null });
-
-  void (async () => {
-    if (user.phone) {
-      void notificationService.foreignApprovalDecided(user.phone, { approved: false, reason });
-    }
-  })();
-
+  await maybeSendMessage(adminId, id, message, 'foreign_rejected', 'تأیید حساب');
   return { id, foreignApprovalStatus: user.foreignApprovalStatus };
 }
 
@@ -623,6 +706,7 @@ async function moderateReview(
   id: string,
   status: 'approved' | 'rejected',
   reason?: string,
+  message?: string,
 ) {
   if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   const review = await Review.findById(id);
@@ -640,26 +724,25 @@ async function moderateReview(
     reason: reason ?? null,
   });
 
-  // Notify the author (best-effort).
-  void (async () => {
-    const author = await User.findById(review.customerId).select('phone').lean();
-    if (author?.phone) {
-      void notificationService.reviewModerated(author.phone, {
-        approved: status === 'approved',
-        reason,
-      });
-    }
-  })();
+  // No SMS for review moderation — the author sees the status in-panel; an
+  // optional admin note is delivered as an in-app message.
+  await maybeSendMessage(
+    adminId,
+    String(review.customerId),
+    message,
+    `review_${status}`,
+    'نظر شما',
+  );
 
   return { id, status: review.status };
 }
 
-export function approveReview(adminId: string, id: string) {
-  return moderateReview(adminId, id, 'approved');
+export function approveReview(adminId: string, id: string, message?: string) {
+  return moderateReview(adminId, id, 'approved', undefined, message);
 }
 
-export function rejectReview(adminId: string, id: string, reason?: string) {
-  return moderateReview(adminId, id, 'rejected', reason);
+export function rejectReview(adminId: string, id: string, reason?: string, message?: string) {
+  return moderateReview(adminId, id, 'rejected', reason, message);
 }
 
 // ───────────────────────── audit log ─────────────────────────
@@ -782,7 +865,7 @@ async function purgeNationalCardBytes(keys: string[]): Promise<void> {
   for (const key of keys) await storageProvider.delete(key).catch(() => undefined);
 }
 
-export async function verifyStylist(adminId: string, stylistId: string) {
+export async function verifyStylist(adminId: string, stylistId: string, message?: string) {
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
 
@@ -800,16 +883,18 @@ export async function verifyStylist(adminId: string, stylistId: string) {
   await audit(adminId, 'stylist.verify', 'stylist', stylistId, {
     documentsDeleted: cardKeys.length > 0,
   });
-
-  void (async () => {
-    const u = await User.findById(stylistId).select('phone').lean();
-    if (u?.phone) void notificationService.verificationApproved(u.phone);
-  })();
+  // No SMS — verification status shows in-panel; optional in-app message.
+  await maybeSendMessage(adminId, stylistId, message, 'verification_approved', 'تأیید پروفایل');
 
   return { stylistId, isVerified: true, verificationStatus: profile.verificationStatus };
 }
 
-export async function rejectVerification(adminId: string, stylistId: string, reason?: string) {
+export async function rejectVerification(
+  adminId: string,
+  stylistId: string,
+  reason?: string,
+  message?: string,
+) {
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
 
@@ -826,11 +911,7 @@ export async function rejectVerification(adminId: string, stylistId: string, rea
     reason: reason ?? null,
     documentsDeleted: cardKeys.length > 0,
   });
-
-  void (async () => {
-    const u = await User.findById(stylistId).select('phone').lean();
-    if (u?.phone) void notificationService.verificationRejected(u.phone, { reason });
-  })();
+  await maybeSendMessage(adminId, stylistId, message, 'verification_rejected', 'تأیید پروفایل');
 
   return { stylistId, isVerified: false, verificationStatus: profile.verificationStatus };
 }

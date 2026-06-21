@@ -3,6 +3,7 @@ import * as controller from './onboarding.controller';
 import * as reportsController from '../reports/reports.controller';
 import * as reservationController from '../reservation/reservation.customer.controller';
 import * as mediaController from '../media/media.controller';
+import * as messageController from '../message/message.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -35,3 +36,7 @@ meRouter.post(
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));
 // Quick-rebook suggestions from the customer's own completed history.
 meRouter.get('/quick-rebook', asyncHandler(reservationController.quickRebook));
+// In-app messages from support (one-way: admin → user).
+meRouter.get('/messages', asyncHandler(messageController.listMine));
+meRouter.get('/messages/unread-count', asyncHandler(messageController.unreadCount));
+meRouter.patch('/messages/:id/read', asyncHandler(messageController.markRead));

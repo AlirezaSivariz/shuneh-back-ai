@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as service from './admin.service';
 import * as stylistService from '../stylist/stylist.service';
+import { MESSAGE_TEMPLATES } from '../message/message.service';
 import { sendSuccess } from '../../utils/response';
 import { Role } from '../../models/User';
 import { ReservationStatus } from '../../models/Reservation';
@@ -45,11 +46,40 @@ export async function listReviews(req: Request, res: Response): Promise<void> {
 }
 
 export async function approveReview(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, await service.approveReview(req.user!.id, req.params.id));
+  sendSuccess(res, await service.approveReview(req.user!.id, req.params.id, req.body?.message));
 }
 
 export async function rejectReview(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, await service.rejectReview(req.user!.id, req.params.id, req.body?.reason));
+  sendSuccess(
+    res,
+    await service.rejectReview(req.user!.id, req.params.id, req.body?.reason, req.body?.message),
+  );
+}
+
+// ── Messages + image moderation ──
+export async function sendMessage(req: Request, res: Response): Promise<void> {
+  const result = await service.sendMessageToUser(req.user!.id, {
+    recipientId: req.body.recipientId,
+    title: req.body.title,
+    body: req.body.body,
+    relatedType: req.body.relatedType,
+  });
+  sendSuccess(res, result, 201);
+}
+
+export async function messageTemplates(_req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { templates: MESSAGE_TEMPLATES });
+}
+
+export async function deleteProfilePhoto(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.deleteUserProfilePhoto(req.user!.id, req.params.id, req.body?.message));
+}
+
+export async function deletePortfolioItem(req: Request, res: Response): Promise<void> {
+  sendSuccess(
+    res,
+    await service.deleteUserPortfolioItem(req.user!.id, req.params.id, req.params.imageId, req.body?.message),
+  );
 }
 
 export async function smsLogs(req: Request, res: Response): Promise<void> {
@@ -79,11 +109,14 @@ export async function listForeignApprovals(req: Request, res: Response): Promise
 }
 
 export async function approveForeign(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, await service.approveForeign(req.user!.id, req.params.id));
+  sendSuccess(res, await service.approveForeign(req.user!.id, req.params.id, req.body?.message));
 }
 
 export async function rejectForeign(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, await service.rejectForeign(req.user!.id, req.params.id, req.body?.reason));
+  sendSuccess(
+    res,
+    await service.rejectForeign(req.user!.id, req.params.id, req.body?.reason, req.body?.message),
+  );
 }
 
 // ── Reservations ──
@@ -153,11 +186,18 @@ export async function listVerifications(req: Request, res: Response): Promise<vo
 }
 
 export async function verifyStylist(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, { verification: await service.verifyStylist(req.user!.id, req.params.id) });
+  sendSuccess(res, {
+    verification: await service.verifyStylist(req.user!.id, req.params.id, req.body?.message),
+  });
 }
 
 export async function rejectVerification(req: Request, res: Response): Promise<void> {
-  const result = await service.rejectVerification(req.user!.id, req.params.id, req.body?.reason);
+  const result = await service.rejectVerification(
+    req.user!.id,
+    req.params.id,
+    req.body?.reason,
+    req.body?.message,
+  );
   sendSuccess(res, { verification: result });
 }
 

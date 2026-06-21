@@ -24,6 +24,10 @@ import {
   listSmsLogsSchema,
   listReviewsSchema,
   rejectReviewSchema,
+  idWithMessageSchema,
+  sendMessageSchema,
+  deleteImageSchema,
+  deletePortfolioImageSchema,
 } from './admin.validators';
 
 /**
@@ -48,15 +52,19 @@ adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema)
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
 adminRouter.get('/sms-logs', validate(listSmsLogsSchema), asyncHandler(controller.smsLogs));
 adminRouter.get('/reviews', validate(listReviewsSchema), asyncHandler(controller.listReviews));
+adminRouter.get('/message-templates', asyncHandler(controller.messageTemplates));
 
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));
+adminRouter.post('/messages', validate(sendMessageSchema), asyncHandler(controller.sendMessage));
+adminRouter.delete('/users/:id/profile-photo', validate(deleteImageSchema), asyncHandler(controller.deleteProfilePhoto));
+adminRouter.delete('/users/:id/portfolio/:imageId', validate(deletePortfolioImageSchema), asyncHandler(controller.deletePortfolioItem));
 adminRouter.post('/reservations/:id/cancel', validate(cancelReservationSchema), asyncHandler(controller.cancelReservation));
 adminRouter.post('/stylists/:id/promote', validate(promoteSchema), asyncHandler(controller.promote));
 adminRouter.post('/stylists/:id/unpromote', validate(stylistIdParamsSchema), asyncHandler(controller.unpromote));
-adminRouter.post('/stylists/:id/verify', validate(stylistIdParamsSchema), asyncHandler(controller.verifyStylist));
+adminRouter.post('/stylists/:id/verify', validate(idWithMessageSchema), asyncHandler(controller.verifyStylist));
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
-adminRouter.post('/users/:id/approve-foreign', validate(idParamsSchema), asyncHandler(controller.approveForeign));
+adminRouter.post('/users/:id/approve-foreign', validate(idWithMessageSchema), asyncHandler(controller.approveForeign));
 adminRouter.post('/users/:id/reject-foreign', validate(rejectForeignSchema), asyncHandler(controller.rejectForeign));
-adminRouter.post('/reviews/:id/approve', validate(idParamsSchema), asyncHandler(controller.approveReview));
+adminRouter.post('/reviews/:id/approve', validate(idWithMessageSchema), asyncHandler(controller.approveReview));
 adminRouter.post('/reviews/:id/reject', validate(rejectReviewSchema), asyncHandler(controller.rejectReview));
