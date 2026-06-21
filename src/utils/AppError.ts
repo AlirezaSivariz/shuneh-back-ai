@@ -22,15 +22,15 @@ export class AppError extends Error {
     return new AppError(400, message, code, details);
   }
 
-  static unauthorized(message = 'Authentication required', code = 'UNAUTHORIZED') {
+  static unauthorized(message = 'برای این کار باید وارد شوید', code = 'UNAUTHORIZED') {
     return new AppError(401, message, code);
   }
 
-  static forbidden(message = 'Access denied', code = 'FORBIDDEN') {
+  static forbidden(message = 'دسترسی غیرمجاز است', code = 'FORBIDDEN') {
     return new AppError(403, message, code);
   }
 
-  static notFound(message = 'Resource not found', code = 'NOT_FOUND') {
+  static notFound(message = 'موردی یافت نشد', code = 'NOT_FOUND') {
     return new AppError(404, message, code);
   }
 

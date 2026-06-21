@@ -25,36 +25,39 @@ export function errorHandler(
 
   // Mongo duplicate key.
   if (err instanceof MongoServerError && err.code === 11000) {
+    // Keep the field name only in details (machine-readable); the user-facing
+    // message stays Persian.
     const field = Object.keys(err.keyPattern ?? {}).join(', ');
     sendError(
       res,
-      { message: `Duplicate value for: ${field}`, code: 'DUPLICATE_KEY' },
+      { message: 'این مقدار قبلاً ثبت شده است', code: 'DUPLICATE_KEY', details: { field } },
       409,
     );
     return;
   }
 
-  // Mongoose validation / cast errors.
+  // Mongoose validation / cast errors — never expose the raw English message.
   if (err instanceof MongooseError.ValidationError) {
-    sendError(res, { message: err.message, code: 'DB_VALIDATION_ERROR' }, 400);
+    sendError(res, { message: 'اطلاعات واردشده معتبر نیست', code: 'DB_VALIDATION_ERROR' }, 400);
     return;
   }
   if (err instanceof MongooseError.CastError) {
-    sendError(res, { message: `Invalid value for ${err.path}`, code: 'CAST_ERROR' }, 400);
+    sendError(res, { message: 'شناسه یا مقدار واردشده نامعتبر است', code: 'CAST_ERROR' }, 400);
     return;
   }
 
-  // Fallback: unexpected error.
+  // Fallback: unexpected error. In dev we surface the raw message to aid
+  // debugging; in production the user only ever sees a Persian generic.
   // eslint-disable-next-line no-console
   console.error('[error]', err);
-  const message = config.isDev && err instanceof Error ? err.message : 'Internal server error';
+  const message = config.isDev && err instanceof Error ? err.message : 'خطای داخلی سرور';
   sendError(res, { message, code: 'INTERNAL_ERROR' }, 500);
 }
 
 export function notFoundHandler(req: Request, res: Response): void {
   sendError(
     res,
-    { message: `Route not found: ${req.method} ${req.originalUrl}`, code: 'ROUTE_NOT_FOUND' },
+    { message: 'مسیر موردنظر یافت نشد', code: 'ROUTE_NOT_FOUND', details: { path: req.originalUrl } },
     404,
   );
 }

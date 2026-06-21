@@ -31,7 +31,7 @@ export async function ensureStylistProfile(userId: string): Promise<IStylistProf
 
 export async function getStylistProfile(userId: string): Promise<IStylistProfile> {
   const profile = await StylistProfile.findOne({ userId });
-  if (!profile) throw AppError.notFound('Stylist profile not found', 'STYLIST_PROFILE_NOT_FOUND');
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'STYLIST_PROFILE_NOT_FOUND');
   return profile;
 }
 
@@ -58,12 +58,12 @@ export async function advanceStep(
  */
 export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
   const user = await User.findById(userId);
-  if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
   for (const role of roles) {
     // 'admin' is never self-assignable — only the seed script can grant it.
     if (!SELF_ASSIGNABLE_ROLES.includes(role)) {
-      throw AppError.badRequest(`Role not allowed: ${role}`, 'INVALID_ROLE');
+      throw AppError.badRequest('این نقش قابل انتخاب نیست', 'INVALID_ROLE');
     }
     if (!user.roles.includes(role)) user.roles.push(role);
   }
@@ -83,7 +83,7 @@ export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
  */
 export async function getOnboardingState(userId: string) {
   const user = await User.findById(userId);
-  if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
   const profile = await StylistProfile.findOne({ userId });
 
@@ -155,7 +155,7 @@ export async function getStylistRoleState(userId: string) {
  */
 export async function getUserState(userId: string) {
   const user = await User.findById(userId);
-  if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
   const hasPersonalInfo = !!user.firstName && (!!user.nationalCode || !!user.foreignId);
   const isStylist = user.roles.includes('stylist');
@@ -244,7 +244,7 @@ export async function updatePersonal(
   },
 ): Promise<void> {
   const user = await User.findById(userId);
-  if (!user) throw AppError.notFound('User not found', 'USER_NOT_FOUND');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
   user.firstName = data.firstName;
   user.lastName = data.lastName;

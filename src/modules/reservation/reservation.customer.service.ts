@@ -244,6 +244,11 @@ export async function createReservation(customerId: string, input: CreateInput) 
     }
   }
 
+  // Ensure the booker holds the 'customer' role (idempotent) — a multi-role user
+  // (e.g. a stylist) booking for the first time becomes a customer too, so the
+  // reservation shows in their customer panel and navigation treats them right.
+  await User.updateOne({ _id: customerId }, { $addToSet: { roles: 'customer' } });
+
   // Notify both parties of the new booking (best-effort; never blocks the flow).
   void (async () => {
     const [stylistUser, customerUser] = await Promise.all([
@@ -657,7 +662,9 @@ export async function getQuickRebookSuggestions(customerId: string) {
   // Only ACTIVE stylists; only services STILL offered by that stylist.
   const [profiles, users, services, links] = await Promise.all([
     StylistProfile.find({ userId: { $in: stylistIds }, status: 'active' }).select('userId').lean(),
-    User.find({ _id: { $in: stylistIds } }).select('firstName lastName').lean(),
+    User.find({ _id: { $in: stylistIds } })
+      .select('firstName lastName isForeignNational foreignApprovalStatus')
+      .lean(),
     Service.find({ _id: { $in: serviceIds } }).lean(),
     StylistService.find({
       stylistId: { $in: stylistIds },
@@ -677,6 +684,9 @@ export async function getQuickRebookSuggestions(customerId: string) {
       const stylistId = String(r._id.stylistId);
       const serviceId = String(r._id.serviceId);
       if (!activeStylist.has(stylistId)) return null; // stylist no longer active
+      // A foreign stylist awaiting/denied approval can't take bookings — don't
+      // suggest them only for the booking to fail.
+      if (isForeignRestricted(userById.get(stylistId))) return null;
       const link = linkByKey.get(`${stylistId}:${serviceId}`);
       const svc = svcById.get(serviceId);
       if (!link || !svc) return null; // service no longer offered

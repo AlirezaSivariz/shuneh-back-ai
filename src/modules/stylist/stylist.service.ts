@@ -36,7 +36,7 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
   // Make sure every referenced service exists.
   const found = await Service.find({ _id: { $in: serviceIds } }).select('_id');
   if (found.length !== new Set(serviceIds).size) {
-    throw AppError.badRequest('One or more services do not exist', 'SERVICE_NOT_FOUND');
+    throw AppError.badRequest('یک یا چند خدمت یافت نشد', 'SERVICE_NOT_FOUND');
   }
 
   // Upsert selected services.
@@ -101,11 +101,11 @@ export async function setFreelance(
 /** Step 3b — join an existing salon (membership pending owner approval). */
 export async function joinSalon(stylistId: string, salonId: string) {
   const salon = await Salon.findById(salonId);
-  if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+  if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
 
   const existing = await StylistSalon.findOne({ stylistId, salonId });
   if (existing) {
-    throw AppError.conflict('Already linked to this salon', 'ALREADY_LINKED');
+    throw AppError.conflict('شما قبلاً به این سالن متصل شده‌اید', 'ALREADY_LINKED');
   }
 
   const link = await StylistSalon.create({
@@ -394,7 +394,7 @@ async function validateEntry(stylistId: string, entry: WorkingHourEntry) {
   if (entry.salonId) {
     const salonMap = await ensureUsableSalons(stylistId, [entry.salonId]);
     const salon = salonMap.get(entry.salonId);
-    if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+    if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
     assertInsideOpeningHours(salon, entry);
   }
 }
@@ -414,7 +414,7 @@ export async function setWorkingHours(stylistId: string, entries: WorkingHourEnt
   for (const e of entries) {
     if (!e.salonId) continue;
     const salon = salonMap.get(e.salonId);
-    if (!salon) throw AppError.notFound('Salon not found', 'SALON_NOT_FOUND');
+    if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
     assertInsideOpeningHours(salon, e);
   }
 
@@ -492,7 +492,7 @@ export async function updateWorkingHour(
 ) {
   const current = await WorkingHour.findOne({ _id: workingHourId, stylistId });
   if (!current) {
-    throw AppError.notFound('Working-hours entry not found', 'WORKING_HOUR_NOT_FOUND');
+    throw AppError.notFound('ساعت کاری موردنظر یافت نشد', 'WORKING_HOUR_NOT_FOUND');
   }
 
   // Merge patch onto the existing entry.
@@ -533,7 +533,7 @@ export async function updateWorkingHour(
 export async function deleteWorkingHour(stylistId: string, workingHourId: string) {
   const result = await WorkingHour.deleteOne({ _id: workingHourId, stylistId });
   if (result.deletedCount === 0) {
-    throw AppError.notFound('Working-hours entry not found', 'WORKING_HOUR_NOT_FOUND');
+    throw AppError.notFound('ساعت کاری موردنظر یافت نشد', 'WORKING_HOUR_NOT_FOUND');
   }
 
   await reconcileStylistHours(stylistId);
@@ -585,7 +585,7 @@ export async function replaceStylistServices(stylistId: string, items: ServiceIt
   if (serviceIds.length > 0) {
     const found = await Service.find({ _id: { $in: serviceIds } }).select('_id');
     if (found.length !== new Set(serviceIds).size) {
-      throw AppError.badRequest('One or more services do not exist', 'SERVICE_NOT_FOUND');
+      throw AppError.badRequest('یک یا چند خدمت یافت نشد', 'SERVICE_NOT_FOUND');
     }
   }
 
@@ -609,7 +609,7 @@ export async function addStylistService(
   data: { price?: number | null; durationMin?: number | null },
 ) {
   const svc = await Service.findById(serviceId).select('_id');
-  if (!svc) throw AppError.notFound('Service not found', 'SERVICE_NOT_FOUND');
+  if (!svc) throw AppError.notFound('خدمت یافت نشد', 'SERVICE_NOT_FOUND');
 
   await StylistService.updateOne(
     { stylistId, serviceId },
@@ -627,7 +627,7 @@ export async function updateStylistService(
 ) {
   const link = await StylistService.findOne({ stylistId, serviceId });
   if (!link) {
-    throw AppError.notFound('This service is not in your offering', 'STYLIST_SERVICE_NOT_FOUND');
+    throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
   }
   if (data.price !== undefined) link.price = data.price;
   if (data.durationMin !== undefined) link.durationMin = data.durationMin;
@@ -639,7 +639,7 @@ export async function updateStylistService(
 export async function removeStylistService(stylistId: string, serviceId: string) {
   const result = await StylistService.deleteOne({ stylistId, serviceId });
   if (result.deletedCount === 0) {
-    throw AppError.notFound('This service is not in your offering', 'STYLIST_SERVICE_NOT_FOUND');
+    throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
   }
   return listStylistServices(stylistId);
 }

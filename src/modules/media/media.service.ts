@@ -17,7 +17,7 @@ export async function saveStylistMedia(
   const portfolioFiles = files.portfolio ?? [];
 
   if (!profilePhotoFile && portfolioFiles.length === 0) {
-    throw AppError.badRequest('Provide a profile photo or portfolio images', 'NO_FILES');
+    throw AppError.badRequest('یک عکس پروفایل یا تصویر نمونه‌کار انتخاب کنید', 'NO_FILES');
   }
 
   if (profilePhotoFile) {
@@ -82,7 +82,7 @@ export async function deletePortfolioItem(stylistId: string, key: string) {
 
   const idx = profile.portfolio.indexOf(key);
   if (idx === -1) {
-    throw AppError.notFound('Portfolio item not found', 'PORTFOLIO_ITEM_NOT_FOUND');
+    throw AppError.notFound('نمونه‌کار یافت نشد', 'PORTFOLIO_ITEM_NOT_FOUND');
   }
 
   profile.portfolio.splice(idx, 1);

@@ -40,7 +40,7 @@ export function createUploader(subdir: string, opts: { private?: boolean } = {})
     limits: { fileSize: MAX_FILE_SIZE },
     fileFilter: (_req: Request, file, cb) => {
       if (!ALLOWED_MIME.includes(file.mimetype)) {
-        cb(AppError.badRequest('Only JPEG, PNG and WebP images are allowed', 'INVALID_FILE_TYPE'));
+        cb(AppError.badRequest('فقط تصاویر JPEG، PNG و WebP مجاز است', 'INVALID_FILE_TYPE'));
         return;
       }
       cb(null, true);

@@ -3,7 +3,7 @@ import * as controller from './reservation.controller';
 import * as customer from './reservation.customer.controller';
 import * as reviewController from '../review/review.controller';
 import { requireInternalKey } from '../../middlewares/internalKey';
-import { authenticate, authorize } from '../../middlewares/auth';
+import { authenticate } from '../../middlewares/auth';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
@@ -30,8 +30,15 @@ internalRouter.post(
 );
 
 // Routes under /reservations — customer-facing booking (Phase 2).
+// Only `authenticate` is required (NOT authorize('customer')): every handler is
+// already scoped to the caller's own data (customerId === req.user.id), and ANY
+// logged-in user may book as a customer — including multi-role users (e.g. a
+// stylist booking someone else) who haven't picked the 'customer' role yet. The
+// customer role is granted idempotently when they actually book. Gating the
+// whole router on the 'customer' role wrongly blocked discount validation (which
+// runs BEFORE the role is granted) with a role error.
 export const reservationRouter = Router();
-reservationRouter.use(authenticate, authorize('customer'));
+reservationRouter.use(authenticate);
 
 reservationRouter.post('/', validate(createReservationSchema), asyncHandler(customer.create));
 // Preview/validate a discount code before booking (literal path before '/:id').

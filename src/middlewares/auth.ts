@@ -18,7 +18,7 @@ export async function authenticate(
   try {
     const header = req.headers.authorization;
     if (!header || !header.startsWith('Bearer ')) {
-      throw AppError.unauthorized('Missing or malformed Authorization header');
+      throw AppError.unauthorized('برای این کار باید وارد شوید');
     }
 
     const token = header.slice('Bearer '.length).trim();
@@ -26,7 +26,7 @@ export async function authenticate(
 
     const user = await User.findById(payload.sub).select('roles isActive');
     if (!user) {
-      throw AppError.unauthorized('User no longer exists', 'USER_NOT_FOUND');
+      throw AppError.unauthorized('حساب کاربری شما یافت نشد', 'USER_NOT_FOUND');
     }
     // A disabled account (admin-blocked) cannot make authenticated requests.
     if (user.isActive === false) {
@@ -40,7 +40,7 @@ export async function authenticate(
       next(err);
       return;
     }
-    next(AppError.unauthorized('Invalid or expired access token', 'INVALID_TOKEN'));
+    next(AppError.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید', 'INVALID_TOKEN'));
   }
 }
 
@@ -79,7 +79,9 @@ export function authorize(...roles: Role[]) {
     if (!req.user) throw AppError.unauthorized();
     const allowed = req.user.roles.some((r) => roles.includes(r));
     if (!allowed) {
-      throw AppError.forbidden(`Requires one of roles: ${roles.join(', ')}`);
+      // User-facing message must be Persian; the role list stays in the audit/log
+      // only (never leaked to the client).
+      throw AppError.forbidden('شما به این بخش دسترسی ندارید', 'FORBIDDEN_ROLE');
     }
     next();
   };

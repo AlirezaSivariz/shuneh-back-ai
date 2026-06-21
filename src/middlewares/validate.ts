@@ -29,7 +29,19 @@ export function validate(schema: ValidationSchema) {
           path: i.path.join('.'),
           message: i.message,
         }));
-        next(AppError.badRequest('Validation failed', 'VALIDATION_ERROR', details));
+        // Surface a Persian top-level message (the client shows `message`
+        // verbatim). Prefer the first field message when it is already Persian,
+        // otherwise fall back to a clear Persian generic so no raw English
+        // (zod's built-in defaults) ever reaches the user. Per-field details are
+        // still attached for clients that want them.
+        const firstPersian = details.find((d) => /[؀-ۿ]/.test(d.message))?.message;
+        next(
+          AppError.badRequest(
+            firstPersian || 'اطلاعات واردشده معتبر نیست',
+            'VALIDATION_ERROR',
+            details,
+          ),
+        );
         return;
       }
       next(err);

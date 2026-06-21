@@ -107,16 +107,16 @@ export async function refresh(refreshToken: string): Promise<TokenPair> {
   try {
     payload = verifyRefreshToken(refreshToken);
   } catch {
-    throw AppError.unauthorized('Invalid or expired refresh token', 'INVALID_REFRESH_TOKEN');
+    throw AppError.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید', 'INVALID_REFRESH_TOKEN');
   }
 
   const stored = await RefreshToken.findOne({ jti: payload.jti });
   if (!stored || stored.revoked) {
-    throw AppError.unauthorized('Refresh token revoked', 'REFRESH_TOKEN_REVOKED');
+    throw AppError.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید', 'REFRESH_TOKEN_REVOKED');
   }
 
   const user = await User.findById(payload.sub);
-  if (!user) throw AppError.unauthorized('User no longer exists', 'USER_NOT_FOUND');
+  if (!user) throw AppError.unauthorized('حساب کاربری شما یافت نشد', 'USER_NOT_FOUND');
 
   // Rotate: revoke the old token, issue a brand new pair.
   stored.revoked = true;

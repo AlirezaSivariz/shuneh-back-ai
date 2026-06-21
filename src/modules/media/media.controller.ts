@@ -19,7 +19,7 @@ export async function uploadProfilePhoto(req: Request, res: Response): Promise<v
 
 export async function deletePortfolioItem(req: Request, res: Response): Promise<void> {
   const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
-  if (!key) throw AppError.badRequest('A portfolio item key is required', 'KEY_REQUIRED');
+  if (!key) throw AppError.badRequest('شناسه‌ی نمونه‌کار لازم است', 'KEY_REQUIRED');
   const result = await service.deletePortfolioItem(req.user!.id, key);
   sendSuccess(res, result);
 }
