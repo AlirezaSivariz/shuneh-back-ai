@@ -37,6 +37,8 @@ export interface NotificationService {
   workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
   /** Tell a foreign-national user the result of their account approval review. */
   foreignApprovalDecided(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
+  /** Tell a review's author whether it was approved or rejected by an admin. */
+  reviewModerated(phone: string, info: { approved: boolean; reason?: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -144,6 +146,15 @@ class SmsNotificationService implements NotificationService {
     } else {
       const reason = info.reason ? ` علت: ${info.reason}` : '';
       await safeSend(phone, `درخواست تأیید حساب شما رد شد.${reason}`, 'foreign_approval');
+    }
+  }
+
+  async reviewModerated(phone: string, info: { approved: boolean; reason?: string }) {
+    if (info.approved) {
+      await safeSend(phone, 'نظر شما تأیید شد و در پروفایل متخصص نمایش داده می‌شود. ✅', 'review_moderation');
+    } else {
+      const reason = info.reason ? ` علت: ${info.reason}` : '';
+      await safeSend(phone, `نظر شما تأیید نشد.${reason}`, 'review_moderation');
     }
   }
 }

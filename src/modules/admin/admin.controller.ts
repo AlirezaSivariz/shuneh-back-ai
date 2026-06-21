@@ -31,6 +31,27 @@ export async function setUserStatus(req: Request, res: Response): Promise<void> 
   sendSuccess(res, result);
 }
 
+// ── Review moderation ──
+export async function listReviews(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string>;
+  sendSuccess(
+    res,
+    await service.listReviews({
+      status: q.status as 'pending' | 'approved' | 'rejected' | 'all' | undefined,
+      page: Number(q.page),
+      limit: Number(q.limit),
+    }),
+  );
+}
+
+export async function approveReview(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.approveReview(req.user!.id, req.params.id));
+}
+
+export async function rejectReview(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.rejectReview(req.user!.id, req.params.id, req.body?.reason));
+}
+
 export async function smsLogs(req: Request, res: Response): Promise<void> {
   const q = req.query as Record<string, string>;
   sendSuccess(

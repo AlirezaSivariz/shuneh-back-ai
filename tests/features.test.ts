@@ -56,9 +56,10 @@ async function bookCompleted(
 // ───────────────────────────── 1) Reviews ─────────────────────────────
 
 describe("Reviews", () => {
-  it("customer reviews a completed reservation once; affects stylist rating; lists it", async () => {
+  it("a new review is pending: hidden publicly + no rating, but visible to its author; admin approval publishes it", async () => {
     const stylist = await createStylist();
     const customer = await createCustomer();
+    const admin = await createAdmin();
     const reservationId = await bookCompleted(
       customer.token,
       stylist.id,
@@ -71,18 +72,35 @@ describe("Reviews", () => {
       .set(...auth(customer.token))
       .send({ rating: 4, comment: "خوب بود" });
     expect(res.status).toBe(201);
-    expect(res.body.data.review.rating).toBe(4);
+    expect(res.body.data.review.status).toBe("pending");
 
-    // Aggregate rating updated on the public profile.
+    // Pending → NOT public and NOT counted in the rating yet.
     const profile = await api().get(`/stylists/${stylist.id}`);
-    expect(profile.body.data.stylist.rating).toBe(4);
-    expect(profile.body.data.stylist.ratingCount).toBe(1);
+    expect(profile.body.data.stylist.ratingCount).toBe(0);
+    const anon = await api().get(`/stylists/${stylist.id}/reviews`);
+    expect(anon.body.data.total).toBe(0);
+    expect(anon.body.data.items).toHaveLength(0);
 
-    // Listed under the stylist's reviews.
-    const list = await api().get(`/stylists/${stylist.id}/reviews`);
-    expect(list.status).toBe(200);
-    expect(list.body.data.total).toBe(1);
-    expect(list.body.data.items[0].rating).toBe(4);
+    // …but the AUTHOR sees their own review (with its pending status).
+    const mine = await api()
+      .get(`/stylists/${stylist.id}/reviews`)
+      .set(...auth(customer.token));
+    expect(mine.body.data.myReview.status).toBe("pending");
+    expect(mine.body.data.myReview.rating).toBe(4);
+
+    // The review is listed for admins; approving it publishes + rates it.
+    const pending = await api().get("/admin/reviews?status=pending").set(...auth(admin.token));
+    const row = pending.body.data.items.find((r: any) => r.id === res.body.data.review.id);
+    expect(row).toBeTruthy();
+
+    await api().post(`/admin/reviews/${res.body.data.review.id}/approve`).set(...auth(admin.token));
+
+    const after = await api().get(`/stylists/${stylist.id}/reviews`);
+    expect(after.body.data.total).toBe(1);
+    expect(after.body.data.items[0].rating).toBe(4);
+    const profile2 = await api().get(`/stylists/${stylist.id}`);
+    expect(profile2.body.data.stylist.rating).toBe(4);
+    expect(profile2.body.data.stylist.ratingCount).toBe(1);
   });
 
   it("a second review for the same reservation conflicts (ALREADY_REVIEWED)", async () => {

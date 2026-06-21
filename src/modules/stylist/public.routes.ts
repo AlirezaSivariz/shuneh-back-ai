@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as controller from './public.controller';
 import * as reviewController from '../review/review.controller';
 import { validate } from '../../middlewares/validate';
+import { optionalAuthenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
   searchStylistsSchema,
@@ -29,6 +30,7 @@ router.get(
 );
 router.get(
   '/:id/reviews',
+  optionalAuthenticate, // personalize for the logged-in author (their own review)
   validate(stylistReviewsSchema),
   asyncHandler(reviewController.listForStylist),
 );

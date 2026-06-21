@@ -14,6 +14,7 @@ export async function getForReservation(req: Request, res: Response): Promise<vo
 
 export async function listForStylist(req: Request, res: Response): Promise<void> {
   const { page, limit } = req.query as unknown as { page?: number; limit?: number };
-  const result = await service.listStylistReviews(req.params.id, page ?? 1, limit ?? 10);
+  // req.user is set only when a valid token is present (optionalAuthenticate).
+  const result = await service.listStylistReviews(req.params.id, page ?? 1, limit ?? 10, req.user?.id);
   sendSuccess(res, result);
 }

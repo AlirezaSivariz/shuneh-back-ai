@@ -17,6 +17,8 @@ import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } fr
 import { DiscountCode } from '../../models/DiscountCode';
 import { AuditLog } from '../../models/AuditLog';
 import { SmsLog } from '../../models/SmsLog';
+import { Review } from '../../models/Review';
+import { recomputeStylistRating, VISIBLE_REVIEW_FILTER } from '../review/review.service';
 import { AppError } from '../../utils/AppError';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
@@ -571,6 +573,93 @@ export async function listSmsLogs(
     })),
     ...pageMeta(page, limit, total),
   };
+}
+
+// ───────────────────────── review moderation ─────────────────────────
+
+export async function listReviews(
+  filter: { status?: 'pending' | 'approved' | 'rejected' | 'all' } & PageQuery,
+) {
+  const { page, limit, skip } = paginate(filter);
+  const status = filter.status ?? 'pending';
+  const q: Record<string, unknown> =
+    status === 'all'
+      ? {}
+      : status === 'approved'
+        ? VISIBLE_REVIEW_FILTER // approved + legacy (missing status)
+        : { status };
+
+  const [rows, total] = await Promise.all([
+    Review.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Review.countDocuments(q),
+  ]);
+
+  const userIds = [
+    ...new Set(rows.flatMap((r) => [String(r.customerId), String(r.stylistId)])),
+  ];
+  const users = await User.find({ _id: { $in: userIds } })
+    .select('firstName lastName phone')
+    .lean();
+  const byId = new Map(users.map((u) => [String(u._id), u]));
+
+  return {
+    items: rows.map((r) => ({
+      id: String(r._id),
+      rating: r.rating,
+      comment: r.comment ?? null,
+      status: r.status ?? 'approved',
+      rejectionReason: r.rejectionReason ?? null,
+      createdAt: r.createdAt,
+      author: { id: String(r.customerId), fullName: fullName(byId.get(String(r.customerId))) },
+      stylist: { id: String(r.stylistId), fullName: fullName(byId.get(String(r.stylistId))) },
+    })),
+    ...pageMeta(page, limit, total),
+  };
+}
+
+/** Set a review's moderation status (from ANY status) and recompute the rating. */
+async function moderateReview(
+  adminId: string,
+  id: string,
+  status: 'approved' | 'rejected',
+  reason?: string,
+) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const review = await Review.findById(id);
+  if (!review) throw AppError.notFound('نظر یافت نشد', 'REVIEW_NOT_FOUND');
+
+  review.status = status;
+  review.rejectionReason = status === 'rejected' ? reason ?? null : null;
+  review.moderatedBy = new Types.ObjectId(adminId);
+  review.moderatedAt = new Date();
+  await review.save();
+
+  // Visible-set changed → recompute the stylist's aggregate rating.
+  await recomputeStylistRating(review.stylistId);
+  await audit(adminId, `review.${status === 'approved' ? 'approve' : 'reject'}`, 'review', id, {
+    reason: reason ?? null,
+  });
+
+  // Notify the author (best-effort).
+  void (async () => {
+    const author = await User.findById(review.customerId).select('phone').lean();
+    if (author?.phone) {
+      void notificationService.reviewModerated(author.phone, {
+        approved: status === 'approved',
+        reason,
+      });
+    }
+  })();
+
+  return { id, status: review.status };
+}
+
+export function approveReview(adminId: string, id: string) {
+  return moderateReview(adminId, id, 'approved');
+}
+
+export function rejectReview(adminId: string, id: string, reason?: string) {
+  return moderateReview(adminId, id, 'rejected', reason);
 }
 
 // ───────────────────────── audit log ─────────────────────────

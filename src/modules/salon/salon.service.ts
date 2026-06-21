@@ -204,6 +204,7 @@ export async function createSalonInvite(
   // Non-blocking SMS to the salon owner (the SmsLog records Success + MessageId
   // so delivery of this link-bearing message is traceable).
   void smsProvider
+    // .send(data.targetPhone, `برای مدیریت ${where} در شونه دعوت شدی: ${inviteUrl}`, {
     .send(data.targetPhone, `برای مدیریت ${where} در شونه دعوت شدی`, {
       event: "salon_invite",
     })

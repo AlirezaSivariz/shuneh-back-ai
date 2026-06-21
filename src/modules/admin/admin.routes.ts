@@ -22,6 +22,8 @@ import {
   listForeignApprovalsSchema,
   rejectForeignSchema,
   listSmsLogsSchema,
+  listReviewsSchema,
+  rejectReviewSchema,
 } from './admin.validators';
 
 /**
@@ -45,6 +47,7 @@ adminRouter.get('/foreign-approvals', validate(listForeignApprovalsSchema), asyn
 adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema), asyncHandler(controller.getStylistDocument));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
 adminRouter.get('/sms-logs', validate(listSmsLogsSchema), asyncHandler(controller.smsLogs));
+adminRouter.get('/reviews', validate(listReviewsSchema), asyncHandler(controller.listReviews));
 
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));
@@ -55,3 +58,5 @@ adminRouter.post('/stylists/:id/verify', validate(stylistIdParamsSchema), asyncH
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
 adminRouter.post('/users/:id/approve-foreign', validate(idParamsSchema), asyncHandler(controller.approveForeign));
 adminRouter.post('/users/:id/reject-foreign', validate(rejectForeignSchema), asyncHandler(controller.rejectForeign));
+adminRouter.post('/reviews/:id/approve', validate(idParamsSchema), asyncHandler(controller.approveReview));
+adminRouter.post('/reviews/:id/reject', validate(rejectReviewSchema), asyncHandler(controller.rejectReview));

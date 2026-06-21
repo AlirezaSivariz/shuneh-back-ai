@@ -30,6 +30,18 @@ export const setUserStatusSchema = {
   }),
 };
 
+export const listReviewsSchema = {
+  query: z.object({
+    status: z.enum(['pending', 'approved', 'rejected', 'all']).optional(),
+    ...pageQuery,
+  }),
+};
+
+export const rejectReviewSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};
+
 export const listSmsLogsSchema = {
   query: z.object({
     event: z.string().trim().max(60).optional(),

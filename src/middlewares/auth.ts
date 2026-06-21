@@ -45,6 +45,33 @@ export async function authenticate(
 }
 
 /**
+ * Like `authenticate`, but NEVER fails: on a missing/invalid token it simply
+ * leaves `req.user` unset and continues. For public endpoints that personalize
+ * when a user happens to be logged in (e.g. show the author their own pending
+ * review) without requiring auth.
+ */
+export async function optionalAuthenticate(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const header = req.headers.authorization;
+    if (header?.startsWith('Bearer ')) {
+      const token = header.slice('Bearer '.length).trim();
+      const payload = verifyAccessToken(token);
+      const user = await User.findById(payload.sub).select('roles isActive');
+      if (user && user.isActive !== false) {
+        req.user = { id: payload.sub, roles: user.roles };
+      }
+    }
+  } catch {
+    /* ignore — treat as anonymous */
+  }
+  next();
+}
+
+/**
  * Allow only users having at least one of the given roles.
  */
 export function authorize(...roles: Role[]) {
