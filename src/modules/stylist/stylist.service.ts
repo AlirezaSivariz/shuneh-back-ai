@@ -772,9 +772,12 @@ export async function submitVerification(stylistId: string) {
 }
 
 /**
- * Save the (PRIVATE) national-ID card images. Both sides are required. The
- * files are written by a PRIVATE uploader (outside the public mount); only the
- * storage KEYS are kept on the profile — never a public URL.
+ * Save the (PRIVATE) national-ID card images. At least one side must be sent;
+ * a side that isn't sent keeps its previously-stored image, so a user can
+ * REPLACE just one side. After the update BOTH sides must exist (a first-time
+ * submission therefore still needs both). The files are written by a PRIVATE
+ * uploader (outside the public mount); only the storage KEYS are kept on the
+ * profile — never a public URL.
  */
 export async function saveVerificationDocuments(
   stylistId: string,
@@ -782,23 +785,32 @@ export async function saveVerificationDocuments(
 ) {
   const front = files.nationalCardFront?.[0];
   const back = files.nationalCardBack?.[0];
-  if (!front || !back) {
-    throw AppError.badRequest('هر دو تصویر روی و پشت کارت ملی لازم است', 'DOCUMENTS_REQUIRED');
+  if (!front && !back) {
+    throw AppError.badRequest('حداقل یک تصویر کارت ملی لازم است', 'DOCUMENTS_REQUIRED');
   }
 
   const profile = await ensureStylistProfile(stylistId);
   const meta = { ownerType: 'stylist', ownerId: stylistId, kind: 'national_card' as const };
-  const f = await storageProvider.savePrivate(front, meta);
-  const b = await storageProvider.savePrivate(back, meta);
-  profile.nationalCardFront = f.path;
-  profile.nationalCardBack = b.path;
+  if (front) {
+    const f = await storageProvider.savePrivate(front, meta);
+    profile.nationalCardFront = f.path;
+  }
+  if (back) {
+    const b = await storageProvider.savePrivate(back, meta);
+    profile.nationalCardBack = b.path;
+  }
+  // A complete record needs both sides — enforce it AFTER applying the update so
+  // replacing a single side (when the other already exists) is allowed.
+  if (!profile.nationalCardFront || !profile.nationalCardBack) {
+    throw AppError.badRequest('هر دو تصویر روی و پشت کارت ملی لازم است', 'DOCUMENTS_REQUIRED');
+  }
   profile.documentsSubmittedAt = new Date();
   await profile.save();
 
   // NOTE: keys are private; the response only confirms presence, no URLs.
   return {
-    nationalCardFront: true,
-    nationalCardBack: true,
+    nationalCardFront: !!profile.nationalCardFront,
+    nationalCardBack: !!profile.nationalCardBack,
     documentsSubmittedAt: profile.documentsSubmittedAt,
   };
 }

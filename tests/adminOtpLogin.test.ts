@@ -7,7 +7,7 @@ import { User } from "../src/models/User";
  * 'admin' role (granted by the seed) gives the admin panel access after login.
  */
 describe("Admin logs in via the normal OTP flow", () => {
-  const ADMIN = "09105959107";
+  const ADMIN = "09369921986";
 
   it("admin uses standard OTP and keeps admin access; no fixed code works", async () => {
     // Simulate the seed: the admin user exists with the 'admin' role.
