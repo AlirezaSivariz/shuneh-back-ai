@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { ROLES } from '../../models/User';
 import { RESERVATION_STATUSES } from '../../models/Reservation';
+import { SERVICE_GENDERS } from '../../models/Salon';
+import { isValidHHmm } from '../../utils/time';
+import { findProvince, isValidProvinceCity } from '../../data/iranGeo';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
@@ -153,4 +156,97 @@ export const rejectForeignSchema = {
 
 export const stylistDocumentSchema = {
   params: z.object({ id: objectId, side: z.enum(['front', 'back']) }),
+};
+
+// ── Service catalogue (categories + services) ──
+export const createCategorySchema = {
+  body: z.object({
+    name: z.string().trim().min(1).max(80),
+    slug: z.string().trim().max(80).optional(),
+    description: z.string().trim().max(500).optional(),
+    order: z.number().int().min(0).max(9999).optional(),
+  }),
+};
+
+export const updateCategorySchema = {
+  params: z.object({ id: objectId }),
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(80).optional(),
+      slug: z.string().trim().max(80).optional(),
+      description: z.string().trim().max(500).optional(),
+      order: z.number().int().min(0).max(9999).optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update'),
+};
+
+export const createServiceSchema = {
+  body: z.object({
+    categoryId: objectId,
+    name: z.string().trim().min(1).max(120),
+    durationMin: z.number().int().min(1).max(1440),
+    defaultPrice: z.number().int().min(0).max(1_000_000_000),
+    description: z.string().trim().max(500).optional(),
+  }),
+};
+
+export const updateServiceSchema = {
+  params: z.object({ id: objectId }),
+  body: z
+    .object({
+      categoryId: objectId.optional(),
+      name: z.string().trim().min(1).max(120).optional(),
+      durationMin: z.number().int().min(1).max(1440).optional(),
+      defaultPrice: z.number().int().min(0).max(1_000_000_000).optional(),
+      description: z.string().trim().max(500).optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update'),
+};
+
+// ── Salon management ──
+const hhmm = z.string().refine(isValidHHmm, 'Time must be in HH:mm format');
+const salonGender = z.enum(SERVICE_GENDERS as [string, ...string[]]);
+const adminOpeningHours = z.array(
+  z.object({
+    dayOfWeek: z.number().int().min(0).max(6),
+    intervals: z.array(z.object({ start: hhmm, end: hhmm })).default([]),
+  }),
+);
+
+export const adminUpdateSalonSchema = {
+  params: z.object({ id: objectId }),
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      description: z.string().trim().max(1000).optional(),
+      address: z.string().trim().min(1).optional(),
+      province: z.string().trim().min(1).optional(),
+      city: z.string().trim().min(1).optional(),
+      serviceGender: salonGender.optional(),
+      lng: z.number().min(-180).max(180).optional(),
+      lat: z.number().min(-90).max(90).optional(),
+      openingHours: adminOpeningHours.optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update')
+    .refine(
+      (b) => (b.lng === undefined) === (b.lat === undefined),
+      'lng and lat must be provided together',
+    )
+    .refine((b) => (b.province === undefined) === (b.city === undefined), {
+      message: 'province and city must be provided together',
+      path: ['city'],
+    })
+    .refine((b) => b.province === undefined || findProvince(b.province) !== undefined, {
+      message: 'province is not a valid Iran province',
+      path: ['province'],
+    })
+    .refine((b) => b.province === undefined || isValidProvinceCity(b.province, b.city), {
+      message: 'city does not belong to the selected province',
+      path: ['city'],
+    }),
+};
+
+export const setSalonStatusSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ status: z.enum(['active', 'pending']) }),
 };

@@ -28,6 +28,12 @@ import {
   sendMessageSchema,
   deleteImageSchema,
   deletePortfolioImageSchema,
+  createCategorySchema,
+  updateCategorySchema,
+  createServiceSchema,
+  updateServiceSchema,
+  adminUpdateSalonSchema,
+  setSalonStatusSchema,
 } from './admin.validators';
 
 /**
@@ -53,6 +59,9 @@ adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controll
 adminRouter.get('/sms-logs', validate(listSmsLogsSchema), asyncHandler(controller.smsLogs));
 adminRouter.get('/reviews', validate(listReviewsSchema), asyncHandler(controller.listReviews));
 adminRouter.get('/message-templates', asyncHandler(controller.messageTemplates));
+// Service catalogue (categories + services) — read.
+adminRouter.get('/catalogue', asyncHandler(controller.listCatalogue));
+adminRouter.get('/salons/:id', validate(idParamsSchema), asyncHandler(controller.getSalon));
 
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));
@@ -68,3 +77,15 @@ adminRouter.post('/users/:id/approve-foreign', validate(idWithMessageSchema), as
 adminRouter.post('/users/:id/reject-foreign', validate(rejectForeignSchema), asyncHandler(controller.rejectForeign));
 adminRouter.post('/reviews/:id/approve', validate(idWithMessageSchema), asyncHandler(controller.approveReview));
 adminRouter.post('/reviews/:id/reject', validate(rejectReviewSchema), asyncHandler(controller.rejectReview));
+
+// ── Service catalogue management (audited) ──
+adminRouter.post('/categories', validate(createCategorySchema), asyncHandler(controller.createCategory));
+adminRouter.patch('/categories/:id', validate(updateCategorySchema), asyncHandler(controller.updateCategory));
+adminRouter.delete('/categories/:id', validate(idParamsSchema), asyncHandler(controller.deleteCategory));
+adminRouter.post('/services', validate(createServiceSchema), asyncHandler(controller.createService));
+adminRouter.patch('/services/:id', validate(updateServiceSchema), asyncHandler(controller.updateService));
+adminRouter.delete('/services/:id', validate(idParamsSchema), asyncHandler(controller.deleteService));
+
+// ── Salon management (audited) ──
+adminRouter.patch('/salons/:id', validate(adminUpdateSalonSchema), asyncHandler(controller.updateSalon));
+adminRouter.patch('/salons/:id/status', validate(setSalonStatusSchema), asyncHandler(controller.setSalonStatus));

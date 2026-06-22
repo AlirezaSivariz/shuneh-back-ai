@@ -213,6 +213,48 @@ export async function getStylistDocument(req: Request, res: Response): Promise<v
   res.send(data);
 }
 
+// ── Service catalogue (categories + services) ──
+export async function listCatalogue(_req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.listCatalogue());
+}
+
+export async function createCategory(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { category: await service.createCategory(req.user!.id, req.body) }, 201);
+}
+
+export async function updateCategory(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { category: await service.updateCategory(req.user!.id, req.params.id, req.body) });
+}
+
+export async function deleteCategory(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.deleteCategory(req.user!.id, req.params.id));
+}
+
+export async function createService(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { service: await service.createService(req.user!.id, req.body) }, 201);
+}
+
+export async function updateService(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { service: await service.updateService(req.user!.id, req.params.id, req.body) });
+}
+
+export async function deleteService(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.deleteService(req.user!.id, req.params.id));
+}
+
+// ── Salon management ──
+export async function getSalon(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { salon: await service.getSalonDetail(req.params.id) });
+}
+
+export async function updateSalon(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { salon: await service.adminUpdateSalon(req.user!.id, req.params.id, req.body) });
+}
+
+export async function setSalonStatus(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { salon: await service.setSalonStatus(req.user!.id, req.params.id, req.body.status) });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

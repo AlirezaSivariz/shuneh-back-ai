@@ -11,8 +11,12 @@ import { User, Role, ROLES } from '../../models/User';
 import { StylistProfile, IStylistProfile } from '../../models/StylistProfile';
 import { StylistSalon } from '../../models/StylistSalon';
 import { StylistService } from '../../models/StylistService';
-import { Salon } from '../../models/Salon';
+import { Salon, ServiceGender } from '../../models/Salon';
 import { Service } from '../../models/Service';
+import { ServiceCategory } from '../../models/ServiceCategory';
+import { updateSalon as updateSalonRecord } from '../salon/salon.service';
+import { OpeningHoursInput } from '../../utils/openingHours';
+import { nanoid } from 'nanoid';
 import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } from '../../models/Reservation';
 import { DiscountCode } from '../../models/DiscountCode';
 import { AuditLog } from '../../models/AuditLog';
@@ -914,4 +918,280 @@ export async function rejectVerification(
   await maybeSendMessage(adminId, stylistId, message, 'verification_rejected', 'تأیید پروفایل');
 
   return { stylistId, isVerified: false, verificationStatus: profile.verificationStatus };
+}
+
+// ───────────────── service catalogue (categories + services) ─────────────────
+// Admin management of the PUBLIC catalogue. Stylist-private custom services
+// (isCustom) are never created/edited/deleted here. All writes are audited and
+// guarded against orphaning data (a category with services / a service still
+// offered by stylists cannot be deleted).
+
+function slugify(input?: string): string {
+  const base = (input ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  // Persian names yield an empty ascii slug → fall back to a unique token.
+  return base || `cat-${nanoid(8).toLowerCase()}`;
+}
+
+/** Full catalogue (categories + their public services) for admin management. */
+export async function listCatalogue() {
+  const [categories, services] = await Promise.all([
+    ServiceCategory.find().sort({ order: 1, name: 1 }).lean(),
+    Service.find({ isCustom: { $ne: true } }).sort({ name: 1 }).lean(),
+  ]);
+  const byCategory = new Map<string, typeof services>();
+  for (const s of services) {
+    const k = String(s.categoryId);
+    if (!byCategory.has(k)) byCategory.set(k, []);
+    byCategory.get(k)!.push(s);
+  }
+  return {
+    categories: categories.map((c) => ({
+      id: String(c._id),
+      name: c.name,
+      slug: c.slug,
+      description: c.description ?? null,
+      order: c.order,
+      isDefault: c.isDefault,
+      services: (byCategory.get(String(c._id)) ?? []).map((s) => ({
+        id: String(s._id),
+        name: s.name,
+        durationMin: s.durationMin,
+        defaultPrice: s.defaultPrice,
+        description: s.description ?? null,
+        isDefault: s.isDefault,
+      })),
+    })),
+  };
+}
+
+export async function createCategory(
+  adminId: string,
+  data: { name: string; slug?: string; description?: string; order?: number },
+) {
+  const slug = slugify(data.slug || data.name);
+  if (await ServiceCategory.exists({ slug })) {
+    throw AppError.conflict('این اسلاگ قبلاً استفاده شده است', 'SLUG_TAKEN');
+  }
+  const cat = await ServiceCategory.create({
+    name: data.name,
+    slug,
+    description: data.description,
+    order: data.order ?? 0,
+    isDefault: false,
+  });
+  await audit(adminId, 'category.create', 'category', String(cat._id), { name: data.name, slug });
+  return { id: String(cat._id), name: cat.name, slug: cat.slug, order: cat.order };
+}
+
+export async function updateCategory(
+  adminId: string,
+  id: string,
+  data: { name?: string; slug?: string; description?: string; order?: number },
+) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const cat = await ServiceCategory.findById(id);
+  if (!cat) throw AppError.notFound('دسته‌بندی یافت نشد', 'CATEGORY_NOT_FOUND');
+
+  if (data.slug !== undefined) {
+    const slug = slugify(data.slug);
+    if (slug !== cat.slug && (await ServiceCategory.exists({ slug }))) {
+      throw AppError.conflict('این اسلاگ قبلاً استفاده شده است', 'SLUG_TAKEN');
+    }
+    cat.slug = slug;
+  }
+  if (data.name !== undefined) cat.name = data.name;
+  if (data.description !== undefined) cat.description = data.description;
+  if (data.order !== undefined) cat.order = data.order;
+  await cat.save();
+  await audit(adminId, 'category.update', 'category', id, data);
+  return { id, name: cat.name, slug: cat.slug, description: cat.description ?? null, order: cat.order };
+}
+
+export async function deleteCategory(adminId: string, id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const cat = await ServiceCategory.findById(id);
+  if (!cat) throw AppError.notFound('دسته‌بندی یافت نشد', 'CATEGORY_NOT_FOUND');
+  // Never orphan services — require the category to be empty first.
+  const serviceCount = await Service.countDocuments({ categoryId: id });
+  if (serviceCount > 0) {
+    throw AppError.badRequest(
+      `این دسته‌بندی ${serviceCount} خدمت دارد؛ ابتدا خدمات را حذف یا جابه‌جا کنید`,
+      'CATEGORY_NOT_EMPTY',
+    );
+  }
+  await cat.deleteOne();
+  await audit(adminId, 'category.delete', 'category', id, { name: cat.name, slug: cat.slug });
+  return { id, deleted: true };
+}
+
+export async function createService(
+  adminId: string,
+  data: {
+    categoryId: string;
+    name: string;
+    durationMin: number;
+    defaultPrice: number;
+    description?: string;
+  },
+) {
+  if (!Types.ObjectId.isValid(data.categoryId)) {
+    throw AppError.badRequest('شناسه‌ی دسته‌بندی نامعتبر', 'INVALID_ID');
+  }
+  const cat = await ServiceCategory.findById(data.categoryId).select('_id').lean();
+  if (!cat) throw AppError.notFound('دسته‌بندی یافت نشد', 'CATEGORY_NOT_FOUND');
+
+  const svc = await Service.create({
+    categoryId: new Types.ObjectId(data.categoryId),
+    name: data.name,
+    durationMin: data.durationMin,
+    defaultPrice: data.defaultPrice,
+    description: data.description,
+    isDefault: false,
+    isCustom: false,
+    ownerStylistId: null,
+  });
+  await audit(adminId, 'service.create', 'service', String(svc._id), {
+    name: data.name,
+    categoryId: data.categoryId,
+  });
+  return { id: String(svc._id) };
+}
+
+/** Load a PUBLIC (non-custom) service for an admin write. */
+async function loadPublicService(id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const svc = await Service.findById(id);
+  if (!svc) throw AppError.notFound('خدمت یافت نشد', 'SERVICE_NOT_FOUND');
+  if (svc.isCustom) {
+    throw AppError.badRequest('خدمات اختصاصی متخصص از این بخش قابل مدیریت نیستند', 'SERVICE_IS_CUSTOM');
+  }
+  return svc;
+}
+
+export async function updateService(
+  adminId: string,
+  id: string,
+  data: {
+    categoryId?: string;
+    name?: string;
+    durationMin?: number;
+    defaultPrice?: number;
+    description?: string;
+  },
+) {
+  const svc = await loadPublicService(id);
+  if (data.categoryId !== undefined) {
+    if (!Types.ObjectId.isValid(data.categoryId)) {
+      throw AppError.badRequest('شناسه‌ی دسته‌بندی نامعتبر', 'INVALID_ID');
+    }
+    const cat = await ServiceCategory.findById(data.categoryId).select('_id').lean();
+    if (!cat) throw AppError.notFound('دسته‌بندی یافت نشد', 'CATEGORY_NOT_FOUND');
+    svc.categoryId = new Types.ObjectId(data.categoryId);
+  }
+  if (data.name !== undefined) svc.name = data.name;
+  if (data.durationMin !== undefined) svc.durationMin = data.durationMin;
+  if (data.defaultPrice !== undefined) svc.defaultPrice = data.defaultPrice;
+  if (data.description !== undefined) svc.description = data.description;
+  await svc.save();
+  await audit(adminId, 'service.update', 'service', id, data);
+  return { id, name: svc.name, durationMin: svc.durationMin, defaultPrice: svc.defaultPrice };
+}
+
+export async function deleteService(adminId: string, id: string) {
+  const svc = await loadPublicService(id);
+  // Don't break active offerings — block deletion while any stylist offers it.
+  // Past reservations are unaffected (they snapshot service name/price).
+  const offered = await StylistService.countDocuments({ serviceId: id });
+  if (offered > 0) {
+    throw AppError.badRequest(
+      `این خدمت توسط ${offered} متخصص ارائه می‌شود و قابل حذف نیست`,
+      'SERVICE_IN_USE',
+    );
+  }
+  await svc.deleteOne();
+  await audit(adminId, 'service.delete', 'service', id, { name: svc.name });
+  return { id, deleted: true };
+}
+
+// ───────────────────────── salon management (admin) ─────────────────────────
+
+/** Full salon detail for the admin panel (owner + stylist count + memberships). */
+export async function getSalonDetail(id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const salon = await Salon.findById(id).lean();
+  if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
+
+  const [owner, memberships] = await Promise.all([
+    salon.ownerId ? User.findById(salon.ownerId).select('firstName lastName phone').lean() : null,
+    StylistSalon.find({ salonId: id }).populate('stylistId', 'firstName lastName phone').lean(),
+  ]);
+
+  return {
+    id: String(salon._id),
+    name: salon.name,
+    description: salon.description ?? null,
+    address: salon.address ?? null,
+    province: salon.province ?? null,
+    city: salon.city ?? null,
+    location: salon.location ?? null,
+    status: salon.status,
+    serviceGender: salon.serviceGender ?? null,
+    openingHours: salon.openingHours,
+    owner: owner
+      ? { id: String(salon.ownerId), fullName: fullName(owner), phone: owner.phone }
+      : null,
+    stylists: memberships.map((m) => {
+      const u = m.stylistId as unknown as {
+        _id: Types.ObjectId;
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+      } | null;
+      return {
+        id: u ? String(u._id) : String(m.stylistId),
+        fullName: fullName(u),
+        phone: u?.phone ?? null,
+        membershipStatus: m.status,
+      };
+    }),
+    createdAt: salon.createdAt,
+  };
+}
+
+/** Admin edits any salon (bypasses owner check). Reuses the shared updater
+ * (opening-hours validation + reservation reconciliation), then audits. */
+export async function adminUpdateSalon(
+  adminId: string,
+  id: string,
+  data: {
+    name?: string;
+    description?: string;
+    address?: string;
+    province?: string;
+    city?: string;
+    serviceGender?: ServiceGender;
+    lng?: number;
+    lat?: number;
+    openingHours?: OpeningHoursInput[];
+  },
+) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const salon = await updateSalonRecord(id, data);
+  await audit(adminId, 'salon.update', 'salon', id, { fields: Object.keys(data) });
+  return getSalonDetail(String(salon._id));
+}
+
+/** Admin sets a salon's status (active|pending). */
+export async function setSalonStatus(adminId: string, id: string, status: 'active' | 'pending') {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const salon = await Salon.findById(id);
+  if (!salon) throw AppError.notFound('سالن یافت نشد', 'SALON_NOT_FOUND');
+  salon.status = status;
+  await salon.save();
+  await audit(adminId, 'salon.setStatus', 'salon', id, { status });
+  return { id, status: salon.status };
 }

@@ -3,29 +3,27 @@ import { GeoPoint } from '../utils/geo';
 
 export type SalonStatus = 'active' | 'pending';
 
-/** Who the salon serves: women-only, men-only, or everyone. */
-export type ServiceGender = 'women' | 'men' | 'unisex';
-export const SERVICE_GENDERS: ServiceGender[] = ['women', 'men', 'unisex'];
+/** Who the salon serves: women-only or men-only. */
+export type ServiceGender = 'women' | 'men';
+export const SERVICE_GENDERS: ServiceGender[] = ['women', 'men'];
 
 /**
- * Whether a salon matches a gender filter. A 'women'/'men' filter also matches
- * 'unisex' salons (they serve everyone); a 'unisex' filter matches only unisex.
- * No filter → always matches.
+ * Whether a salon matches a gender filter (exact match). No filter → always
+ * matches. A salon with no gender set (legacy / not-yet-chosen) matches no
+ * filter, so it only surfaces in unfiltered results until its owner picks one.
  */
 export function salonMatchesGender(
   salonGender: ServiceGender | undefined | null,
   filter?: ServiceGender,
 ): boolean {
   if (!filter) return true;
-  const g = salonGender ?? 'unisex';
-  if (filter === 'unisex') return g === 'unisex';
-  return g === filter || g === 'unisex';
+  return salonGender === filter;
 }
 
-/** Mongo query fragment for a gender filter (mirrors salonMatchesGender). */
+/** Mongo query fragment for a gender filter (exact match). */
 export function genderQuery(filter?: ServiceGender): unknown | undefined {
   if (!filter) return undefined;
-  return filter === 'unisex' ? 'unisex' : { $in: [filter, 'unisex'] };
+  return filter;
 }
 
 export interface IOpeningInterval {
@@ -50,7 +48,7 @@ export interface ISalon extends Document {
   location?: GeoPoint;
   ownerId: Types.ObjectId | null;
   status: SalonStatus;
-  serviceGender: ServiceGender;
+  serviceGender?: ServiceGender;
   openingHours: IOpeningHours[];
   createdBy: Types.ObjectId;
   createdAt: Date;
@@ -92,8 +90,10 @@ const salonSchema = new Schema<ISalon>(
     location: { type: geoPointSchema },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     status: { type: String, enum: ['active', 'pending'], default: 'active' },
-    // Existing salons predate this field → default 'unisex' keeps them valid.
-    serviceGender: { type: String, enum: SERVICE_GENDERS, default: 'unisex', index: true },
+    // women|men only (no default). Legacy salons may have it unset until the
+    // owner edits — the startup migration unsets the removed 'unisex' value so
+    // those docs stay valid against this enum.
+    serviceGender: { type: String, enum: SERVICE_GENDERS, index: true },
     openingHours: { type: [openingHoursSchema], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

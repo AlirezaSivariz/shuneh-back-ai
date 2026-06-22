@@ -10,7 +10,7 @@ export async function search(req: Request, res: Response): Promise<void> {
     lng?: number;
     lat?: number;
     radius?: number;
-    gender?: 'women' | 'men' | 'unisex';
+    gender?: 'women' | 'men';
   };
   const salons = await service.searchSalons({ name, province, city, lng, lat, radius, gender });
   sendSuccess(res, { salons });

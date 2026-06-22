@@ -1,7 +1,7 @@
 import { createApp } from './app';
 import { connectDb } from './config/db';
 import { config } from './config/env';
-import { autoSeedIfEmpty } from './seed/seed';
+import { autoSeedIfEmpty, migrateLegacySalonServiceGender } from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 
 async function bootstrap() {
@@ -9,6 +9,8 @@ async function bootstrap() {
 
   // Ensure the default service catalogue exists on a fresh database.
   await autoSeedIfEmpty();
+  // Drop the removed 'unisex' service gender from any legacy salons.
+  await migrateLegacySalonServiceGender();
 
   const app = createApp();
 

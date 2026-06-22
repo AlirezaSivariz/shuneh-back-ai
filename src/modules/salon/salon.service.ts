@@ -80,7 +80,7 @@ export async function searchSalons(params: {
       city: s.city ?? null,
       location: s.location,
       status: s.status,
-      serviceGender: s.serviceGender ?? "unisex",
+      serviceGender: s.serviceGender ?? null,
       openingHours: s.openingHours,
     }));
 }
@@ -130,7 +130,7 @@ export async function createOwnSalon(
     location: toGeoPoint(data.lng, data.lat),
     ownerId: new Types.ObjectId(userId),
     status: "active",
-    serviceGender: data.serviceGender ?? "unisex",
+    serviceGender: data.serviceGender,
     openingHours: validateOpeningHours(data.openingHours),
     createdBy: new Types.ObjectId(userId),
   });
@@ -272,7 +272,7 @@ export async function listOwnerSalons(ownerId: string) {
     city: s.city ?? null,
     location: s.location,
     status: s.status,
-    serviceGender: s.serviceGender ?? "unisex",
+    serviceGender: s.serviceGender ?? null,
     openingHours: s.openingHours,
   }));
 }

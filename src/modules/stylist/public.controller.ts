@@ -13,7 +13,7 @@ export async function search(req: Request, res: Response): Promise<void> {
       lng?: number;
       lat?: number;
       radius?: number;
-      gender?: 'women' | 'men' | 'unisex';
+      gender?: 'women' | 'men';
     };
   const stylists = await service.searchStylists({
     serviceId,

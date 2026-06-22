@@ -62,7 +62,7 @@ interface SearchParams {
   lng?: number;
   lat?: number;
   radius?: number; // meters
-  gender?: 'women' | 'men' | 'unisex';
+  gender?: 'women' | 'men';
 }
 
 /**
@@ -210,7 +210,7 @@ export async function searchStylists(params: SearchParams) {
             id: String(loc.salon._id),
             name: loc.salon.name,
             status: loc.salonStatus,
-            serviceGender: loc.salon.serviceGender ?? 'unisex',
+            serviceGender: loc.salon.serviceGender ?? null,
             province: loc.salon.province ?? null,
             city: loc.salon.city ?? null,
           }
