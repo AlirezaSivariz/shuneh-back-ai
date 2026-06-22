@@ -6,6 +6,7 @@ import { optionalAuthenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
   searchStylistsSchema,
+  homeStylistsSchema,
   stylistIdParamsSchema,
   availabilitySchema,
   availableDaysSchema,
@@ -18,6 +19,9 @@ const router = Router();
 router.get('/search', validate(searchStylistsSchema), asyncHandler(controller.search));
 // Promoted stylists for the landing "featured" section.
 router.get('/featured', asyncHandler(controller.featured));
+// Landing "متخصصین" section: promoted first, then a quality fallback so it's
+// never empty while any bookable stylist exists.
+router.get('/home', validate(homeStylistsSchema), asyncHandler(controller.home));
 router.get(
   '/:id/availability',
   validate(availabilitySchema),

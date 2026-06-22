@@ -7,10 +7,18 @@ export const searchStylistsSchema = {
     serviceId: objectId.optional(),
     categoryId: objectId.optional(),
     name: z.string().trim().optional(),
+    province: z.string().trim().optional(),
+    city: z.string().trim().optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(),
     radius: z.coerce.number().int().min(1).max(100000).optional(),
     gender: z.enum(['women', 'men', 'unisex']).optional(),
+  }),
+};
+
+export const homeStylistsSchema = {
+  query: z.object({
+    limit: z.coerce.number().int().min(1).max(24).optional(),
   }),
 };
 

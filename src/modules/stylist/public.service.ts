@@ -57,6 +57,8 @@ interface SearchParams {
   serviceId?: string;
   categoryId?: string;
   name?: string;
+  province?: string;
+  city?: string;
   lng?: number;
   lat?: number;
   radius?: number; // meters
@@ -163,6 +165,11 @@ export async function searchStylists(params: SearchParams) {
 
     const loc = await resolveStylistLocation(uid, profile);
 
+    // province/city filter: matches the stylist's salon location. Freelancers
+    // (no salon) carry no province/city and are excluded when either is set.
+    if (params.province && loc.salon?.province !== params.province) continue;
+    if (params.city && loc.salon?.city !== params.city) continue;
+
     // geo filter.
     if (params.lng !== undefined && params.lat !== undefined) {
       if (!loc.location) continue;
@@ -204,6 +211,8 @@ export async function searchStylists(params: SearchParams) {
             name: loc.salon.name,
             status: loc.salonStatus,
             serviceGender: loc.salon.serviceGender ?? 'unisex',
+            province: loc.salon.province ?? null,
+            city: loc.salon.city ?? null,
           }
         : null,
       services,
@@ -212,6 +221,9 @@ export async function searchStylists(params: SearchParams) {
       ratingCount: profile.ratingCount ?? 0,
       isPromoted: isPromotedActive(profile),
       isVerified: profile.isVerified === true,
+      // Registration time — used only by the home fallback ranking (tie-break
+      // by newest). Not sensitive; clients may ignore it.
+      createdAt: profile.createdAt ?? null,
     });
   }
 
@@ -229,6 +241,43 @@ export async function searchStylists(params: SearchParams) {
 export async function getFeaturedStylists() {
   const all = await searchStylists({});
   return all.filter((s) => s.isPromoted);
+}
+
+/** Default and maximum number of stylists the landing "home" section returns. */
+const HOME_DEFAULT_LIMIT = 6;
+const HOME_MAX_LIMIT = 24;
+
+/**
+ * Stylists for the landing page "متخصصین" section, with a fallback so the
+ * section is never empty while any bookable stylist exists. Ordering:
+ *   1) active-promoted stylists (isPromoted && promotedUntil > now), then
+ *   2) the remaining bookable stylists by best rating, then newest registration.
+ * Only bookable stylists are considered (searchStylists already enforces an
+ * active workplace + accepting reservations). Each item is tagged `isPromoted`
+ * (real promotion) and `isFallback` (filled the slot only because there weren't
+ * enough promoted ones) so the client can label "ویژه" optionally.
+ */
+export async function getHomeStylists(limit?: number) {
+  const take = Math.min(Math.max(1, Math.floor(limit ?? HOME_DEFAULT_LIMIT)), HOME_MAX_LIMIT);
+  const all = await searchStylists({});
+
+  const promoted = all.filter((s) => s.isPromoted);
+  const fallback = all
+    .filter((s) => !s.isPromoted)
+    .sort((a, b) => {
+      const byRating = (b.rating ?? 0) - (a.rating ?? 0);
+      if (byRating !== 0) return byRating;
+      // Tie-break: newest registration first (keeps the lineup fresh).
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bt - at;
+    });
+
+  // promoted first (already rating-sorted by searchStylists), then fallbacks.
+  return [...promoted, ...fallback].slice(0, take).map(({ createdAt, ...s }) => {
+    void createdAt; // internal-only ranking field; not part of the card payload.
+    return { ...s, isFallback: !s.isPromoted };
+  });
 }
 
 export async function getStylistProfile(stylistId: string) {
@@ -278,6 +327,8 @@ export async function getStylistProfile(stylistId: string) {
             id: String(s._id),
             name: s.name,
             address: s.address ?? null,
+            province: s.province ?? null,
+            city: s.city ?? null,
             location: s.location ?? null,
             // The stylist's membership status in this salon (active|pending).
             status: l.status,

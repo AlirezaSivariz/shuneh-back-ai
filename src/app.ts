@@ -14,6 +14,7 @@ import {
   meRouter,
 } from "./modules/onboarding/onboarding.routes";
 import serviceRoutes from "./modules/service/service.routes";
+import geoRoutes from "./modules/geo/geo.routes";
 import stylistRoutes from "./modules/stylist/stylist.routes";
 import stylistsPublicRoutes from "./modules/stylist/public.routes";
 import mediaRoutes from "./modules/media/media.routes";
@@ -50,6 +51,8 @@ export function createApp(): Application {
   app.use("/onboarding", onboardingRouter);
   app.use("/me", meRouter);
   app.use("/services", serviceRoutes);
+  // Static reference data (provinces/cities) for selects + map.
+  app.use("/geo", geoRoutes);
   // Mount the more specific /stylist/media before /stylist so it matches first.
   app.use("/stylist/media", mediaRoutes);
   app.use("/stylist", stylistRoutes);

@@ -3,19 +3,24 @@ import * as service from './public.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function search(req: Request, res: Response): Promise<void> {
-  const { serviceId, categoryId, name, lng, lat, radius, gender } = req.query as unknown as {
-    serviceId?: string;
-    categoryId?: string;
-    name?: string;
-    lng?: number;
-    lat?: number;
-    radius?: number;
-    gender?: 'women' | 'men' | 'unisex';
-  };
+  const { serviceId, categoryId, name, province, city, lng, lat, radius, gender } =
+    req.query as unknown as {
+      serviceId?: string;
+      categoryId?: string;
+      name?: string;
+      province?: string;
+      city?: string;
+      lng?: number;
+      lat?: number;
+      radius?: number;
+      gender?: 'women' | 'men' | 'unisex';
+    };
   const stylists = await service.searchStylists({
     serviceId,
     categoryId,
     name,
+    province,
+    city,
     lng,
     lat,
     radius,
@@ -31,6 +36,12 @@ export async function profile(req: Request, res: Response): Promise<void> {
 
 export async function featured(_req: Request, res: Response): Promise<void> {
   const stylists = await service.getFeaturedStylists();
+  sendSuccess(res, { stylists });
+}
+
+export async function home(req: Request, res: Response): Promise<void> {
+  const { limit } = req.query as unknown as { limit?: number };
+  const stylists = await service.getHomeStylists(limit);
   sendSuccess(res, { stylists });
 }
 

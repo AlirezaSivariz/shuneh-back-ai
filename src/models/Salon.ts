@@ -43,6 +43,10 @@ export interface ISalon extends Document {
   name: string;
   description?: string;
   address?: string;
+  /** Iran province name (from the shared geo dataset). Nullable for legacy docs. */
+  province?: string | null;
+  /** City name within `province` (from the shared geo dataset). Nullable. */
+  city?: string | null;
   location?: GeoPoint;
   ownerId: Types.ObjectId | null;
   status: SalonStatus;
@@ -82,6 +86,9 @@ const salonSchema = new Schema<ISalon>(
     name: { type: String, required: true, trim: true, index: true },
     description: { type: String },
     address: { type: String },
+    // Province/city for filtering & display. Default null keeps legacy docs valid.
+    province: { type: String, default: null, index: true },
+    city: { type: String, default: null, index: true },
     location: { type: geoPointSchema },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     status: { type: String, enum: ['active', 'pending'], default: 'active' },

@@ -38,6 +38,8 @@ const validateOpeningHours = (
  */
 export async function searchSalons(params: {
   name?: string;
+  province?: string;
+  city?: string;
   lng?: number;
   lat?: number;
   radius?: number; // meters
@@ -48,6 +50,8 @@ export async function searchSalons(params: {
   if (params.name) {
     query.name = { $regex: params.name, $options: "i" };
   }
+  if (params.province) query.province = params.province;
+  if (params.city) query.city = params.city;
   const gq = genderQuery(params.gender);
   if (gq !== undefined) {
     query.serviceGender = gq;
@@ -72,6 +76,8 @@ export async function searchSalons(params: {
       name: s.name,
       description: s.description,
       address: s.address,
+      province: s.province ?? null,
+      city: s.city ?? null,
       location: s.location,
       status: s.status,
       serviceGender: s.serviceGender ?? "unisex",
@@ -107,6 +113,8 @@ export async function createOwnSalon(
     name: string;
     description?: string;
     address: string;
+    province?: string;
+    city?: string;
     lng: number;
     lat: number;
     serviceGender?: ServiceGender;
@@ -117,6 +125,8 @@ export async function createOwnSalon(
     name: data.name,
     description: data.description,
     address: data.address,
+    province: data.province ?? null,
+    city: data.city ?? null,
     location: toGeoPoint(data.lng, data.lat),
     ownerId: new Types.ObjectId(userId),
     status: "active",
@@ -157,6 +167,8 @@ export async function createSalonInvite(
     name: (draft.name as string) ?? "Pending salon",
     description: draft.description as string | undefined,
     address: draft.address as string | undefined,
+    province: (draft.province as string | undefined) ?? null,
+    city: (draft.city as string | undefined) ?? null,
     location:
       typeof draft.lng === "number" && typeof draft.lat === "number"
         ? toGeoPoint(draft.lng as number, draft.lat as number)
@@ -256,8 +268,11 @@ export async function listOwnerSalons(ownerId: string) {
     name: s.name,
     description: s.description,
     address: s.address,
+    province: s.province ?? null,
+    city: s.city ?? null,
     location: s.location,
     status: s.status,
+    serviceGender: s.serviceGender ?? "unisex",
     openingHours: s.openingHours,
   }));
 }
@@ -572,6 +587,8 @@ export async function updateSalon(
     name?: string;
     description?: string;
     address?: string;
+    province?: string;
+    city?: string;
     lng?: number;
     lat?: number;
     serviceGender?: ServiceGender;
@@ -584,6 +601,8 @@ export async function updateSalon(
   if (data.name !== undefined) salon.name = data.name;
   if (data.description !== undefined) salon.description = data.description;
   if (data.address !== undefined) salon.address = data.address;
+  if (data.province !== undefined) salon.province = data.province;
+  if (data.city !== undefined) salon.city = data.city;
   if (data.serviceGender !== undefined)
     salon.serviceGender = data.serviceGender;
   if (data.lng !== undefined && data.lat !== undefined) {

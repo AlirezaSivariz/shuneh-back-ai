@@ -3,14 +3,16 @@ import * as service from './salon.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function search(req: Request, res: Response): Promise<void> {
-  const { name, lng, lat, radius, gender } = req.query as unknown as {
+  const { name, province, city, lng, lat, radius, gender } = req.query as unknown as {
     name?: string;
+    province?: string;
+    city?: string;
     lng?: number;
     lat?: number;
     radius?: number;
     gender?: 'women' | 'men' | 'unisex';
   };
-  const salons = await service.searchSalons({ name, lng, lat, radius, gender });
+  const salons = await service.searchSalons({ name, province, city, lng, lat, radius, gender });
   sendSuccess(res, { salons });
 }
 
@@ -97,6 +99,8 @@ export async function updateSalon(req: Request, res: Response): Promise<void> {
       name: salon.name,
       description: salon.description,
       address: salon.address,
+      province: salon.province ?? null,
+      city: salon.city ?? null,
       location: salon.location,
       status: salon.status,
       serviceGender: salon.serviceGender,
