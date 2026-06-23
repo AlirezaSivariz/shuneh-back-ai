@@ -266,6 +266,30 @@ export async function adjustWallet(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { wallet: result });
 }
 
+// ── Analytics & pending counts ──
+export async function reservationAnalytics(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string>;
+  sendSuccess(
+    res,
+    await service.getReservationAnalytics({
+      granularity: (q.granularity as 'week' | 'month') ?? 'month',
+      from: q.from,
+      to: q.to,
+    }),
+  );
+}
+
+export async function pendingCounts(_req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getPendingCounts());
+}
+
+// ── Act-on-behalf ──
+export async function setStylistAccepting(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, {
+    stylist: await service.setStylistAccepting(req.user!.id, req.params.id, req.body.accepting),
+  });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

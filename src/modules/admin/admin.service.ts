@@ -20,6 +20,7 @@ import { OpeningHoursInput } from '../../utils/openingHours';
 import { nanoid } from 'nanoid';
 import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } from '../../models/Reservation';
 import { DiscountCode } from '../../models/DiscountCode';
+import { WalletTransaction } from '../../models/WalletTransaction';
 import { AuditLog } from '../../models/AuditLog';
 import { SmsLog } from '../../models/SmsLog';
 import { Review } from '../../models/Review';
@@ -156,17 +157,20 @@ export async function getUser(id: string) {
   const user = await User.findById(id).lean();
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
-  const [profile, ownedSalons, memberships, services, reservationRows] = await Promise.all([
-    StylistProfile.findOne({ userId: id }).lean(),
-    Salon.find({ ownerId: id }).select('name address status').lean(),
-    StylistSalon.find({ stylistId: id }).populate('salonId', 'name status').lean(),
-    StylistService.find({ stylistId: id }).populate('serviceId', 'name').lean(),
-    // The user's reservations (as customer OR stylist), most recent first.
-    Reservation.find({ $or: [{ customerId: id }, { stylistId: id }] })
-      .sort({ startAt: -1 })
-      .limit(20)
-      .lean(),
-  ]);
+  const [profile, ownedSalons, memberships, services, reservationRows, walletTxRows] =
+    await Promise.all([
+      StylistProfile.findOne({ userId: id }).lean(),
+      Salon.find({ ownerId: id }).select('name address status').lean(),
+      StylistSalon.find({ stylistId: id }).populate('salonId', 'name status').lean(),
+      StylistService.find({ stylistId: id }).populate('serviceId', 'name').lean(),
+      // The user's reservations (as customer OR stylist), most recent first.
+      Reservation.find({ $or: [{ customerId: id }, { stylistId: id }] })
+        .sort({ startAt: -1 })
+        .limit(20)
+        .lean(),
+      // Recent wallet ledger entries (for the admin wallet panel).
+      WalletTransaction.find({ userId: id }).sort({ createdAt: -1 }).limit(10).lean(),
+    ]);
   const reservations = await enrichReservations(reservationRows as unknown as IReservation[]);
 
   return {
@@ -187,8 +191,18 @@ export async function getUser(id: string) {
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
       profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
+      walletBalance: user.walletBalance ?? 0,
       createdAt: user.createdAt,
     },
+    // Recent wallet ledger (newest first) for the admin wallet panel.
+    walletTransactions: walletTxRows.map((t) => ({
+      id: String(t._id),
+      type: t.type,
+      amount: t.amount,
+      reason: t.reason,
+      status: t.status,
+      createdAt: t.createdAt,
+    })),
     // Portfolio with stable keys (the key IS the delete id).
     portfolio: (profile?.portfolio ?? []).map((key) => ({
       id: key,
@@ -1236,4 +1250,165 @@ export async function adjustUserWallet(
     balance: result.balance,
     transaction: { id: String(result.transaction._id), type, amount: Math.abs(amt) },
   };
+}
+
+// ───────────────────── pending work counts (sidebar badges) ─────────────────────
+
+/** One light query set powering the sidebar "pending work" badges. */
+export async function getPendingCounts() {
+  const [foreignApprovals, reviews, verifications, pendingSalons] = await Promise.all([
+    User.countDocuments({ isForeignNational: true, foreignApprovalStatus: 'pending' }),
+    Review.countDocuments({ status: 'pending' }),
+    StylistProfile.countDocuments({ verificationStatus: 'pending' }),
+    Salon.countDocuments({ status: 'pending' }),
+  ]);
+  return { foreignApprovals, reviews, verifications, pendingSalons };
+}
+
+// ───────────────────────── reservation analytics ─────────────────────────
+
+type Granularity = 'week' | 'month';
+
+/**
+ * Reservation time-series + revenue, bucketed by week or month (Iran days are
+ * stored at their UTC midnight, so we truncate in UTC; the week starts Saturday).
+ * Returns the series, range totals, period-over-period % change (last bucket vs
+ * the previous one), the status breakdown, busiest weekday and top services.
+ * A few small aggregations — Atlas-friendly.
+ */
+export async function getReservationAnalytics(opts: {
+  granularity: Granularity;
+  from?: string;
+  to?: string;
+}) {
+  const granularity = opts.granularity;
+  const to = opts.to ? new Date(`${opts.to}T00:00:00.000Z`) : new Date();
+  let from: Date;
+  if (opts.from) {
+    from = new Date(`${opts.from}T00:00:00.000Z`);
+  } else {
+    from = new Date(to);
+    // ~12 buckets by default.
+    if (granularity === 'month') from.setUTCMonth(from.getUTCMonth() - 11);
+    else from.setUTCDate(from.getUTCDate() - 7 * 11);
+  }
+  const match = { date: { $gte: from, $lte: to } };
+
+  const truncSpec =
+    granularity === 'week'
+      ? { date: '$date', unit: 'week', binSize: 1, startOfWeek: 'saturday', timezone: 'UTC' }
+      : { date: '$date', unit: 'month', binSize: 1, timezone: 'UTC' };
+
+  const series = await Reservation.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: { $dateTrunc: truncSpec },
+        count: { $sum: 1 },
+        revenue: {
+          $sum: { $cond: [{ $eq: ['$status', 'completed'] }, { $ifNull: ['$price', 0] }, 0] },
+        },
+        completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+        cancelled: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } },
+        confirmed: { $sum: { $cond: [{ $eq: ['$status', 'confirmed'] }, 1, 0] } },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+
+  const points = series.map((s) => ({
+    bucket: (s._id as Date).toISOString().slice(0, 10),
+    count: s.count as number,
+    revenue: s.revenue as number,
+    completed: s.completed as number,
+    cancelled: s.cancelled as number,
+    confirmed: s.confirmed as number,
+  }));
+
+  const last = points[points.length - 1];
+  const prev = points[points.length - 2];
+  const pct = (cur: number, prv: number) =>
+    prv > 0 ? Math.round(((cur - prv) / prv) * 100) : cur > 0 ? 100 : 0;
+
+  // Status breakdown across the whole range.
+  const statusAgg = await Reservation.aggregate([
+    { $match: match },
+    { $group: { _id: '$status', count: { $sum: 1 } } },
+  ]);
+  const byStatus = RESERVATION_STATUSES.map((st) => ({
+    status: st,
+    count: (statusAgg.find((x) => x._id === st)?.count as number) ?? 0,
+  }));
+
+  // Busiest weekday. $dayOfWeek is 1..7 (1=Sunday) → JS 0..6 (0=Sunday).
+  const dowAgg = await Reservation.aggregate([
+    { $match: match },
+    { $group: { _id: { $dayOfWeek: { date: '$date', timezone: 'UTC' } }, count: { $sum: 1 } } },
+  ]);
+  const byWeekday = Array.from({ length: 7 }, (_, i) => ({
+    dayOfWeek: i,
+    count: (dowAgg.find((x) => (x._id as number) - 1 === i)?.count as number) ?? 0,
+  }));
+
+  // Top services (by reservation count) — uses serviceIds, falling back to serviceId.
+  const topAgg = await Reservation.aggregate([
+    { $match: match },
+    {
+      $project: {
+        ids: {
+          $cond: [
+            { $gt: [{ $size: { $ifNull: ['$serviceIds', []] } }, 0] },
+            '$serviceIds',
+            ['$serviceId'],
+          ],
+        },
+      },
+    },
+    { $unwind: '$ids' },
+    { $group: { _id: '$ids', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 6 },
+  ]);
+  const svcDocs = await Service.find({ _id: { $in: topAgg.map((t) => t._id) } })
+    .select('name')
+    .lean();
+  const svcName = new Map(svcDocs.map((s) => [String(s._id), s.name]));
+  const topServices = topAgg.map((t) => ({
+    id: String(t._id),
+    name: svcName.get(String(t._id)) ?? '—',
+    count: t.count as number,
+  }));
+
+  return {
+    granularity,
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+    points,
+    totals: {
+      reservations: points.reduce((a, p) => a + p.count, 0),
+      revenue: points.reduce((a, p) => a + p.revenue, 0),
+    },
+    change: {
+      reservations: last && prev ? pct(last.count, prev.count) : 0,
+      revenue: last && prev ? pct(last.revenue, prev.revenue) : 0,
+      current: { reservations: last?.count ?? 0, revenue: last?.revenue ?? 0 },
+      previous: { reservations: prev?.count ?? 0, revenue: prev?.revenue ?? 0 },
+    },
+    byStatus,
+    byWeekday,
+    topServices,
+  };
+}
+
+// ─────────────────── act-on-behalf (admin support actions) ───────────────────
+
+/** Admin pauses/resumes a stylist's incoming bookings on their behalf. */
+export async function setStylistAccepting(adminId: string, stylistId: string, accepting: boolean) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  profile.isAcceptingReservations = accepting;
+  await profile.save();
+  await audit(adminId, 'stylist.setAccepting', 'stylist', stylistId, { accepting });
+  return { stylistId, isAcceptingReservations: accepting };
 }

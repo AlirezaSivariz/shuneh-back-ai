@@ -35,6 +35,8 @@ import {
   adminUpdateSalonSchema,
   setSalonStatusSchema,
   adminWalletAdjustSchema,
+  reservationAnalyticsSchema,
+  setStylistAcceptingSchema,
 } from './admin.validators';
 
 /**
@@ -46,6 +48,8 @@ adminRouter.use(authenticate, requireAdmin, rateLimit({ windowMs: 60_000, max: 1
 
 // ── Read ──
 adminRouter.get('/reports', asyncHandler(controller.reports));
+adminRouter.get('/pending-counts', asyncHandler(controller.pendingCounts));
+adminRouter.get('/analytics/reservations', validate(reservationAnalyticsSchema), asyncHandler(controller.reservationAnalytics));
 adminRouter.get('/users', validate(listUsersSchema), asyncHandler(controller.listUsers));
 adminRouter.get('/users/:id', validate(idParamsSchema), asyncHandler(controller.getUser));
 adminRouter.get('/reservations', validate(listReservationsSchema), asyncHandler(controller.listReservations));
@@ -93,3 +97,6 @@ adminRouter.patch('/salons/:id/status', validate(setSalonStatusSchema), asyncHan
 
 // ── Wallet manual adjust (audited) ──
 adminRouter.post('/users/:id/wallet/adjust', validate(adminWalletAdjustSchema), asyncHandler(controller.adjustWallet));
+
+// ── Act-on-behalf (audited) ──
+adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));

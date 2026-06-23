@@ -251,6 +251,19 @@ export const setSalonStatusSchema = {
   body: z.object({ status: z.enum(['active', 'pending']) }),
 };
 
+export const reservationAnalyticsSchema = {
+  query: z.object({
+    granularity: z.enum(['week', 'month']).optional(),
+    from: dateStr.optional(),
+    to: dateStr.optional(),
+  }),
+};
+
+export const setStylistAcceptingSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ accepting: z.boolean() }),
+};
+
 // ── Wallet manual adjust (signed Toman: + credit / − debit) ──
 export const adminWalletAdjustSchema = {
   params: z.object({ id: objectId }),
