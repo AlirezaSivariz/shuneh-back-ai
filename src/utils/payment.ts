@@ -13,8 +13,21 @@ export interface TipChargeResult {
   reference: string | null;
 }
 
+/**
+ * Result of STARTING a wallet top-up. With a real gateway this would carry a
+ * `paymentUrl` to redirect the user to; the stub returns nulls and 'pending'.
+ */
+export interface TopupInitResult {
+  status: 'pending' | 'paid';
+  /** Gateway redirect URL once integrated; null in the stub. */
+  paymentUrl: string | null;
+  reference: string | null;
+}
+
 export interface PaymentProvider {
   recordTip(input: { customerId: string; stylistId: string; amount: number }): Promise<TipChargeResult>;
+  /** Begin a wallet top-up of `amount` Toman for `userId`. */
+  startWalletTopup(input: { userId: string; amount: number }): Promise<TopupInitResult>;
 }
 
 class StubPaymentProvider implements PaymentProvider {
@@ -22,6 +35,17 @@ class StubPaymentProvider implements PaymentProvider {
     // TODO(payments): integrate the real gateway here. On a successful charge,
     // return { status: 'paid', reference } and the Tip will be marked paid.
     return { status: 'recorded', reference: null };
+  }
+
+  async startWalletTopup(): Promise<TopupInitResult> {
+    // TODO(payments): integrate the real gateway (e.g. Zarinpal) HERE.
+    //   1) request a payment with `amount` → get { authority/paymentUrl }.
+    //   2) return { status: 'pending', paymentUrl, reference: authority }.
+    //   3) on the gateway callback/verify, flip the pending WalletTransaction to
+    //      'completed' and credit the balance via wallet.service.applyWalletChange.
+    // Until then no money moves: the top-up stays 'pending' and the balance is
+    // unchanged.
+    return { status: 'pending', paymentUrl: null, reference: null };
   }
 }
 

@@ -250,3 +250,17 @@ export const setSalonStatusSchema = {
   params: z.object({ id: objectId }),
   body: z.object({ status: z.enum(['active', 'pending']) }),
 };
+
+// ── Wallet manual adjust (signed Toman: + credit / − debit) ──
+export const adminWalletAdjustSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    amount: z
+      .number()
+      .int('مبلغ باید عدد صحیح باشد')
+      .refine((v) => v !== 0, 'مبلغ نمی‌تواند صفر باشد')
+      .refine((v) => Math.abs(v) <= 500_000_000, 'مبلغ بیش از حد مجاز است'),
+    // Optional note stored on the transaction meta + the audit log.
+    reason: z.string().trim().max(500).optional(),
+  }),
+};

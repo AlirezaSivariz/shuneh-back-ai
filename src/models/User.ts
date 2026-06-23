@@ -46,6 +46,12 @@ export interface IUser extends Document {
   foreignApprovalStatus: ForeignApprovalStatus;
   /** Why a foreign user's approval was rejected (shown back to them). */
   foreignRejectionReason?: string | null;
+  /**
+   * Wallet balance in **whole Toman** (integer — never fractional, to avoid
+   * rounding errors). Only ever changed atomically alongside a WalletTransaction
+   * ledger entry (see `wallet.service`). Defaults to 0.
+   */
+  walletBalance: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,6 +80,9 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     foreignRejectionReason: { type: String, default: null },
+    // Wallet balance in whole Toman (integer). Mutated only via wallet.service
+    // (atomic with a WalletTransaction). min:0 — balance never goes negative.
+    walletBalance: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );

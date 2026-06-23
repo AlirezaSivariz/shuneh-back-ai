@@ -255,6 +255,17 @@ export async function setSalonStatus(req: Request, res: Response): Promise<void>
   sendSuccess(res, { salon: await service.setSalonStatus(req.user!.id, req.params.id, req.body.status) });
 }
 
+// ── Wallet (manual adjust) ──
+export async function adjustWallet(req: Request, res: Response): Promise<void> {
+  const result = await service.adjustUserWallet(
+    req.user!.id,
+    req.params.id,
+    req.body.amount,
+    req.body?.reason,
+  );
+  sendSuccess(res, { wallet: result });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

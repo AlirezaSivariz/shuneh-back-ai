@@ -34,6 +34,7 @@ import {
   updateServiceSchema,
   adminUpdateSalonSchema,
   setSalonStatusSchema,
+  adminWalletAdjustSchema,
 } from './admin.validators';
 
 /**
@@ -89,3 +90,6 @@ adminRouter.delete('/services/:id', validate(idParamsSchema), asyncHandler(contr
 // ── Salon management (audited) ──
 adminRouter.patch('/salons/:id', validate(adminUpdateSalonSchema), asyncHandler(controller.updateSalon));
 adminRouter.patch('/salons/:id/status', validate(setSalonStatusSchema), asyncHandler(controller.setSalonStatus));
+
+// ── Wallet manual adjust (audited) ──
+adminRouter.post('/users/:id/wallet/adjust', validate(adminWalletAdjustSchema), asyncHandler(controller.adjustWallet));

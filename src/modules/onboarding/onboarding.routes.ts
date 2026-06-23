@@ -4,12 +4,14 @@ import * as reportsController from '../reports/reports.controller';
 import * as reservationController from '../reservation/reservation.customer.controller';
 import * as mediaController from '../media/media.controller';
 import * as messageController from '../message/message.controller';
+import * as walletController from '../wallet/wallet.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { createUploader } from '../../middlewares/upload';
 import { setRolesSchema, personalSchema } from './onboarding.validators';
 import { reportRangeSchema } from '../reports/reports.validators';
+import { topupSchema, walletTxListSchema } from '../wallet/wallet.validators';
 
 // Routes under /onboarding
 export const onboardingRouter = Router();
@@ -32,6 +34,11 @@ meRouter.post(
   profilePhotoUploader.single('photo'),
   asyncHandler(mediaController.uploadProfilePhoto),
 );
+// ── Wallet (customer; own wallet only) ──
+meRouter.get('/wallet', asyncHandler(walletController.getWallet));
+meRouter.get('/wallet/transactions', validate(walletTxListSchema), asyncHandler(walletController.listTransactions));
+meRouter.post('/wallet/topup', validate(topupSchema), asyncHandler(walletController.topup));
+
 // Customer activity/spending report (scoped to the authenticated user).
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));
 // Quick-rebook suggestions from the customer's own completed history.

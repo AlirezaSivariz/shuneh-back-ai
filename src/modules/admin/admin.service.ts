@@ -15,6 +15,7 @@ import { Salon, ServiceGender } from '../../models/Salon';
 import { Service } from '../../models/Service';
 import { ServiceCategory } from '../../models/ServiceCategory';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
+import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
 import { nanoid } from 'nanoid';
 import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } from '../../models/Reservation';
@@ -1194,4 +1195,45 @@ export async function setSalonStatus(adminId: string, id: string, status: 'activ
   await salon.save();
   await audit(adminId, 'salon.setStatus', 'salon', id, { status });
   return { id, status: salon.status };
+}
+
+// ───────────────────────── wallet (admin adjust) ─────────────────────────
+
+/**
+ * Manually credit/debit a user's wallet (support tool / pre-gateway testing).
+ * `amount` is a signed integer Toman: positive credits, negative debits. The
+ * change is applied atomically via the wallet service (balance ↔ ledger) and
+ * audited; the optional note is stored on the transaction's meta.
+ */
+export async function adjustUserWallet(
+  adminId: string,
+  userId: string,
+  amount: number,
+  note?: string,
+) {
+  if (!Types.ObjectId.isValid(userId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const amt = Math.trunc(amount);
+  if (!Number.isFinite(amt) || amt === 0) {
+    throw AppError.badRequest('مبلغ نامعتبر است', 'INVALID_AMOUNT');
+  }
+  const user = await User.findById(userId).select('_id').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const type: 'credit' | 'debit' = amt > 0 ? 'credit' : 'debit';
+  const result = await applyWalletChange(userId, {
+    type,
+    amount: Math.abs(amt),
+    reason: 'admin_adjust',
+    meta: { adminId, ...(note ? { note } : {}) },
+  });
+  await audit(adminId, 'wallet.adjust', 'user', userId, {
+    type,
+    amount: Math.abs(amt),
+    note: note ?? null,
+  });
+  return {
+    userId,
+    balance: result.balance,
+    transaction: { id: String(result.transaction._id), type, amount: Math.abs(amt) },
+  };
 }
