@@ -18,6 +18,8 @@ import {
   updateDiscountCodeSchema,
   discountCodeIdParamsSchema,
 } from '../discount/discount.validators';
+import * as campaignController from '../campaign/campaign.controller';
+import { customersQuerySchema, sendCampaignSchema } from '../campaign/campaign.validators';
 import {
   setServicesSchema,
   replaceServicesSchema,
@@ -217,5 +219,13 @@ router.delete(
   validate(discountCodeIdParamsSchema),
   asyncHandler(discountController.remove),
 );
+
+// ── SMS discount campaign (paid «نقره‌ای» plan; gated by smsCampaignEnabled) ──
+// The stylist's own past customers (recipient picker).
+router.get('/customers', validate(customersQuerySchema), asyncHandler(campaignController.customers));
+// Plan/limit status (drives the lock state in the panel).
+router.get('/sms-campaign/status', asyncHandler(campaignController.status));
+// Send one OWN discount code to chosen recipients (own customers or a number).
+router.post('/sms-campaign/send', validate(sendCampaignSchema), asyncHandler(campaignController.send));
 
 export default router;

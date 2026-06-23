@@ -12,6 +12,7 @@ import { Types } from 'mongoose';
 import { DiscountCode, IDiscountCode } from '../../models/DiscountCode';
 import { StylistService } from '../../models/StylistService';
 import { Service, IService } from '../../models/Service';
+import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { toMinutes } from '../../utils/time';
 import { iranWallClockToUtc } from '../../utils/timezone';
@@ -316,34 +317,93 @@ function computeDiscount(
 }
 
 /**
- * Preview a code for the customer (no writes). Resolves the stylist's prices,
- * validates the code, and returns the computed amounts (or throws a clear
- * Persian reason).
+ * The FULL, customer-facing terms of a code (for transparency / trust). Resolves
+ * the owning stylist's name and the eligible service names. Dates are returned
+ * Gregorian YYYY-MM-DD (the client renders Jalali).
+ */
+async function buildConditions(code: IDiscountCode, stylistId: string) {
+  const [user, serviceDocs] = await Promise.all([
+    User.findById(stylistId).select('firstName lastName').lean(),
+    code.appliesTo === 'services' && code.serviceIds.length
+      ? Service.find({ _id: { $in: code.serviceIds } })
+          .select('name')
+          .lean()
+      : Promise.resolve([] as { _id: Types.ObjectId; name: string }[]),
+  ]);
+  const stylistName = `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'متخصص';
+  return {
+    code: code.code,
+    stylistId,
+    stylistName,
+    type: code.type,
+    value: code.value,
+    maxDiscountAmount: code.maxDiscountAmount ?? null,
+    appliesTo: code.appliesTo,
+    services: serviceDocs.map((s) => ({ id: String(s._id), name: s.name })),
+    validFrom: dateOnly(code.validFrom),
+    validUntil: dateOnly(code.validUntil),
+    timeConstraints: {
+      daysOfWeek: code.timeConstraints?.daysOfWeek ?? null,
+      startTime: code.timeConstraints?.startTime ?? null,
+      endTime: code.timeConstraints?.endTime ?? null,
+    },
+    usageLimit: code.usageLimit ?? null,
+    usedCount: code.usedCount ?? 0,
+    isActive: code.isActive,
+  };
+}
+
+/**
+ * Preview a code for the customer (no writes). ALWAYS returns the code's full
+ * terms (`conditions`) so the customer can see exactly what the code is — plus a
+ * structured `valid` + `reason {code,message}` instead of throwing, so the UI can
+ * explain WHY a code can't be used right now (wrong day/time/service/expired),
+ * not just "invalid". Booking-time enforcement stays strict (resolveDiscountForBooking).
  */
 export async function previewDiscount(
   stylistId: string,
   input: { code: string; serviceIds: string[]; date: string; startTime: string },
 ) {
   const items = await resolveItems(stylistId, input.serviceIds);
-  const code = await findCode(stylistId, input.code);
-  assertRedeemable(code);
-  const { originalPrice, discountAmount, finalPrice, eligibleServiceIds } = computeDiscount(
-    code,
-    items,
-    input.date,
-    input.startTime,
-  );
-  return {
-    valid: true,
-    code: code.code,
-    type: code.type,
-    value: code.value,
-    appliesTo: code.appliesTo,
-    eligibleServiceIds,
-    originalPrice,
-    discountAmount,
-    finalPrice,
-  };
+  const codeLower = input.code.trim().toLowerCase();
+  const code = await DiscountCode.findOne({ stylistId, codeLower });
+  if (!code) {
+    return {
+      valid: false as const,
+      reason: { code: 'INVALID_DISCOUNT_CODE', message: 'کد تخفیف نامعتبر است' },
+      conditions: null,
+    };
+  }
+
+  const conditions = await buildConditions(code, stylistId);
+  try {
+    assertRedeemable(code);
+    const { originalPrice, discountAmount, finalPrice, eligibleServiceIds } = computeDiscount(
+      code,
+      items,
+      input.date,
+      input.startTime,
+    );
+    return {
+      valid: true as const,
+      code: code.code,
+      type: code.type,
+      value: code.value,
+      appliesTo: code.appliesTo,
+      eligibleServiceIds,
+      originalPrice,
+      discountAmount,
+      finalPrice,
+      conditions,
+    };
+  } catch (e) {
+    // Soft validation failure → return the reason + full terms (don't throw), so
+    // the customer sees what's needed. Hard errors (non-AppError) still bubble up.
+    if (e instanceof AppError) {
+      return { valid: false as const, reason: { code: e.code, message: e.message }, conditions };
+    }
+    throw e;
+  }
 }
 
 /**

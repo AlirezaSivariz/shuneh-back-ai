@@ -71,6 +71,10 @@ export interface AppConfig {
   limoSmsFooter: string;
   /** LimoSMS sender line number for notification SMS (sendsms). From env only. */
   limoSmsSenderNumber?: string;
+  /** Max recipients a stylist may target in ONE discount-SMS campaign send. */
+  smsCampaignPerSendMax: number;
+  /** Max discount-campaign SMS a stylist may send PER DAY (anti-spam/cost). */
+  smsCampaignDailyMax: number;
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -106,4 +110,6 @@ export const config: AppConfig = {
   // LimoSMS expects the literal string "vip" as the sender (per their support),
   // not a line number. Overridable via env if that ever changes.
   limoSmsSenderNumber: process.env.LIMOSMS_SENDER_NUMBER || 'vip',
+  smsCampaignPerSendMax: asNumber('SMS_CAMPAIGN_PER_SEND_MAX', 50),
+  smsCampaignDailyMax: asNumber('SMS_CAMPAIGN_DAILY_MAX', 100),
 };

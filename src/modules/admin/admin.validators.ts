@@ -264,6 +264,11 @@ export const setStylistAcceptingSchema = {
   body: z.object({ accepting: z.boolean() }),
 };
 
+export const setStylistSmsCampaignSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ enabled: z.boolean() }),
+};
+
 // ── Wallet manual adjust (signed Toman: + credit / − debit) ──
 export const adminWalletAdjustSchema = {
   params: z.object({ id: objectId }),

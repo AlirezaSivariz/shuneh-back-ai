@@ -162,7 +162,7 @@ export async function getUserState(userId: string) {
   const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
     isStylist
       ? StylistProfile.findOne({ userId })
-          .select('onboardingStep status workplaceType freelance isAcceptingReservations needsHoursUpdate')
+          .select('onboardingStep status workplaceType freelance isAcceptingReservations needsHoursUpdate smsCampaignEnabled')
           .lean()
       : Promise.resolve(null),
     user.roles.includes('owner') ? Salon.countDocuments({ ownerId: userId }) : Promise.resolve(0),
@@ -178,6 +178,7 @@ export async function getUserState(userId: string) {
         bookable: boolean;
         bookableReason: string | null;
         needsHoursUpdate: boolean;
+        smsCampaignEnabled: boolean;
       }
     | null = null;
   if (stylistProfile) {
@@ -192,6 +193,8 @@ export async function getUserState(userId: string) {
       bookableReason: book?.reason ?? null,
       // Hours change left future reservations out-of-hours → panel shows a banner.
       needsHoursUpdate: stylistProfile.needsHoursUpdate ?? false,
+      // Paid plan gate for the SMS discount campaign feature.
+      smsCampaignEnabled: stylistProfile.smsCampaignEnabled ?? false,
     };
   }
 

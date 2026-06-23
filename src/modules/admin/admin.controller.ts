@@ -290,6 +290,12 @@ export async function setStylistAccepting(req: Request, res: Response): Promise<
   });
 }
 
+export async function setStylistSmsCampaign(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, {
+    stylist: await service.setStylistSmsCampaign(req.user!.id, req.params.id, req.body.enabled),
+  });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

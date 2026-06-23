@@ -43,6 +43,13 @@ export interface IStylistProfile extends Document {
    */
   isAcceptingReservations: boolean;
   /**
+   * Paid-plan gate for the "send discount code by SMS" campaign feature (a
+   * «نقره‌ای»/silver capability). Default false. There is NO payment gateway yet,
+   * so a stylist cannot buy it — only an admin flips this. When billing exists,
+   * a successful plan purchase will set this true (see admin sms-campaign + TODO).
+   */
+  smsCampaignEnabled: boolean;
+  /**
    * Raised when a working-hours / salon opening-hours change left one or more
    * FUTURE reservations falling outside the stylist's current effective hours.
    * Existing reservations are never auto-cancelled (the commitment stands); this
@@ -107,6 +114,9 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     onboardingStep: { type: String, enum: ONBOARDING_STEPS, default: 'role' },
     status: { type: String, enum: ['draft', 'active'], default: 'draft' },
     isAcceptingReservations: { type: Boolean, default: true },
+    // Paid «نقره‌ای» plan gate for SMS discount campaigns. Default false; only an
+    // admin flips it today (no billing yet). Existing docs default to false.
+    smsCampaignEnabled: { type: Boolean, default: false },
     // Raised when an hours change orphaned future reservations (default keeps
     // existing docs valid).
     needsHoursUpdate: { type: Boolean, default: false },

@@ -37,6 +37,7 @@ import {
   adminWalletAdjustSchema,
   reservationAnalyticsSchema,
   setStylistAcceptingSchema,
+  setStylistSmsCampaignSchema,
 } from './admin.validators';
 
 /**
@@ -100,3 +101,5 @@ adminRouter.post('/users/:id/wallet/adjust', validate(adminWalletAdjustSchema), 
 
 // ── Act-on-behalf (audited) ──
 adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));
+// Enable/disable the paid SMS discount-campaign plan for a stylist (audited).
+adminRouter.post('/stylists/:id/sms-campaign', validate(setStylistSmsCampaignSchema), asyncHandler(controller.setStylistSmsCampaign));

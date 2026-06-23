@@ -218,6 +218,7 @@ export async function getUser(id: string) {
           ratingCount: profile.ratingCount,
           isPromoted: profile.isPromoted,
           promotedUntil: profile.promotedUntil,
+          smsCampaignEnabled: profile.smsCampaignEnabled ?? false,
         }
       : null,
     ownedSalons: ownedSalons.map((s) => ({
@@ -1411,4 +1412,19 @@ export async function setStylistAccepting(adminId: string, stylistId: string, ac
   await profile.save();
   await audit(adminId, 'stylist.setAccepting', 'stylist', stylistId, { accepting });
   return { stylistId, isAcceptingReservations: accepting };
+}
+
+/**
+ * Admin enables/disables the paid SMS discount-campaign plan («نقره‌ای») for a
+ * stylist. TODO(billing): once a payment gateway exists, a successful plan
+ * purchase will set this flag instead of (or in addition to) the admin toggle.
+ */
+export async function setStylistSmsCampaign(adminId: string, stylistId: string, enabled: boolean) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  profile.smsCampaignEnabled = enabled;
+  await profile.save();
+  await audit(adminId, 'stylist.setSmsCampaign', 'stylist', stylistId, { enabled });
+  return { stylistId, smsCampaignEnabled: enabled };
 }
