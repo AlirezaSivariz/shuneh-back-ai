@@ -53,6 +53,15 @@ export interface AppConfig {
    * so it is never served by the public /uploads static mount.
    */
   privateUploadDir: string;
+  s3: {
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    publicBucket: string;
+    privateBucket: string;
+    forcePathStyle: boolean;
+  };
   /** When true, no scheduled jobs are registered (tests / one-off scripts). */
   disableCron: boolean;
   /** How often the reservation auto-complete job runs, in minutes. */
@@ -99,6 +108,15 @@ export const config: AppConfig = {
   storageDriver: ((process.env.STORAGE_DRIVER || 'local').toLowerCase() as AppConfig['storageDriver']),
   uploadDir: required('UPLOAD_DIR', 'uploads'),
   privateUploadDir: required('PRIVATE_UPLOAD_DIR', 'uploads-private'),
+  s3: {
+    endpoint: process.env.S3_ENDPOINT || '',
+    region: process.env.S3_REGION || 'us-east-1',
+    accessKeyId: process.env.S3_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+    publicBucket: process.env.S3_PUBLIC_BUCKET || '',
+    privateBucket: process.env.S3_PRIVATE_BUCKET || process.env.S3_PUBLIC_BUCKET || '',
+    forcePathStyle: asBool('S3_FORCE_PATH_STYLE', true),
+  },
   disableCron: asBool('DISABLE_CRON', false),
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),

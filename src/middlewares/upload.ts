@@ -16,10 +16,9 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
  * the public /uploads mount) — for sensitive files such as ID documents.
  */
 export function createUploader(subdir: string, opts: { private?: boolean } = {}) {
-  // The Mongo driver needs raw bytes in memory (file.buffer) to re-encode to
-  // webp; disk drivers stream to UPLOAD_DIR/<subdir> as before.
+  // Remote/object drivers need raw bytes in memory to validate and re-encode.
   let storage: multer.StorageEngine;
-  if (config.storageDriver === 'mongo') {
+  if (config.storageDriver === 'mongo' || config.storageDriver === 's3') {
     storage = multer.memoryStorage();
   } else {
     const root = opts.private ? config.privateUploadDir : config.uploadDir;
