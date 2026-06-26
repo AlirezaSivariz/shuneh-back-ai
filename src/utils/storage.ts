@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import { Readable } from 'stream';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Types } from 'mongoose';
 import { config } from '../config/env';
 import { ImageAsset, ImageKind } from '../models/ImageAsset';
@@ -118,6 +120,22 @@ function asBuffer(value: unknown): Buffer | null {
   return Buffer.isBuffer(inner) ? inner : null;
 }
 
+async function processImage(buffer: Buffer) {
+  const main = await sharp(buffer)
+    .rotate()
+    .resize({ width: MAX_LONG_EDGE, height: MAX_LONG_EDGE, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toBuffer({ resolveWithObject: true });
+
+  const thumbnailData = await sharp(buffer)
+    .rotate()
+    .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 70 })
+    .toBuffer();
+
+  return { main, thumbnailData };
+}
+
 export class MongoStorageProvider implements StorageProvider {
   private async store(
     file: Express.Multer.File,
@@ -128,18 +146,7 @@ export class MongoStorageProvider implements StorageProvider {
       throw new Error('MongoStorageProvider requires in-memory uploads (multer memoryStorage)');
     }
 
-    // Re-encode to webp, downscaling the long edge. EXIF rotation is applied.
-    const main = await sharp(file.buffer)
-      .rotate()
-      .resize({ width: MAX_LONG_EDGE, height: MAX_LONG_EDGE, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer({ resolveWithObject: true });
-
-    const thumbnailData = await sharp(file.buffer)
-      .rotate()
-      .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 70 })
-      .toBuffer();
+    const { main, thumbnailData } = await processImage(file.buffer);
 
     const doc = await ImageAsset.create({
       ownerType: meta?.ownerType,
@@ -205,13 +212,143 @@ export class MongoStorageProvider implements StorageProvider {
   }
 }
 
+// ───────────────────── S3 / MinIO (webp via sharp) ─────────────────────
+export class S3StorageProvider implements StorageProvider {
+  private client: S3Client;
+
+  constructor() {
+    const { endpoint, region, accessKeyId, secretAccessKey, publicBucket, privateBucket } = config.s3;
+    const missing = [
+      ['S3_ENDPOINT', endpoint],
+      ['S3_ACCESS_KEY_ID', accessKeyId],
+      ['S3_SECRET_ACCESS_KEY', secretAccessKey],
+      ['S3_PUBLIC_BUCKET', publicBucket],
+      ['S3_PRIVATE_BUCKET', privateBucket],
+    ].filter(([, value]) => !value).map(([key]) => key);
+
+    if (missing.length) {
+      throw new Error(`Missing S3 environment variables: ${missing.join(', ')}`);
+    }
+
+    this.client = new S3Client({
+      endpoint,
+      region,
+      forcePathStyle: config.s3.forcePathStyle,
+      credentials: { accessKeyId, secretAccessKey },
+    });
+  }
+
+  save(file: Express.Multer.File, meta?: SaveMeta): Promise<StoredFile> {
+    return this.store(file, false, meta);
+  }
+
+  savePrivate(file: Express.Multer.File, meta?: SaveMeta): Promise<StoredFile> {
+    return this.store(file, true, { ...meta, kind: meta?.kind ?? 'national_card' });
+  }
+
+  getUrl(storedPath: string): string {
+    return `${config.baseUrl}/images/${encodeURIComponent(storedPath)}`;
+  }
+
+  async delete(storedPath: string): Promise<void> {
+    const parsed = this.parseKey(storedPath);
+    if (!parsed) return;
+    await Promise.all([
+      this.client.send(new DeleteObjectCommand({ Bucket: parsed.bucket, Key: parsed.key })).catch(() => undefined),
+      this.client.send(new DeleteObjectCommand({ Bucket: parsed.bucket, Key: this.thumbKey(parsed.key) })).catch(() => undefined),
+    ]);
+  }
+
+  getImage(key: string): Promise<StoredImage | null> {
+    const parsed = this.parseKey(key);
+    if (!parsed || parsed.isPrivate) return Promise.resolve(null);
+    return this.read(parsed.bucket, parsed.key);
+  }
+
+  async getThumbnail(key: string): Promise<StoredImage | null> {
+    const parsed = this.parseKey(key);
+    if (!parsed || parsed.isPrivate) return null;
+    return (await this.read(parsed.bucket, this.thumbKey(parsed.key))) ?? this.read(parsed.bucket, parsed.key);
+  }
+
+  getPrivateImage(key: string): Promise<StoredImage | null> {
+    const parsed = this.parseKey(key);
+    if (!parsed || !parsed.isPrivate) return Promise.resolve(null);
+    return this.read(parsed.bucket, parsed.key);
+  }
+
+  private async store(file: Express.Multer.File, isPrivate: boolean, meta?: SaveMeta): Promise<StoredFile> {
+    if (!file.buffer) throw new Error('S3StorageProvider requires in-memory uploads (multer memoryStorage)');
+
+    const { main, thumbnailData } = await processImage(file.buffer);
+    const id = new Types.ObjectId().toString();
+    const kind = meta?.kind ?? (isPrivate ? 'national_card' : 'profile');
+    const owner = meta?.ownerType && meta?.ownerId ? `${meta.ownerType}/${meta.ownerId}` : 'unowned';
+    const bucket = isPrivate ? config.s3.privateBucket : config.s3.publicBucket;
+    const prefix = isPrivate ? 'private' : 'public';
+    const key = `${prefix}/${owner}/${kind}/${id}.webp`;
+
+    await Promise.all([
+      this.put(bucket, key, main.data, meta, isPrivate),
+      this.put(bucket, this.thumbKey(key), thumbnailData, meta, isPrivate),
+    ]);
+
+    return { path: `${isPrivate ? 'private' : 'public'}:${key}` };
+  }
+
+  private put(bucket: string, key: string, body: Buffer, meta: SaveMeta | undefined, isPrivate: boolean) {
+    return this.client.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: 'image/webp',
+      CacheControl: isPrivate ? 'private, max-age=0, no-store' : 'public, max-age=31536000, immutable',
+      Metadata: {
+        ...(meta?.ownerType ? { ownerType: meta.ownerType } : {}),
+        ...(meta?.ownerId ? { ownerId: meta.ownerId } : {}),
+        ...(meta?.kind ? { kind: meta.kind } : {}),
+        isPrivate: String(isPrivate),
+      },
+    }));
+  }
+
+  private async read(bucket: string, key: string): Promise<StoredImage | null> {
+    const result = await this.client.send(new GetObjectCommand({ Bucket: bucket, Key: key })).catch(() => null);
+    if (!result?.Body) return null;
+    const data = await this.toBuffer(result.Body as Readable);
+    return { data, mime: result.ContentType || 'image/webp' };
+  }
+
+  private async toBuffer(stream: Readable): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
+
+  private parseKey(storedPath: string): { bucket: string; key: string; isPrivate: boolean } | null {
+    const separator = storedPath.indexOf(':');
+    if (separator < 0) return null;
+    const scope = storedPath.slice(0, separator);
+    const key = storedPath.slice(separator + 1);
+    if (scope !== 'public' && scope !== 'private') return null;
+    return {
+      bucket: scope === 'private' ? config.s3.privateBucket : config.s3.publicBucket,
+      key,
+      isPrivate: scope === 'private',
+    };
+  }
+
+  private thumbKey(key: string): string {
+    return key.replace(/\.webp$/, '-thumb.webp');
+  }
+}
+
 function buildProvider(): StorageProvider {
   switch (config.storageDriver) {
     case 'mongo':
       return new MongoStorageProvider();
     case 's3':
-      // Not implemented yet — the seam exists so adding it is a drop-in.
-      throw new Error('STORAGE_DRIVER=s3 is not implemented yet');
+      return new S3StorageProvider();
     default:
       return new LocalStorageProvider();
   }
