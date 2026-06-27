@@ -2,6 +2,7 @@ import { ServiceCategory } from '../models/ServiceCategory';
 import { Service } from '../models/Service';
 import { Salon } from '../models/Salon';
 import { StylistProfile } from '../models/StylistProfile';
+import { BlogPost } from '../models/BlogPost';
 import { seedCategories } from './data';
 
 /**
@@ -101,5 +102,32 @@ export async function migrateStylistPlanTier(): Promise<void> {
   if (n > 0) {
     // eslint-disable-next-line no-console
     console.log(`[migrate] backfilled planTier on ${n} stylist profile(s)`);
+  }
+}
+
+/**
+ * Repair blog cover images that were stored as a resolved URL (and re-prefixed
+ * on every edit → «…/images/…/images/…»). Recover the bare storage key from the
+ * last «/images/» segment so `coverUrl` resolves it correctly once.
+ */
+export async function migrateBlogCoverKeys(): Promise<void> {
+  const bad = await BlogPost.find({ coverImage: { $regex: '^https?://' } }).select('_id coverImage');
+  let fixed = 0;
+  for (const post of bad) {
+    const tail = (post.coverImage as string).split('/images/').pop();
+    if (!tail) continue;
+    let key = tail;
+    try {
+      key = decodeURIComponent(tail);
+    } catch {
+      /* keep raw */
+    }
+    post.coverImage = key;
+    await post.save();
+    fixed += 1;
+  }
+  if (fixed > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[migrate] normalized blog cover key on ${fixed} post(s)`);
   }
 }

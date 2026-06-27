@@ -18,8 +18,10 @@ const baseBody = {
   title: z.string().trim().min(2, 'عنوان باید حداقل ۲ کاراکتر باشد').max(200),
   slug: z.string().trim().max(200).optional(),
   excerpt: z.string().trim().max(500).optional(),
-  content: z.string().max(50_000).optional(),
+  content: z.string().max(100_000).optional(),
   coverImage: z.string().nullable().optional(),
+  metaTitle: z.string().trim().max(200).optional(),
+  metaDescription: z.string().trim().max(300).optional(),
   status: z.enum(['draft', 'published']).optional(),
 };
 

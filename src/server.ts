@@ -5,6 +5,7 @@ import {
   autoSeedIfEmpty,
   migrateLegacySalonServiceGender,
   migrateStylistPlanTier,
+  migrateBlogCoverKeys,
 } from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 
@@ -17,6 +18,8 @@ async function bootstrap() {
   await migrateLegacySalonServiceGender();
   // Backfill planTier from the legacy smsCampaignEnabled flag.
   await migrateStylistPlanTier();
+  // Repair blog cover images stored as a (re-prefixed) URL → bare key.
+  await migrateBlogCoverKeys();
 
   const app = createApp();
 

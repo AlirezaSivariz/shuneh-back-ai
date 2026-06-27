@@ -11,6 +11,9 @@ export interface IBlogPost extends Document {
   content: string;
   /** Storage key of the cover image (resolve to a URL via storageProvider). */
   coverImage: string | null;
+  /** Optional SEO overrides; fall back to title/excerpt when empty. */
+  metaTitle: string;
+  metaDescription: string;
   status: BlogStatus;
   author: Types.ObjectId | null;
   publishedAt: Date | null;
@@ -25,6 +28,8 @@ const blogPostSchema = new Schema<IBlogPost>(
     excerpt: { type: String, default: '' },
     content: { type: String, default: '' },
     coverImage: { type: String, default: null },
+    metaTitle: { type: String, default: '' },
+    metaDescription: { type: String, default: '' },
     status: { type: String, enum: ['draft', 'published'], default: 'draft', index: true },
     author: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     // Set the first time a post transitions to 'published'.
