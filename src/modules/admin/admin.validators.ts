@@ -269,6 +269,11 @@ export const setStylistSmsCampaignSchema = {
   body: z.object({ enabled: z.boolean() }),
 };
 
+export const setStylistPlanSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ tier: z.enum(['free', 'silver', 'gold']) }),
+};
+
 // ── Wallet manual adjust (signed Toman: + credit / − debit) ──
 export const adminWalletAdjustSchema = {
   params: z.object({ id: objectId }),

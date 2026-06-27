@@ -1,7 +1,11 @@
 import { createApp } from './app';
 import { connectDb } from './config/db';
 import { config } from './config/env';
-import { autoSeedIfEmpty, migrateLegacySalonServiceGender } from './seed/seed';
+import {
+  autoSeedIfEmpty,
+  migrateLegacySalonServiceGender,
+  migrateStylistPlanTier,
+} from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 
 async function bootstrap() {
@@ -11,6 +15,8 @@ async function bootstrap() {
   await autoSeedIfEmpty();
   // Drop the removed 'unisex' service gender from any legacy salons.
   await migrateLegacySalonServiceGender();
+  // Backfill planTier from the legacy smsCampaignEnabled flag.
+  await migrateStylistPlanTier();
 
   const app = createApp();
 

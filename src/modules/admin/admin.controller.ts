@@ -296,6 +296,12 @@ export async function setStylistSmsCampaign(req: Request, res: Response): Promis
   });
 }
 
+export async function setStylistPlan(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, {
+    stylist: await service.setStylistPlan(req.user!.id, req.params.id, req.body.tier),
+  });
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

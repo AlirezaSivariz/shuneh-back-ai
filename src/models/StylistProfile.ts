@@ -24,6 +24,20 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
 
 export type StylistStatus = 'draft' | 'active';
 
+/**
+ * Subscription plan tier. `free` → booking + analytics only; `silver` → adds the
+ * SMS discount-campaign panel; `gold` → silver + reserved for future perks.
+ * There is no payment gateway, so only an admin changes this.
+ */
+export type PlanTier = 'free' | 'silver' | 'gold';
+
+export const PLAN_TIERS: PlanTier[] = ['free', 'silver', 'gold'];
+
+/** Silver and above unlock the SMS discount-campaign feature. */
+export function planAllowsSmsCampaign(tier: PlanTier): boolean {
+  return tier === 'silver' || tier === 'gold';
+}
+
 export interface IFreelanceInfo {
   address?: string;
   location?: GeoPoint;
@@ -49,6 +63,11 @@ export interface IStylistProfile extends Document {
    * a successful plan purchase will set this true (see admin sms-campaign + TODO).
    */
   smsCampaignEnabled: boolean;
+  /**
+   * Subscription plan tier (source of truth for paid features). `smsCampaignEnabled`
+   * is kept in sync with this (silver+ → true) so existing gates keep working.
+   */
+  planTier: PlanTier;
   /**
    * Raised when a working-hours / salon opening-hours change left one or more
    * FUTURE reservations falling outside the stylist's current effective hours.
@@ -117,6 +136,9 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     // Paid «نقره‌ای» plan gate for SMS discount campaigns. Default false; only an
     // admin flips it today (no billing yet). Existing docs default to false.
     smsCampaignEnabled: { type: Boolean, default: false },
+    // Subscription plan tier; source of truth for paid features. Admin-managed
+    // only (no billing yet). Defaults keep existing docs valid.
+    planTier: { type: String, enum: PLAN_TIERS, default: 'free', index: true },
     // Raised when an hours change orphaned future reservations (default keeps
     // existing docs valid).
     needsHoursUpdate: { type: Boolean, default: false },

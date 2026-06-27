@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isValidHHmm } from '../../utils/time';
+import { containsBannedWord } from '../../config/bannedWords';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const hhmm = z.string().refine(isValidHHmm, 'ساعت باید به فرمت HH:mm باشد');
@@ -15,9 +16,10 @@ const baseFields = {
   code: z
     .string()
     .trim()
-    .min(1, 'کد لازم است')
-    .max(32)
-    .regex(/^[A-Za-z0-9_-]+$/, 'کد فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد'),
+    .min(3, 'کد باید حداقل ۳ کاراکتر باشد')
+    .max(20, 'کد نباید بیشتر از ۲۰ کاراکتر باشد')
+    .regex(/^[A-Za-z0-9_-]+$/, 'کد فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد')
+    .refine((c) => !containsBannedWord(c), 'این کد شامل کلمه‌ی نامناسب است؛ کد دیگری انتخاب کن'),
   type: z.enum(['percentage', 'fixed']),
   value: z.number().positive('مقدار باید بزرگ‌تر از صفر باشد'),
   maxDiscountAmount: z.number().min(0).nullable().optional(),

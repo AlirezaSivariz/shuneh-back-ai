@@ -1,10 +1,18 @@
 import { Router } from 'express';
 import * as controller from './admin.controller';
+import * as blogController from '../blog/blog.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { requireAdmin } from '../../middlewares/requireAdmin';
 import { rateLimit } from '../../middlewares/rateLimit';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { createUploader } from '../../middlewares/upload';
+import {
+  createBlogSchema,
+  updateBlogSchema,
+  blogIdSchema,
+  listBlogSchema,
+} from '../blog/blog.validators';
 import {
   idParamsSchema,
   listUsersSchema,
@@ -38,6 +46,7 @@ import {
   reservationAnalyticsSchema,
   setStylistAcceptingSchema,
   setStylistSmsCampaignSchema,
+  setStylistPlanSchema,
 } from './admin.validators';
 
 /**
@@ -103,3 +112,14 @@ adminRouter.post('/users/:id/wallet/adjust', validate(adminWalletAdjustSchema), 
 adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));
 // Enable/disable the paid SMS discount-campaign plan for a stylist (audited).
 adminRouter.post('/stylists/:id/sms-campaign', validate(setStylistSmsCampaignSchema), asyncHandler(controller.setStylistSmsCampaign));
+// Set a stylist's subscription plan tier (free/silver/gold); syncs SMS gate (audited).
+adminRouter.post('/stylists/:id/plan', validate(setStylistPlanSchema), asyncHandler(controller.setStylistPlan));
+
+// ── Blog management (audited) ──
+const blogCoverUpload = createUploader('blog');
+adminRouter.get('/blog', validate(listBlogSchema), asyncHandler(blogController.adminList));
+adminRouter.post('/blog', validate(createBlogSchema), asyncHandler(blogController.create));
+adminRouter.post('/blog/cover', blogCoverUpload.single('image'), asyncHandler(blogController.uploadCover));
+adminRouter.get('/blog/:id', validate(blogIdSchema), asyncHandler(blogController.adminGet));
+adminRouter.patch('/blog/:id', validate(updateBlogSchema), asyncHandler(blogController.update));
+adminRouter.delete('/blog/:id', validate(blogIdSchema), asyncHandler(blogController.remove));

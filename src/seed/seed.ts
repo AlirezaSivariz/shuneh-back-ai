@@ -1,6 +1,7 @@
 import { ServiceCategory } from '../models/ServiceCategory';
 import { Service } from '../models/Service';
 import { Salon } from '../models/Salon';
+import { StylistProfile } from '../models/StylistProfile';
 import { seedCategories } from './data';
 
 /**
@@ -75,5 +76,30 @@ export async function migrateLegacySalonServiceGender(): Promise<void> {
   if (n > 0) {
     // eslint-disable-next-line no-console
     console.log(`[migrate] cleared legacy 'unisex' serviceGender on ${n} salon(s)`);
+  }
+}
+
+/**
+ * Backfill the new `planTier` from the pre-existing `smsCampaignEnabled` flag:
+ * stylists who already had the SMS campaign enabled become 'silver', the rest
+ * stay 'free'. Idempotent — only touches docs missing `planTier`.
+ */
+export async function migrateStylistPlanTier(): Promise<void> {
+  const [silver, free] = await Promise.all([
+    StylistProfile.updateMany(
+      { planTier: { $exists: false }, smsCampaignEnabled: true },
+      { $set: { planTier: 'silver' } },
+    ),
+    StylistProfile.updateMany(
+      { planTier: { $exists: false }, smsCampaignEnabled: { $ne: true } },
+      { $set: { planTier: 'free' } },
+    ),
+  ]);
+  const n =
+    ((silver as { modifiedCount?: number }).modifiedCount ?? 0) +
+    ((free as { modifiedCount?: number }).modifiedCount ?? 0);
+  if (n > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[migrate] backfilled planTier on ${n} stylist profile(s)`);
   }
 }

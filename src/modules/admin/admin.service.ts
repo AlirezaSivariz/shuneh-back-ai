@@ -8,7 +8,12 @@
  */
 import { Types } from 'mongoose';
 import { User, Role, ROLES } from '../../models/User';
-import { StylistProfile, IStylistProfile } from '../../models/StylistProfile';
+import {
+  StylistProfile,
+  IStylistProfile,
+  PlanTier,
+  planAllowsSmsCampaign,
+} from '../../models/StylistProfile';
 import { StylistSalon } from '../../models/StylistSalon';
 import { StylistService } from '../../models/StylistService';
 import { Salon, ServiceGender } from '../../models/Salon';
@@ -219,6 +224,7 @@ export async function getUser(id: string) {
           isPromoted: profile.isPromoted,
           promotedUntil: profile.promotedUntil,
           smsCampaignEnabled: profile.smsCampaignEnabled ?? false,
+          planTier: profile.planTier ?? 'free',
         }
       : null,
     ownedSalons: ownedSalons.map((s) => ({
@@ -1427,4 +1433,20 @@ export async function setStylistSmsCampaign(adminId: string, stylistId: string, 
   await profile.save();
   await audit(adminId, 'stylist.setSmsCampaign', 'stylist', stylistId, { enabled });
   return { stylistId, smsCampaignEnabled: enabled };
+}
+
+/**
+ * Admin sets a stylist's subscription plan tier (the source of truth for paid
+ * features). `smsCampaignEnabled` is kept in sync (silver+ → true) so every
+ * existing gate keeps working. No billing exists, so this is admin-only.
+ */
+export async function setStylistPlan(adminId: string, stylistId: string, tier: PlanTier) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  profile.planTier = tier;
+  profile.smsCampaignEnabled = planAllowsSmsCampaign(tier);
+  await profile.save();
+  await audit(adminId, 'stylist.setPlan', 'stylist', stylistId, { tier });
+  return { stylistId, planTier: tier, smsCampaignEnabled: profile.smsCampaignEnabled };
 }
