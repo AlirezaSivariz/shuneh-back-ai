@@ -3,6 +3,7 @@ import { Service } from '../models/Service';
 import { Salon } from '../models/Salon';
 import { StylistProfile } from '../models/StylistProfile';
 import { BlogPost } from '../models/BlogPost';
+import { Promotion } from '../models/Promotion';
 import { seedCategories } from './data';
 
 /**
@@ -129,5 +130,32 @@ export async function migrateBlogCoverKeys(): Promise<void> {
   if (fixed > 0) {
     // eslint-disable-next-line no-console
     console.log(`[migrate] normalized blog cover key on ${fixed} post(s)`);
+  }
+}
+
+/**
+ * Backfill the new `Promotion` collection from the legacy `StylistProfile`
+ * promotion flags: any profile flagged `isPromoted` with a `promotedUntil`
+ * becomes a GENERAL promotion (categoryId=null). Idempotent — only creates a
+ * row when the stylist has no general promotion yet.
+ */
+export async function migratePromotions(): Promise<void> {
+  const promoted = await StylistProfile.find({
+    isPromoted: true,
+    promotedUntil: { $ne: null },
+  })
+    .select('userId promotedUntil')
+    .lean();
+  let n = 0;
+  for (const p of promoted) {
+    if (!p.promotedUntil) continue;
+    const exists = await Promotion.findOne({ stylistId: p.userId, categoryId: null }).select('_id').lean();
+    if (exists) continue;
+    await Promotion.create({ stylistId: p.userId, categoryId: null, promotedUntil: p.promotedUntil });
+    n += 1;
+  }
+  if (n > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[migrate] created ${n} general promotion(s) from legacy flags`);
   }
 }

@@ -126,6 +126,19 @@ export const stylistIdParamsSchema = {
   params: z.object({ id: objectId }),
 };
 
+export const addPromotionSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    // null/omitted → general promotion; otherwise a category-targeted one.
+    categoryId: objectId.nullable().optional(),
+    promotedUntil: z.coerce.date().refine((d) => d.getTime() > Date.now(), 'باید در آینده باشد'),
+  }),
+};
+
+export const removePromotionSchema = {
+  params: z.object({ id: objectId, promotionId: objectId }),
+};
+
 export const paginationSchema = {
   query: z.object({ ...pageQuery }),
 };

@@ -3,7 +3,7 @@ import * as service from './public.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function search(req: Request, res: Response): Promise<void> {
-  const { serviceId, categoryId, name, province, city, lng, lat, radius, gender } =
+  const { serviceId, categoryId, name, province, city, lng, lat, radius, gender, date } =
     req.query as unknown as {
       serviceId?: string;
       categoryId?: string;
@@ -14,6 +14,7 @@ export async function search(req: Request, res: Response): Promise<void> {
       lat?: number;
       radius?: number;
       gender?: 'women' | 'men';
+      date?: string;
     };
   const stylists = await service.searchStylists({
     serviceId,
@@ -25,6 +26,7 @@ export async function search(req: Request, res: Response): Promise<void> {
     lat,
     radius,
     gender,
+    date,
   });
   sendSuccess(res, { stylists });
 }

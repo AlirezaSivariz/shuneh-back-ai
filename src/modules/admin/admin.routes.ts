@@ -47,6 +47,8 @@ import {
   setStylistAcceptingSchema,
   setStylistSmsCampaignSchema,
   setStylistPlanSchema,
+  addPromotionSchema,
+  removePromotionSchema,
 } from './admin.validators';
 
 /**
@@ -86,6 +88,10 @@ adminRouter.delete('/users/:id/portfolio/:imageId', validate(deletePortfolioImag
 adminRouter.post('/reservations/:id/cancel', validate(cancelReservationSchema), asyncHandler(controller.cancelReservation));
 adminRouter.post('/stylists/:id/promote', validate(promoteSchema), asyncHandler(controller.promote));
 adminRouter.post('/stylists/:id/unpromote', validate(stylistIdParamsSchema), asyncHandler(controller.unpromote));
+// Promotions (general or category-targeted) — source of truth for ranking.
+adminRouter.get('/promotions', asyncHandler(controller.listPromotions));
+adminRouter.post('/stylists/:id/promotions', validate(addPromotionSchema), asyncHandler(controller.addPromotion));
+adminRouter.delete('/stylists/:id/promotions/:promotionId', validate(removePromotionSchema), asyncHandler(controller.removePromotion));
 adminRouter.post('/stylists/:id/verify', validate(idWithMessageSchema), asyncHandler(controller.verifyStylist));
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
 adminRouter.post('/users/:id/approve-foreign', validate(idWithMessageSchema), asyncHandler(controller.approveForeign));

@@ -302,6 +302,28 @@ export async function setStylistPlan(req: Request, res: Response): Promise<void>
   });
 }
 
+// ── Promotions (general + category-targeted) ──
+export async function listPromotions(_req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { promotions: await service.listActivePromotions() });
+}
+
+export async function addPromotion(req: Request, res: Response): Promise<void> {
+  const promotion = await service.addStylistPromotion(
+    req.user!.id,
+    req.params.id,
+    req.body.categoryId ?? null,
+    req.body.promotedUntil,
+  );
+  sendSuccess(res, { promotion }, 201);
+}
+
+export async function removePromotion(req: Request, res: Response): Promise<void> {
+  sendSuccess(
+    res,
+    await service.removeStylistPromotion(req.user!.id, req.params.id, req.params.promotionId),
+  );
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

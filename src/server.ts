@@ -6,6 +6,7 @@ import {
   migrateLegacySalonServiceGender,
   migrateStylistPlanTier,
   migrateBlogCoverKeys,
+  migratePromotions,
 } from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 
@@ -20,6 +21,8 @@ async function bootstrap() {
   await migrateStylistPlanTier();
   // Repair blog cover images stored as a (re-prefixed) URL → bare key.
   await migrateBlogCoverKeys();
+  // Backfill the Promotion collection from legacy profile promotion flags.
+  await migratePromotions();
 
   const app = createApp();
 

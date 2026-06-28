@@ -19,6 +19,7 @@ import { Interval } from '../../utils/time';
 import { buildSlots, iranNow, WorkingInterval } from '../../utils/slots';
 import { getBookability, getBookabilityMap } from './bookability';
 import { clipToOpeningHours } from './hoursReconcile';
+import { getActivePromotionMap, isContextPromoted, isAnyPromoted } from './promotions';
 
 /** Effective price/duration: stylist override falls back to the service default. */
 export function effectivePrice(override: number | null, svc: IService): number {
@@ -63,6 +64,91 @@ interface SearchParams {
   lat?: number;
   radius?: number; // meters
   gender?: 'women' | 'men';
+  /**
+   * Optional Iran calendar day "YYYY-MM-DD". When set, only stylists with at
+   * least one free slot that day are returned, and each carries `availableThatDay`
+   * ({count, firstSlot}). Computed in bulk (≈3 queries total) so it stays cheap
+   * even with many stylists.
+   */
+  date?: string;
+}
+
+/** Per-stylist inputs needed to test "has a free slot on a given day" in bulk. */
+interface DayAvailabilityMeta {
+  stylistId: string;
+  minDuration: number;
+  activeSalonIds: string[];
+  freelance: boolean;
+}
+
+/**
+ * For each stylist, whether they have ≥1 bookable slot on `dateStr` (using their
+ * SHORTEST service as the probe duration = "has any capacity"). Bulk: one
+ * working-hours query, one salon-opening-hours query, one reservations query —
+ * regardless of stylist count. Mirrors `getAvailability`'s clipping/now rules.
+ */
+async function computeDayAvailability(
+  meta: DayAvailabilityMeta[],
+  dateStr: string,
+): Promise<Map<string, { count: number; firstSlot: string | null }>> {
+  const out = new Map<string, { count: number; firstSlot: string | null }>();
+  if (meta.length === 0) return out;
+
+  const dayDate = new Date(`${dateStr}T00:00:00.000Z`);
+  if (Number.isNaN(dayDate.getTime())) return out;
+  const dayOfWeek = dayDate.getUTCDay();
+  const ids = meta.map((m) => m.stylistId);
+
+  const hours = await WorkingHour.find({ stylistId: { $in: ids }, dayOfWeek }).lean();
+  const salonIds = [...new Set(hours.map((h) => h.salonId).filter(Boolean).map(String))];
+  const salons = salonIds.length
+    ? await Salon.find({ _id: { $in: salonIds } }).select('openingHours').lean()
+    : [];
+  const openingBySalon = new Map(salons.map((s) => [String(s._id), s.openingHours ?? []]));
+
+  const reservations = await Reservation.find({
+    stylistId: { $in: ids },
+    date: dayDate,
+    status: { $in: ['pending', 'confirmed'] },
+  })
+    .select('stylistId startTime endTime')
+    .lean();
+  const busyByStylist = new Map<string, Interval[]>();
+  for (const r of reservations) {
+    const sid = String(r.stylistId);
+    const list = busyByStylist.get(sid) ?? [];
+    list.push({ start: r.startTime, end: r.endTime });
+    busyByStylist.set(sid, list);
+  }
+
+  const hoursByStylist = new Map<string, typeof hours>();
+  for (const h of hours) {
+    const sid = String(h.stylistId);
+    const list = hoursByStylist.get(sid) ?? [];
+    list.push(h);
+    hoursByStylist.set(sid, list);
+  }
+
+  const now = iranNow();
+  const minStart = now.date === dateStr ? now.minutes : 0;
+
+  for (const m of meta) {
+    const activeSet = new Set(m.activeSalonIds);
+    const working: WorkingInterval[] = (hoursByStylist.get(m.stylistId) ?? [])
+      .filter((h) => (h.salonId ? activeSet.has(String(h.salonId)) : m.freelance))
+      .flatMap((h) => {
+        const salonId = h.salonId ? String(h.salonId) : null;
+        const parts = salonId
+          ? clipToOpeningHours({ start: h.start, end: h.end }, dayOfWeek, openingBySalon.get(salonId))
+          : [{ start: h.start, end: h.end }];
+        return parts.map((p) => ({ start: p.start, end: p.end, salonId, salon: null }));
+      });
+    if (working.length === 0) continue;
+    const busy = busyByStylist.get(m.stylistId) ?? [];
+    const slots = buildSlots(working, m.minDuration, busy, 15, minStart);
+    if (slots.length > 0) out.set(m.stylistId, { count: slots.length, firstSlot: slots[0].startTime });
+  }
+  return out;
 }
 
 /**
@@ -135,6 +221,8 @@ export async function searchStylists(params: SearchParams) {
   }
 
   const results = [];
+  // Per-stylist inputs for the optional day-availability filter (date param).
+  const availabilityMeta: DayAvailabilityMeta[] = [];
   for (const profile of profiles) {
     const uid = String(profile.userId);
     const user = userById.get(uid);
@@ -219,22 +307,49 @@ export async function searchStylists(params: SearchParams) {
       portfolio: (profile.portfolio ?? []).slice(0, 4).map((p) => storageProvider.getUrl(p)),
       rating: profile.ratingAverage ?? 0,
       ratingCount: profile.ratingCount ?? 0,
-      isPromoted: isPromotedActive(profile),
+      // Context-promoted flag is filled after the loop (needs the promo map).
+      isPromoted: false,
       isVerified: profile.isVerified === true,
+      // Day-availability ({count, firstSlot}) — only populated when `date` is set.
+      availableThatDay: null as { count: number; firstSlot: string | null } | null,
       // Registration time — used only by the home fallback ranking (tie-break
       // by newest). Not sensitive; clients may ignore it.
       createdAt: profile.createdAt ?? null,
     });
+
+    const book = bookMap.get(uid);
+    availabilityMeta.push({
+      stylistId: uid,
+      minDuration: services.length ? Math.min(...services.map((s) => s!.durationMin)) : 15,
+      activeSalonIds: book?.activeSalonIds ?? [],
+      freelance: book?.freelance ?? false,
+    });
+  }
+
+  // Promotions: a stylist is "promoted" in THIS context — when a category filter
+  // is active, only its category promotion counts; otherwise the general one.
+  const promoMap = await getActivePromotionMap(results.map((r) => r.id));
+  for (const r of results) {
+    r.isPromoted = isContextPromoted(promoMap.get(r.id), params.categoryId);
+  }
+
+  // Optional "available on this day" filter (bulk; keeps only stylists with a
+  // free slot that day and annotates each with the count + first slot).
+  let final = results;
+  if (params.date) {
+    const avail = await computeDayAvailability(availabilityMeta, params.date);
+    final = results.filter((r) => avail.has(r.id));
+    for (const r of final) r.availableThatDay = avail.get(r.id) ?? null;
   }
 
   // Ranking: promoted stylists first, then by rating (desc). Within a group,
   // ties keep their natural order.
-  results.sort((a, b) => {
+  final.sort((a, b) => {
     if (a.isPromoted !== b.isPromoted) return a.isPromoted ? -1 : 1;
     return (b.rating ?? 0) - (a.rating ?? 0);
   });
 
-  return results;
+  return final;
 }
 
 /** Active, currently-promoted stylists for the landing "featured" section. */
@@ -337,6 +452,9 @@ export async function getStylistProfile(stylistId: string) {
     })
     .filter(Boolean);
 
+  // "ویژه" badge on the profile when the stylist has ANY active promotion.
+  const promoEntry = (await getActivePromotionMap([stylistId])).get(stylistId);
+
   return {
     id: stylistId,
     firstName: user.firstName ?? null,
@@ -352,7 +470,7 @@ export async function getStylistProfile(stylistId: string) {
     salons,
     rating: profile.ratingAverage ?? 0,
     ratingCount: profile.ratingCount ?? 0,
-    isPromoted: isPromotedActive(profile),
+    isPromoted: isAnyPromoted(promoEntry),
     isAcceptingReservations: profile.isAcceptingReservations !== false,
     isVerified: profile.isVerified === true,
   };

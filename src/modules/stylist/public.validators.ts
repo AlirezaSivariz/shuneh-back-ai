@@ -13,6 +13,8 @@ export const searchStylistsSchema = {
     lat: z.coerce.number().min(-90).max(90).optional(),
     radius: z.coerce.number().int().min(1).max(100000).optional(),
     gender: z.enum(['women', 'men']).optional(),
+    // Optional Iran calendar day "YYYY-MM-DD" → only stylists free that day.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD').optional(),
   }),
 };
 

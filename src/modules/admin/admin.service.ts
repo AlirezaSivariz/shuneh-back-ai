@@ -19,6 +19,7 @@ import { StylistService } from '../../models/StylistService';
 import { Salon, ServiceGender } from '../../models/Salon';
 import { Service } from '../../models/Service';
 import { ServiceCategory } from '../../models/ServiceCategory';
+import { Promotion, IPromotion } from '../../models/Promotion';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
@@ -177,6 +178,8 @@ export async function getUser(id: string) {
       WalletTransaction.find({ userId: id }).sort({ createdAt: -1 }).limit(10).lean(),
     ]);
   const reservations = await enrichReservations(reservationRows as unknown as IReservation[]);
+  // Promotions (general + category) for the admin promotion-management panel.
+  const promotions = profile ? await getStylistPromotions(id) : [];
 
   return {
     user: {
@@ -225,6 +228,7 @@ export async function getUser(id: string) {
           promotedUntil: profile.promotedUntil,
           smsCampaignEnabled: profile.smsCampaignEnabled ?? false,
           planTier: profile.planTier ?? 'free',
+          promotions,
         }
       : null,
     ownedSalons: ownedSalons.map((s) => ({
@@ -831,6 +835,105 @@ export async function unpromoteStylist(adminId: string, stylistId: string) {
   await profile.save();
   await audit(adminId, 'stylist.unpromote', 'stylist', stylistId, {});
   return summarizePromotion(stylistId, profile);
+}
+
+// ───────────────────────── promotions (general + category) ───────────────────
+// Source of truth is the `Promotion` collection: one row per (stylist, category),
+// with categoryId=null for a general promotion. No billing yet → admin-managed.
+// TODO(billing): a successful promotion purchase will create the same record.
+
+function serializePromotion(p: {
+  _id: unknown;
+  stylistId: unknown;
+  categoryId: unknown;
+  promotedUntil: Date;
+  createdAt?: Date;
+}) {
+  // `stylistId`/`categoryId` may be populated docs or raw ids.
+  const stylist = p.stylistId as { _id?: unknown; firstName?: string; lastName?: string } | unknown;
+  const cat = p.categoryId as { _id?: unknown; name?: string } | null;
+  const stylistObj = stylist as { _id?: unknown; firstName?: string; lastName?: string };
+  return {
+    id: String(p._id),
+    stylistId: String(stylistObj?._id ?? p.stylistId),
+    stylistName:
+      `${stylistObj?.firstName ?? ''} ${stylistObj?.lastName ?? ''}`.trim() || null,
+    categoryId: cat && (cat as { _id?: unknown })._id ? String((cat as { _id: unknown })._id) : p.categoryId ? String(p.categoryId) : null,
+    categoryName: cat && (cat as { name?: string }).name ? (cat as { name: string }).name : null,
+    promotedUntil: p.promotedUntil,
+    isActive: new Date(p.promotedUntil).getTime() > Date.now(),
+  };
+}
+
+/** Add or extend a stylist's promotion (general when categoryId is null/omitted). */
+export async function addStylistPromotion(
+  adminId: string,
+  stylistId: string,
+  categoryId: string | null,
+  until: Date,
+) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  if (categoryId) {
+    if (!Types.ObjectId.isValid(categoryId)) throw AppError.badRequest('دسته‌بندی نامعتبر', 'INVALID_ID');
+    const cat = await ServiceCategory.findById(categoryId).select('_id').lean();
+    if (!cat) throw AppError.notFound('دسته‌بندی یافت نشد', 'CATEGORY_NOT_FOUND');
+  }
+  const promo = await Promotion.findOneAndUpdate(
+    { stylistId, categoryId: categoryId ?? null },
+    { $set: { promotedUntil: until, createdBy: new Types.ObjectId(adminId) } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+  // Mirror the general promotion onto the legacy profile flag (the user-detail
+  // "پروموشن" row + any old reader still works).
+  if (categoryId == null) {
+    profile.isPromoted = true;
+    profile.promotedUntil = until;
+    await profile.save();
+  }
+  await audit(adminId, 'stylist.addPromotion', 'stylist', stylistId, {
+    categoryId: categoryId ?? null,
+    until,
+  });
+  return serializePromotion(promo as unknown as IPromotion);
+}
+
+/** Remove a single promotion (by id). Clears the legacy flag if it was general. */
+export async function removeStylistPromotion(adminId: string, stylistId: string, promotionId: string) {
+  if (!Types.ObjectId.isValid(promotionId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const promo = await Promotion.findOne({ _id: promotionId, stylistId });
+  if (!promo) throw AppError.notFound('پروموشن یافت نشد', 'PROMOTION_NOT_FOUND');
+  const wasGeneral = promo.categoryId == null;
+  await promo.deleteOne();
+  if (wasGeneral) {
+    await StylistProfile.updateOne(
+      { userId: stylistId },
+      { $set: { isPromoted: false, promotedUntil: null, promotionTier: null } },
+    );
+  }
+  await audit(adminId, 'stylist.removePromotion', 'stylist', stylistId, { promotionId });
+  return { id: promotionId };
+}
+
+/** All promotions for one stylist (active + expired), newest expiry first. */
+export async function getStylistPromotions(stylistId: string) {
+  if (!Types.ObjectId.isValid(stylistId)) return [];
+  const promos = await Promotion.find({ stylistId })
+    .sort({ promotedUntil: -1 })
+    .populate('categoryId', 'name')
+    .lean();
+  return promos.map((p) => serializePromotion(p as unknown as IPromotion));
+}
+
+/** Active promotions across all stylists (for the admin management list). */
+export async function listActivePromotions() {
+  const promos = await Promotion.find({ promotedUntil: { $gt: new Date() } })
+    .sort({ promotedUntil: 1 })
+    .populate('stylistId', 'firstName lastName')
+    .populate('categoryId', 'name')
+    .lean();
+  return promos.map((p) => serializePromotion(p as unknown as IPromotion));
 }
 
 // ───────────────────────── verification (blue tick) ─────────────────────────
