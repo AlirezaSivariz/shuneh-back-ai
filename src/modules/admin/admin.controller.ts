@@ -324,6 +324,37 @@ export async function removePromotion(req: Request, res: Response): Promise<void
   );
 }
 
+// ── Social moderation ──
+export async function socialReports(req: Request, res: Response): Promise<void> {
+  const q = req.query as { status?: 'open' | 'reviewed'; page?: number; limit?: number };
+  sendSuccess(res, await service.listSocialReports({ status: q.status, page: Number(q.page), limit: Number(q.limit) }));
+}
+
+export async function socialPosts(req: Request, res: Response): Promise<void> {
+  const q = req.query as { status?: 'active' | 'removed'; page?: number; limit?: number };
+  sendSuccess(res, await service.listSocialPosts({ status: q.status, page: Number(q.page), limit: Number(q.limit) }));
+}
+
+export async function socialPostDetail(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { post: await service.getSocialPost(req.params.id) });
+}
+
+export async function removeSocialPost(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.removeSocialPost(req.user!.id, req.params.id, req.body.reason));
+}
+
+export async function removeSocialComment(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.removeSocialComment(req.user!.id, req.params.id, req.body.reason));
+}
+
+export async function banSocial(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.setSocialBan(req.user!.id, req.params.id, true, req.body.reason));
+}
+
+export async function unbanSocial(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.setSocialBan(req.user!.id, req.params.id, false));
+}
+
 // ── Reports & audit ──
 export async function reports(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.getReports());

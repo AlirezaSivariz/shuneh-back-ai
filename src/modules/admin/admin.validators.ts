@@ -139,6 +139,25 @@ export const removePromotionSchema = {
   params: z.object({ id: objectId, promotionId: objectId }),
 };
 
+// ── Social moderation ──
+export const socialReportsSchema = {
+  query: z.object({ status: z.enum(['open', 'reviewed']).optional(), ...pageQuery }),
+};
+
+export const socialPostsSchema = {
+  query: z.object({ status: z.enum(['active', 'removed']).optional(), ...pageQuery }),
+};
+
+export const removeContentSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};
+
+export const banSocialSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};
+
 export const paginationSchema = {
   query: z.object({ ...pageQuery }),
 };

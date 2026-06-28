@@ -20,6 +20,9 @@ import { Salon, ServiceGender } from '../../models/Salon';
 import { Service } from '../../models/Service';
 import { ServiceCategory } from '../../models/ServiceCategory';
 import { Promotion, IPromotion } from '../../models/Promotion';
+import { Post } from '../../models/Post';
+import { PostComment } from '../../models/PostComment';
+import { ContentReport } from '../../models/ContentReport';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
@@ -190,6 +193,8 @@ export async function getUser(id: string) {
       accountActive: accountStatus(user).active,
       inactiveReason: accountStatus(user).reason,
       suspendedReason: user.suspendedReason ?? null,
+      socialBanned: user.socialBanned === true,
+      socialBannedReason: user.socialBannedReason ?? null,
       firstName: user.firstName ?? null,
       lastName: user.lastName ?? null,
       nationalCode: user.nationalCode ?? null, // admin-only sensitive field
@@ -936,6 +941,214 @@ export async function listActivePromotions() {
   return promos.map((p) => serializePromotion(p as unknown as IPromotion));
 }
 
+// ───────────────────────── social moderation ─────────────────────────────
+/** Open/all abuse reports with a small preview of the reported content. */
+export async function listSocialReports(filter: { status?: 'open' | 'reviewed' } & PageQuery) {
+  const { skip, limit, page } = paginate(filter);
+  const q = filter.status ? { status: filter.status } : {};
+  const [rows, total] = await Promise.all([
+    ContentReport.find(q)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('reporterId', 'firstName lastName phone')
+      .lean(),
+    ContentReport.countDocuments(q),
+  ]);
+  // Resolve a short preview + author for each reported target.
+  const items = await Promise.all(
+    rows.map(async (r) => {
+      let preview: string | null = null;
+      let authorId: string | null = null;
+      let exists = true;
+      if (r.targetType === 'post') {
+        const post = await Post.findById(r.targetId).select('caption authorId status').lean();
+        if (!post) exists = false;
+        else {
+          preview = (post.caption || '').slice(0, 120) || '(بدون متن)';
+          authorId = String(post.authorId);
+        }
+      } else {
+        const c = await PostComment.findById(r.targetId).select('text authorId status').lean();
+        if (!c) exists = false;
+        else {
+          preview = c.text.slice(0, 120);
+          authorId = String(c.authorId);
+        }
+      }
+      const reporter = r.reporterId as unknown as { _id: unknown; firstName?: string; lastName?: string } | null;
+      return {
+        id: String(r._id),
+        targetType: r.targetType,
+        targetId: String(r.targetId),
+        reason: r.reason,
+        status: r.status,
+        createdAt: r.createdAt,
+        reporterName: reporter ? `${reporter.firstName ?? ''} ${reporter.lastName ?? ''}`.trim() || null : null,
+        preview,
+        authorId,
+        exists,
+      };
+    }),
+  );
+  return { items, page, limit, total };
+}
+
+/** Resolve a minimal author view (name + photo) for a set of user ids. */
+async function socialAuthorMap(authorIds: string[]) {
+  const users = await User.find({ _id: { $in: [...new Set(authorIds)] } })
+    .select('firstName lastName profilePhoto')
+    .lean();
+  return new Map(
+    users.map((u) => [
+      String(u._id),
+      {
+        id: String(u._id),
+        fullName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || 'متخصص',
+        profilePhoto: u.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
+      },
+    ]),
+  );
+}
+
+/** Open-report counts grouped by post id (one aggregate). */
+async function reportCountsByTarget(targetType: 'post' | 'comment', ids: (unknown)[]) {
+  if (ids.length === 0) return new Map<string, number>();
+  const rows = await ContentReport.aggregate<{ _id: unknown; count: number }>([
+    { $match: { targetType, targetId: { $in: ids } } },
+    { $group: { _id: '$targetId', count: { $sum: 1 } } },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), r.count]));
+}
+
+/** All posts (active + removed) for admin moderation, with author + counts. */
+export async function listSocialPosts(filter: { status?: 'active' | 'removed' } & PageQuery) {
+  const { skip, limit, page } = paginate(filter);
+  const q = filter.status ? { status: filter.status } : {};
+  const [posts, total] = await Promise.all([
+    Post.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Post.countDocuments(q),
+  ]);
+  const [authors, reportCounts] = await Promise.all([
+    socialAuthorMap(posts.map((p) => String(p.authorId))),
+    reportCountsByTarget('post', posts.map((p) => p._id)),
+  ]);
+  const items = posts.map((p) => ({
+    id: String(p._id),
+    author: authors.get(String(p.authorId)) ?? { id: String(p.authorId), fullName: 'حذف‌شده', profilePhoto: null },
+    caption: p.caption,
+    thumbnail: p.images[0] ? storageProvider.getUrl(p.images[0]) : null,
+    imageCount: p.images.length,
+    likeCount: p.likeCount,
+    commentCount: p.commentCount,
+    reportCount: reportCounts.get(String(p._id)) ?? 0,
+    status: p.status,
+    createdAt: p.createdAt,
+  }));
+  return { items, page, limit, total };
+}
+
+/** Full post detail for admin: images, author, its comments and its reports. */
+export async function getSocialPost(id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const post = await Post.findById(id).lean();
+  if (!post) throw AppError.notFound('پست یافت نشد', 'POST_NOT_FOUND');
+
+  const [comments, reports] = await Promise.all([
+    PostComment.find({ postId: id }).sort({ createdAt: 1 }).limit(100).lean(),
+    ContentReport.find({ targetType: 'post', targetId: id })
+      .sort({ createdAt: -1 })
+      .populate('reporterId', 'firstName lastName')
+      .lean(),
+  ]);
+  const authorIds = [String(post.authorId), ...comments.map((c) => String(c.authorId))];
+  const [authors, commentReportCounts] = await Promise.all([
+    socialAuthorMap(authorIds),
+    reportCountsByTarget('comment', comments.map((c) => c._id)),
+  ]);
+
+  return {
+    id: String(post._id),
+    author: authors.get(String(post.authorId)) ?? { id: String(post.authorId), fullName: 'حذف‌شده', profilePhoto: null },
+    caption: post.caption,
+    images: post.images.map((k) => storageProvider.getUrl(k)),
+    hashtags: post.hashtags,
+    likeCount: post.likeCount,
+    commentCount: post.commentCount,
+    status: post.status,
+    removedReason: post.removedReason ?? null,
+    createdAt: post.createdAt,
+    comments: comments.map((c) => ({
+      id: String(c._id),
+      author: authors.get(String(c.authorId)) ?? { id: String(c.authorId), fullName: 'حذف‌شده', profilePhoto: null },
+      text: c.text,
+      status: c.status,
+      reportCount: commentReportCounts.get(String(c._id)) ?? 0,
+      createdAt: c.createdAt,
+    })),
+    reports: reports.map((r) => {
+      const reporter = r.reporterId as unknown as { firstName?: string; lastName?: string } | null;
+      return {
+        id: String(r._id),
+        reason: r.reason,
+        status: r.status,
+        reporterName: reporter ? `${reporter.firstName ?? ''} ${reporter.lastName ?? ''}`.trim() || null : null,
+        createdAt: r.createdAt,
+      };
+    }),
+  };
+}
+
+/** Remove a post (soft: status='removed'; hides it everywhere). Audited. */
+export async function removeSocialPost(adminId: string, postId: string, reason?: string) {
+  if (!Types.ObjectId.isValid(postId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const post = await Post.findById(postId);
+  if (!post) throw AppError.notFound('پست یافت نشد', 'POST_NOT_FOUND');
+  post.status = 'removed';
+  post.removedReason = reason ?? null;
+  await post.save();
+  await ContentReport.updateMany({ targetType: 'post', targetId: post._id }, { $set: { status: 'reviewed' } });
+  await audit(adminId, 'social.removePost', 'post', postId, { reason: reason ?? null });
+  return { id: postId };
+}
+
+/** Remove a comment (soft) and decrement its post's count. Audited. */
+export async function removeSocialComment(adminId: string, commentId: string, reason?: string) {
+  if (!Types.ObjectId.isValid(commentId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const comment = await PostComment.findById(commentId);
+  if (!comment) throw AppError.notFound('کامنت یافت نشد', 'COMMENT_NOT_FOUND');
+  if (comment.status !== 'removed') {
+    comment.status = 'removed';
+    comment.removedReason = reason ?? null;
+    await comment.save();
+    await Post.updateOne({ _id: comment.postId }, { $inc: { commentCount: -1 } });
+  }
+  await ContentReport.updateMany({ targetType: 'comment', targetId: comment._id }, { $set: { status: 'reviewed' } });
+  await audit(adminId, 'social.removeComment', 'comment', commentId, { reason: reason ?? null });
+  return { id: commentId };
+}
+
+/** Ban/unban a user from the social network + notify them by message. Audited. */
+export async function setSocialBan(adminId: string, userId: string, banned: boolean, reason?: string) {
+  if (!Types.ObjectId.isValid(userId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  user.socialBanned = banned;
+  user.socialBannedReason = banned ? reason ?? null : null;
+  await user.save();
+  await createMessage({
+    recipientId: userId,
+    title: banned ? 'مسدودسازی شبکه‌ی اجتماعی' : 'رفع مسدودی شبکه‌ی اجتماعی',
+    body: banned
+      ? `دسترسی شما به شبکه‌ی اجتماعی شونه مسدود شد${reason ? `: ${reason}` : '.'}`
+      : 'دسترسی شما به شبکه‌ی اجتماعی شونه دوباره فعال شد.',
+    relatedType: 'social_ban',
+    createdBy: adminId,
+  }).catch(() => undefined);
+  await audit(adminId, banned ? 'social.banUser' : 'social.unbanUser', 'user', userId, { reason: reason ?? null });
+  return { userId, socialBanned: banned };
+}
+
 // ───────────────────────── verification (blue tick) ─────────────────────────
 
 export async function listVerifications(
@@ -1366,13 +1579,14 @@ export async function adjustUserWallet(
 
 /** One light query set powering the sidebar "pending work" badges. */
 export async function getPendingCounts() {
-  const [foreignApprovals, reviews, verifications, pendingSalons] = await Promise.all([
+  const [foreignApprovals, reviews, verifications, pendingSalons, socialReports] = await Promise.all([
     User.countDocuments({ isForeignNational: true, foreignApprovalStatus: 'pending' }),
     Review.countDocuments({ status: 'pending' }),
     StylistProfile.countDocuments({ verificationStatus: 'pending' }),
     Salon.countDocuments({ status: 'pending' }),
+    ContentReport.countDocuments({ status: 'open' }),
   ]);
-  return { foreignApprovals, reviews, verifications, pendingSalons };
+  return { foreignApprovals, reviews, verifications, pendingSalons, socialReports };
 }
 
 // ───────────────────────── reservation analytics ─────────────────────────

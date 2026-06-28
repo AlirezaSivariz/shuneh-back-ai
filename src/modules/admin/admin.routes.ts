@@ -49,6 +49,10 @@ import {
   setStylistPlanSchema,
   addPromotionSchema,
   removePromotionSchema,
+  socialReportsSchema,
+  socialPostsSchema,
+  removeContentSchema,
+  banSocialSchema,
 } from './admin.validators';
 
 /**
@@ -92,6 +96,15 @@ adminRouter.post('/stylists/:id/unpromote', validate(stylistIdParamsSchema), asy
 adminRouter.get('/promotions', asyncHandler(controller.listPromotions));
 adminRouter.post('/stylists/:id/promotions', validate(addPromotionSchema), asyncHandler(controller.addPromotion));
 adminRouter.delete('/stylists/:id/promotions/:promotionId', validate(removePromotionSchema), asyncHandler(controller.removePromotion));
+
+// ── Social moderation (audited) ──
+adminRouter.get('/social/reports', validate(socialReportsSchema), asyncHandler(controller.socialReports));
+adminRouter.get('/social/posts', validate(socialPostsSchema), asyncHandler(controller.socialPosts));
+adminRouter.get('/social/posts/:id', validate(idParamsSchema), asyncHandler(controller.socialPostDetail));
+adminRouter.post('/social/posts/:id/remove', validate(removeContentSchema), asyncHandler(controller.removeSocialPost));
+adminRouter.post('/social/comments/:id/remove', validate(removeContentSchema), asyncHandler(controller.removeSocialComment));
+adminRouter.post('/users/:id/ban-social', validate(banSocialSchema), asyncHandler(controller.banSocial));
+adminRouter.post('/users/:id/unban-social', validate(idParamsSchema), asyncHandler(controller.unbanSocial));
 adminRouter.post('/stylists/:id/verify', validate(idWithMessageSchema), asyncHandler(controller.verifyStylist));
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
 adminRouter.post('/users/:id/approve-foreign', validate(idWithMessageSchema), asyncHandler(controller.approveForeign));

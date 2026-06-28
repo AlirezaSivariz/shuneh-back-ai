@@ -33,6 +33,10 @@ export interface IUser extends Document {
   isActive: boolean;
   /** Why an admin suspended the account (shown to support; set when isActive=false). */
   suspendedReason?: string | null;
+  /** Banned from the internal social network (can't post/comment/like). Separate
+   * from the account-level `isActive` suspend so the rest of the app keeps working. */
+  socialBanned: boolean;
+  socialBannedReason?: string | null;
   firstName?: string;
   lastName?: string;
   nationalCode?: string;
@@ -66,6 +70,8 @@ const userSchema = new Schema<IUser>(
     },
     isActive: { type: Boolean, default: true, index: true },
     suspendedReason: { type: String, default: null },
+    socialBanned: { type: Boolean, default: false },
+    socialBannedReason: { type: String, default: null },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     nationalCode: { type: String, trim: true },
