@@ -11,6 +11,10 @@ export const createPostSchema = {
   body: z.object({
     caption: z.string().max(2200).optional().default(''),
     acceptedRules: boolish,
+    type: z.enum(['normal', 'before_after']).optional(),
+    // Multipart string; "" → no related service. Validated against the stylist's
+    // own services in the service layer.
+    relatedServiceId: z.string().optional(),
   }),
 };
 
@@ -38,8 +42,24 @@ export const addCommentSchema = {
 
 export const reportSchema = {
   body: z.object({
-    targetType: z.enum(['post', 'comment']),
+    targetType: z.enum(['post', 'comment', 'story']),
     targetId: objectId,
     reason: z.string().trim().min(1, 'دلیل گزارش لازم است').max(500),
   }),
+};
+
+// ── Stories ──
+export const createStorySchema = {
+  body: z.object({
+    caption: z.string().max(500).optional().default(''),
+    acceptedRules: boolish,
+  }),
+};
+
+export const authorIdSchema = {
+  params: z.object({ authorId: objectId }),
+};
+
+export const storyIdSchema = {
+  params: z.object({ id: objectId }),
 };

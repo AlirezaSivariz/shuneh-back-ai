@@ -339,6 +339,29 @@ export async function socialPostDetail(req: Request, res: Response): Promise<voi
   sendSuccess(res, { post: await service.getSocialPost(req.params.id) });
 }
 
+export async function socialStories(req: Request, res: Response): Promise<void> {
+  const q = req.query as { includeExpired?: boolean; page?: number; limit?: number };
+  sendSuccess(res, await service.listSocialStories({ includeExpired: q.includeExpired, page: Number(q.page), limit: Number(q.limit) }));
+}
+
+export async function removeSocialStory(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.removeSocialStory(req.user!.id, req.params.id, req.body.reason));
+}
+
+// ── Profile name-edit review ──
+export async function profileEdits(req: Request, res: Response): Promise<void> {
+  const q = req.query as { status?: 'pending' | 'approved' | 'rejected'; page?: number; limit?: number };
+  sendSuccess(res, await service.listProfileEdits({ status: q.status, page: Number(q.page), limit: Number(q.limit) }));
+}
+
+export async function approveProfileEdit(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.approveProfileEdit(req.user!.id, req.params.id));
+}
+
+export async function rejectProfileEdit(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.rejectProfileEdit(req.user!.id, req.params.id, req.body.reason));
+}
+
 export async function removeSocialPost(req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.removeSocialPost(req.user!.id, req.params.id, req.body.reason));
 }

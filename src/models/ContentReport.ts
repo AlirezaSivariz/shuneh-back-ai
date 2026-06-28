@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type ReportTargetType = 'post' | 'comment';
+export type ReportTargetType = 'post' | 'comment' | 'story';
 export type ReportStatus = 'open' | 'reviewed';
 
 /** A user-submitted abuse report against a post or comment. */
@@ -16,7 +16,7 @@ export interface IContentReport extends Document {
 
 const contentReportSchema = new Schema<IContentReport>(
   {
-    targetType: { type: String, enum: ['post', 'comment'], required: true },
+    targetType: { type: String, enum: ['post', 'comment', 'story'], required: true },
     targetId: { type: Schema.Types.ObjectId, required: true, index: true },
     reporterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     reason: { type: String, required: true, trim: true, maxlength: 500 },

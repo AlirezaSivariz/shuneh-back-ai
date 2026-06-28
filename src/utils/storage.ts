@@ -2,7 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { Readable } from 'stream';
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { Types } from 'mongoose';
 import { config } from '../config/env';
 import { ImageAsset, ImageKind } from '../models/ImageAsset';
@@ -215,6 +222,8 @@ export class MongoStorageProvider implements StorageProvider {
 // ───────────────────── S3 / MinIO (webp via sharp) ─────────────────────
 export class S3StorageProvider implements StorageProvider {
   private client: S3Client;
+  /** Memoized one-time bucket existence check / creation. */
+  private bucketsReady?: Promise<void>;
 
   constructor() {
     const { endpoint, region, accessKeyId, secretAccessKey, publicBucket, privateBucket } = config.s3;
@@ -277,9 +286,46 @@ export class S3StorageProvider implements StorageProvider {
     return this.read(parsed.bucket, parsed.key);
   }
 
+  /**
+   * Ensure the public + private buckets exist (idempotent, memoized). A fresh
+   * S3/MinIO endpoint has no buckets yet, so the first upload would 500 with
+   * "The specified bucket does not exist" — we create them on demand instead.
+   */
+  ensureBuckets(): Promise<void> {
+    if (!this.bucketsReady) {
+      const buckets = [...new Set([config.s3.publicBucket, config.s3.privateBucket])];
+      this.bucketsReady = Promise.all(buckets.map((b) => this.ensureBucket(b)))
+        .then(() => undefined)
+        .catch((err) => {
+          // Reset so a later attempt can retry (e.g. transient endpoint error).
+          this.bucketsReady = undefined;
+          throw err;
+        });
+    }
+    return this.bucketsReady;
+  }
+
+  private async ensureBucket(bucket: string): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: bucket }));
+      return; // already exists
+    } catch {
+      // Fall through to create — missing, or no head permission.
+    }
+    try {
+      await this.client.send(new CreateBucketCommand({ Bucket: bucket }));
+    } catch (err) {
+      const name = (err as { name?: string }).name ?? '';
+      // Created concurrently / already ours → success.
+      if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') return;
+      throw err;
+    }
+  }
+
   private async store(file: Express.Multer.File, isPrivate: boolean, meta?: SaveMeta): Promise<StoredFile> {
     if (!file.buffer) throw new Error('S3StorageProvider requires in-memory uploads (multer memoryStorage)');
 
+    await this.ensureBuckets();
     const { main, thumbnailData } = await processImage(file.buffer);
     const id = new Types.ObjectId().toString();
     const kind = meta?.kind ?? (isPrivate ? 'national_card' : 'profile');
@@ -355,3 +401,13 @@ function buildProvider(): StorageProvider {
 }
 
 export const storageProvider: StorageProvider = buildProvider();
+
+/**
+ * Best-effort: pre-create S3/MinIO buckets at boot so the first image upload
+ * doesn't fail with "bucket does not exist". No-op for local/mongo drivers.
+ */
+export async function ensureStorageReady(): Promise<void> {
+  if (storageProvider instanceof S3StorageProvider) {
+    await storageProvider.ensureBuckets();
+  }
+}

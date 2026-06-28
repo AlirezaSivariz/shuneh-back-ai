@@ -9,6 +9,8 @@ import { StylistService } from '../../models/StylistService';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Salon } from '../../models/Salon';
+import { ProfileEditRequest } from '../../models/ProfileEditRequest';
+import { containsBannedWord } from '../../config/bannedWords';
 import { AppError } from '../../utils/AppError';
 import { hasPendingInvitesForPhone } from '../invite/invite.service';
 import { getBookability } from '../stylist/bookability';
@@ -312,4 +314,58 @@ export async function updatePersonal(
     const profile = await ensureStylistProfile(userId);
     await advanceStep(profile, 'personal');
   }
+}
+
+// ───────────────────────── profile name edit (reviewed) ─────────────────────
+const NAME_RE = /^[؀-ۿ‌ a-zA-Z'’\-]{2,50}$/;
+
+function serializeNameEdit(r: {
+  _id: unknown;
+  firstName: string;
+  lastName: string;
+  status: string;
+  rejectionReason: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: String(r._id),
+    firstName: r.firstName,
+    lastName: r.lastName,
+    status: r.status,
+    rejectionReason: r.rejectionReason ?? null,
+    createdAt: r.createdAt,
+  };
+}
+
+/**
+ * Request a display-name change. NOT applied immediately — it becomes a pending
+ * `ProfileEditRequest` an admin must approve (so a verified identity can't be
+ * silently changed). Replaces any existing pending request for the user.
+ */
+export async function requestNameEdit(userId: string, firstName: string, lastName: string) {
+  const user = await User.findById(userId).select('firstName lastName');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const fn = firstName.trim();
+  const ln = lastName.trim();
+  if (!NAME_RE.test(fn) || !NAME_RE.test(ln)) {
+    throw AppError.badRequest('نام و نام خانوادگی باید بین ۲ تا ۵۰ حرف معتبر باشند', 'INVALID_NAME');
+  }
+  if (containsBannedWord(fn) || containsBannedWord(ln)) {
+    throw AppError.badRequest('نام شامل کلمه‌ی نامناسب است', 'PROFANITY');
+  }
+  if (user.firstName === fn && user.lastName === ln) {
+    throw AppError.badRequest('نام جدید با نام فعلی یکسان است', 'NO_CHANGE');
+  }
+
+  // One pending request per user — drop any open one first.
+  await ProfileEditRequest.deleteMany({ userId, status: 'pending' });
+  const req = await ProfileEditRequest.create({ userId, firstName: fn, lastName: ln });
+  return serializeNameEdit(req);
+}
+
+/** The user's current pending name-edit request (or null). */
+export async function getMyNameEdit(userId: string) {
+  const req = await ProfileEditRequest.findOne({ userId, status: 'pending' }).lean();
+  return req ? serializeNameEdit(req) : null;
 }

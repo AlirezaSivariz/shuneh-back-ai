@@ -51,8 +51,11 @@ import {
   removePromotionSchema,
   socialReportsSchema,
   socialPostsSchema,
+  socialStoriesSchema,
   removeContentSchema,
   banSocialSchema,
+  profileEditsSchema,
+  rejectProfileEditSchema,
 } from './admin.validators';
 
 /**
@@ -101,10 +104,17 @@ adminRouter.delete('/stylists/:id/promotions/:promotionId', validate(removePromo
 adminRouter.get('/social/reports', validate(socialReportsSchema), asyncHandler(controller.socialReports));
 adminRouter.get('/social/posts', validate(socialPostsSchema), asyncHandler(controller.socialPosts));
 adminRouter.get('/social/posts/:id', validate(idParamsSchema), asyncHandler(controller.socialPostDetail));
+adminRouter.get('/social/stories', validate(socialStoriesSchema), asyncHandler(controller.socialStories));
+adminRouter.post('/social/stories/:id/remove', validate(removeContentSchema), asyncHandler(controller.removeSocialStory));
 adminRouter.post('/social/posts/:id/remove', validate(removeContentSchema), asyncHandler(controller.removeSocialPost));
 adminRouter.post('/social/comments/:id/remove', validate(removeContentSchema), asyncHandler(controller.removeSocialComment));
 adminRouter.post('/users/:id/ban-social', validate(banSocialSchema), asyncHandler(controller.banSocial));
 adminRouter.post('/users/:id/unban-social', validate(idParamsSchema), asyncHandler(controller.unbanSocial));
+
+// ── Profile name-edit review (audited) ──
+adminRouter.get('/profile-edits', validate(profileEditsSchema), asyncHandler(controller.profileEdits));
+adminRouter.post('/profile-edits/:id/approve', validate(idParamsSchema), asyncHandler(controller.approveProfileEdit));
+adminRouter.post('/profile-edits/:id/reject', validate(rejectProfileEditSchema), asyncHandler(controller.rejectProfileEdit));
 adminRouter.post('/stylists/:id/verify', validate(idWithMessageSchema), asyncHandler(controller.verifyStylist));
 adminRouter.post('/stylists/:id/reject-verification', validate(rejectVerificationSchema), asyncHandler(controller.rejectVerification));
 adminRouter.post('/users/:id/approve-foreign', validate(idWithMessageSchema), asyncHandler(controller.approveForeign));

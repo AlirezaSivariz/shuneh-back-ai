@@ -3,6 +3,7 @@ import * as controller from './reservation.controller';
 import * as customer from './reservation.customer.controller';
 import * as reviewController from '../review/review.controller';
 import { requireInternalKey } from '../../middlewares/internalKey';
+import { purgeExpiredStories } from '../social/story.service';
 import { authenticate } from '../../middlewares/auth';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -27,6 +28,16 @@ internalRouter.post(
   '/reservations/complete-due',
   requireInternalKey,
   asyncHandler(controller.completeDue),
+);
+
+// Manually purge expired 24h stories (fallback when no in-process cron runs).
+internalRouter.post(
+  '/stories/purge',
+  requireInternalKey,
+  asyncHandler(async (_req, res) => {
+    const result = await purgeExpiredStories();
+    res.json({ success: true, data: result });
+  }),
 );
 
 // Routes under /reservations — customer-facing booking (Phase 2).

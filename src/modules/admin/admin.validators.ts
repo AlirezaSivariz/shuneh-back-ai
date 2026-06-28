@@ -148,6 +148,20 @@ export const socialPostsSchema = {
   query: z.object({ status: z.enum(['active', 'removed']).optional(), ...pageQuery }),
 };
 
+export const socialStoriesSchema = {
+  query: z.object({ includeExpired: z.coerce.boolean().optional(), ...pageQuery }),
+};
+
+// ── Profile name-edit review ──
+export const profileEditsSchema = {
+  query: z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional(), ...pageQuery }),
+};
+
+export const rejectProfileEditSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ reason: z.string().trim().max(500).optional() }),
+};
+
 export const removeContentSchema = {
   params: z.object({ id: objectId }),
   body: z.object({ reason: z.string().trim().max(500).optional() }),

@@ -7,8 +7,10 @@ import {
   migrateStylistPlanTier,
   migrateBlogCoverKeys,
   migratePromotions,
+  migrateSocialPostType,
 } from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
+import { ensureStorageReady } from './utils/storage';
 
 async function bootstrap() {
   await connectDb();
@@ -23,6 +25,17 @@ async function bootstrap() {
   await migrateBlogCoverKeys();
   // Backfill the Promotion collection from legacy profile promotion flags.
   await migratePromotions();
+  // Social post type photo→normal (phase-2 rename).
+  await migrateSocialPostType();
+
+  // Pre-create object-storage buckets (S3/MinIO) so uploads don't 500 on a
+  // fresh endpoint. Best-effort: the provider also self-heals lazily per upload.
+  try {
+    await ensureStorageReady();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[storage] bucket warm-up failed (will retry on first upload):', err);
+  }
 
   const app = createApp();
 

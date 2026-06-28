@@ -4,6 +4,7 @@ import { Salon } from '../models/Salon';
 import { StylistProfile } from '../models/StylistProfile';
 import { BlogPost } from '../models/BlogPost';
 import { Promotion } from '../models/Promotion';
+import { Post } from '../models/Post';
 import { seedCategories } from './data';
 
 /**
@@ -157,5 +158,15 @@ export async function migratePromotions(): Promise<void> {
   if (n > 0) {
     // eslint-disable-next-line no-console
     console.log(`[migrate] created ${n} general promotion(s) from legacy flags`);
+  }
+}
+
+/** Rename the legacy social post type `photo` → `normal` (phase-2 schema). */
+export async function migrateSocialPostType(): Promise<void> {
+  const res = await Post.updateMany({ type: 'photo' }, { $set: { type: 'normal' } });
+  const n = (res as { modifiedCount?: number }).modifiedCount ?? 0;
+  if (n > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[migrate] renamed ${n} social post(s) type photo→normal`);
   }
 }

@@ -1,5 +1,10 @@
 import { config } from '../config/env';
 import { completeDueReservations } from '../modules/reservation/reservation.service';
+import { purgeExpiredStories } from '../modules/social/story.service';
+
+/** How often expired 24h stories are purged (record + image). Read-time filtering
+ * already hides them; this only reclaims storage. */
+const STORY_PURGE_INTERVAL_MIN = 60;
 
 /**
  * Lightweight job scheduler.
@@ -27,6 +32,19 @@ async function runReservationAutoComplete(): Promise<void> {
   }
 }
 
+async function runStoryPurge(): Promise<void> {
+  try {
+    const { removed } = await purgeExpiredStories();
+    if (removed > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[cron] purged ${removed} expired stor(ies)`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[cron] story purge failed:', err);
+  }
+}
+
 export function startScheduledJobs(): void {
   if (config.disableCron) {
     // eslint-disable-next-line no-console
@@ -44,9 +62,15 @@ export function startScheduledJobs(): void {
   timer.unref?.();
   timers.push(timer);
 
+  // Expired-story cleanup (storage reclaim; read-time filter handles visibility).
+  void runStoryPurge();
+  const storyTimer = setInterval(runStoryPurge, STORY_PURGE_INTERVAL_MIN * 60 * 1000);
+  storyTimer.unref?.();
+  timers.push(storyTimer);
+
   // eslint-disable-next-line no-console
   console.log(
-    `[cron] reservation auto-complete scheduled every ${config.autoCompleteIntervalMinutes} minute(s)`,
+    `[cron] reservation auto-complete every ${config.autoCompleteIntervalMinutes}m; story purge every ${STORY_PURGE_INTERVAL_MIN}m`,
   );
 }
 

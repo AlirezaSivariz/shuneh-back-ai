@@ -67,3 +67,11 @@ export const personalSchema = {
       }
     }),
 };
+
+/** A reviewed name-edit request (firstName/lastName only). */
+export const nameEditSchema = {
+  body: z.object({
+    firstName: z.string().trim().min(2, 'نام را وارد کن').max(50),
+    lastName: z.string().trim().min(2, 'نام خانوادگی را وارد کن').max(50),
+  }),
+};

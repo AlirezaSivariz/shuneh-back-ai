@@ -23,6 +23,9 @@ import { Promotion, IPromotion } from '../../models/Promotion';
 import { Post } from '../../models/Post';
 import { PostComment } from '../../models/PostComment';
 import { ContentReport } from '../../models/ContentReport';
+import { ProfileEditRequest } from '../../models/ProfileEditRequest';
+import { Story } from '../../models/Story';
+import { StoryView } from '../../models/StoryView';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
@@ -968,6 +971,13 @@ export async function listSocialReports(filter: { status?: 'open' | 'reviewed' }
           preview = (post.caption || '').slice(0, 120) || '(بدون متن)';
           authorId = String(post.authorId);
         }
+      } else if (r.targetType === 'story') {
+        const story = await Story.findById(r.targetId).select('caption authorId status').lean();
+        if (!story) exists = false;
+        else {
+          preview = `استوری: ${(story.caption || '').slice(0, 100) || '(بدون متن)'}`;
+          authorId = String(story.authorId);
+        }
       } else {
         const c = await PostComment.findById(r.targetId).select('text authorId status').lean();
         if (!c) exists = false;
@@ -1012,7 +1022,7 @@ async function socialAuthorMap(authorIds: string[]) {
 }
 
 /** Open-report counts grouped by post id (one aggregate). */
-async function reportCountsByTarget(targetType: 'post' | 'comment', ids: (unknown)[]) {
+async function reportCountsByTarget(targetType: 'post' | 'comment' | 'story', ids: (unknown)[]) {
   if (ids.length === 0) return new Map<string, number>();
   const rows = await ContentReport.aggregate<{ _id: unknown; count: number }>([
     { $match: { targetType, targetId: { $in: ids } } },
@@ -1037,8 +1047,12 @@ export async function listSocialPosts(filter: { status?: 'active' | 'removed' } 
     id: String(p._id),
     author: authors.get(String(p.authorId)) ?? { id: String(p.authorId), fullName: 'حذف‌شده', profilePhoto: null },
     caption: p.caption,
-    thumbnail: p.images[0] ? storageProvider.getUrl(p.images[0]) : null,
-    imageCount: p.images.length,
+    type: p.type,
+    thumbnail: (() => {
+      const key = p.images[0] ?? p.beforeImage ?? null;
+      return key ? storageProvider.getUrl(key) : null;
+    })(),
+    imageCount: p.type === 'before_after' ? 2 : p.images.length,
     likeCount: p.likeCount,
     commentCount: p.commentCount,
     reportCount: reportCounts.get(String(p._id)) ?? 0,
@@ -1071,7 +1085,10 @@ export async function getSocialPost(id: string) {
     id: String(post._id),
     author: authors.get(String(post.authorId)) ?? { id: String(post.authorId), fullName: 'حذف‌شده', profilePhoto: null },
     caption: post.caption,
+    type: post.type,
     images: post.images.map((k) => storageProvider.getUrl(k)),
+    beforeImage: post.beforeImage ? storageProvider.getUrl(post.beforeImage) : null,
+    afterImage: post.afterImage ? storageProvider.getUrl(post.afterImage) : null,
     hashtags: post.hashtags,
     likeCount: post.likeCount,
     commentCount: post.commentCount,
@@ -1147,6 +1164,142 @@ export async function setSocialBan(adminId: string, userId: string, banned: bool
   }).catch(() => undefined);
   await audit(adminId, banned ? 'social.banUser' : 'social.unbanUser', 'user', userId, { reason: reason ?? null });
   return { userId, socialBanned: banned };
+}
+
+/** Active (non-expired) stories for admin review, with author + view/report counts. */
+export async function listSocialStories(filter: { includeExpired?: boolean } & PageQuery) {
+  const { skip, limit, page } = paginate(filter);
+  const q = filter.includeExpired ? {} : { status: 'active', expiresAt: { $gt: new Date() } };
+  const [stories, total] = await Promise.all([
+    Story.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Story.countDocuments(q),
+  ]);
+  const [authors, viewCounts, reportCounts] = await Promise.all([
+    socialAuthorMap(stories.map((s) => String(s.authorId))),
+    (async () => {
+      if (stories.length === 0) return new Map<string, number>();
+      const rows = await StoryView.aggregate<{ _id: unknown; count: number }>([
+        { $match: { storyId: { $in: stories.map((s) => s._id) } } },
+        { $group: { _id: '$storyId', count: { $sum: 1 } } },
+      ]);
+      return new Map(rows.map((r) => [String(r._id), r.count]));
+    })(),
+    reportCountsByTarget('story', stories.map((s) => s._id)),
+  ]);
+  const items = stories.map((s) => ({
+    id: String(s._id),
+    author: authors.get(String(s.authorId)) ?? { id: String(s.authorId), fullName: 'حذف‌شده', profilePhoto: null },
+    image: storageProvider.getUrl(s.image),
+    caption: s.caption,
+    status: s.status,
+    viewCount: viewCounts.get(String(s._id)) ?? 0,
+    reportCount: reportCounts.get(String(s._id)) ?? 0,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+  }));
+  return { items, page, limit, total };
+}
+
+/** Remove a story (soft: status='removed'; hidden everywhere). Audited. */
+export async function removeSocialStory(adminId: string, storyId: string, reason?: string) {
+  if (!Types.ObjectId.isValid(storyId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const story = await Story.findById(storyId);
+  if (!story) throw AppError.notFound('استوری یافت نشد', 'STORY_NOT_FOUND');
+  story.status = 'removed';
+  story.removedReason = reason ?? null;
+  await story.save();
+  await ContentReport.updateMany({ targetType: 'story', targetId: story._id }, { $set: { status: 'reviewed' } });
+  await audit(adminId, 'social.removeStory', 'story', storyId, { reason: reason ?? null });
+  return { id: storyId };
+}
+
+// ───────────────────────── profile name-edit review ─────────────────────────
+/** Pending (or all) name-edit requests with the user's CURRENT name for comparison. */
+export async function listProfileEdits(filter: { status?: 'pending' | 'approved' | 'rejected' } & PageQuery) {
+  const { skip, limit, page } = paginate(filter);
+  const q = filter.status ? { status: filter.status } : {};
+  const [rows, total] = await Promise.all([
+    ProfileEditRequest.find(q)
+      .sort({ createdAt: 1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'firstName lastName phone profilePhoto')
+      .lean(),
+    ProfileEditRequest.countDocuments(q),
+  ]);
+  const items = rows.map((r) => {
+    const u = r.userId as unknown as {
+      _id: unknown;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      profilePhoto?: string;
+    } | null;
+    return {
+      id: String(r._id),
+      userId: u?._id ? String(u._id) : String(r.userId),
+      phone: u?.phone ?? null,
+      profilePhoto: u?.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
+      currentName: u ? `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || '—' : '—',
+      requestedFirstName: r.firstName,
+      requestedLastName: r.lastName,
+      status: r.status,
+      createdAt: r.createdAt,
+    };
+  });
+  return { items, page, limit, total };
+}
+
+/** Approve a name edit → apply it to the user. Audited + notifies the user. */
+export async function approveProfileEdit(adminId: string, requestId: string) {
+  if (!Types.ObjectId.isValid(requestId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const req = await ProfileEditRequest.findById(requestId);
+  if (!req) throw AppError.notFound('درخواست یافت نشد', 'REQUEST_NOT_FOUND');
+  if (req.status !== 'pending') throw AppError.badRequest('این درخواست قبلاً بررسی شده است', 'ALREADY_REVIEWED');
+  const user = await User.findById(req.userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  user.firstName = req.firstName;
+  user.lastName = req.lastName;
+  await user.save();
+  req.status = 'approved';
+  req.reviewedBy = new Types.ObjectId(adminId);
+  await req.save();
+
+  await createMessage({
+    recipientId: String(user._id),
+    title: 'تأیید ویرایش پروفایل',
+    body: `نام نمایشی شما به «${req.firstName} ${req.lastName}» تغییر کرد.`,
+    relatedType: 'profile_edit',
+    createdBy: adminId,
+  }).catch(() => undefined);
+  await audit(adminId, 'profile.approveNameEdit', 'user', String(user._id), {
+    firstName: req.firstName,
+    lastName: req.lastName,
+  });
+  return { id: requestId, status: 'approved' as const };
+}
+
+/** Reject a name edit (keeps the current name). Audited + notifies the user. */
+export async function rejectProfileEdit(adminId: string, requestId: string, reason?: string) {
+  if (!Types.ObjectId.isValid(requestId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const req = await ProfileEditRequest.findById(requestId);
+  if (!req) throw AppError.notFound('درخواست یافت نشد', 'REQUEST_NOT_FOUND');
+  if (req.status !== 'pending') throw AppError.badRequest('این درخواست قبلاً بررسی شده است', 'ALREADY_REVIEWED');
+  req.status = 'rejected';
+  req.rejectionReason = reason ?? null;
+  req.reviewedBy = new Types.ObjectId(adminId);
+  await req.save();
+
+  await createMessage({
+    recipientId: String(req.userId),
+    title: 'رد ویرایش پروفایل',
+    body: `درخواست تغییر نام شما رد شد${reason ? `: ${reason}` : '.'}`,
+    relatedType: 'profile_edit',
+    createdBy: adminId,
+  }).catch(() => undefined);
+  await audit(adminId, 'profile.rejectNameEdit', 'user', String(req.userId), { reason: reason ?? null });
+  return { id: requestId, status: 'rejected' as const };
 }
 
 // ───────────────────────── verification (blue tick) ─────────────────────────
@@ -1579,14 +1732,16 @@ export async function adjustUserWallet(
 
 /** One light query set powering the sidebar "pending work" badges. */
 export async function getPendingCounts() {
-  const [foreignApprovals, reviews, verifications, pendingSalons, socialReports] = await Promise.all([
-    User.countDocuments({ isForeignNational: true, foreignApprovalStatus: 'pending' }),
-    Review.countDocuments({ status: 'pending' }),
-    StylistProfile.countDocuments({ verificationStatus: 'pending' }),
-    Salon.countDocuments({ status: 'pending' }),
-    ContentReport.countDocuments({ status: 'open' }),
-  ]);
-  return { foreignApprovals, reviews, verifications, pendingSalons, socialReports };
+  const [foreignApprovals, reviews, verifications, pendingSalons, socialReports, profileEdits] =
+    await Promise.all([
+      User.countDocuments({ isForeignNational: true, foreignApprovalStatus: 'pending' }),
+      Review.countDocuments({ status: 'pending' }),
+      StylistProfile.countDocuments({ verificationStatus: 'pending' }),
+      Salon.countDocuments({ status: 'pending' }),
+      ContentReport.countDocuments({ status: 'open' }),
+      ProfileEditRequest.countDocuments({ status: 'pending' }),
+    ]);
+  return { foreignApprovals, reviews, verifications, pendingSalons, socialReports, profileEdits };
 }
 
 // ───────────────────────── reservation analytics ─────────────────────────

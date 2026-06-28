@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as service from './social.service';
+import * as storyService from './story.service';
 import { sendSuccess } from '../../utils/response';
 
 const pageOf = (q: unknown) => {
@@ -12,13 +13,27 @@ export async function access(req: Request, res: Response): Promise<void> {
 }
 
 export async function createPost(req: Request, res: Response): Promise<void> {
-  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  // `.fields()` → req.files is an object keyed by field name.
+  const files = (req.files as service.PostFiles | undefined) ?? {};
   const post = await service.createPost(
     req.user!.id,
-    { caption: req.body.caption ?? '', acceptedRules: req.body.acceptedRules },
+    {
+      caption: req.body.caption ?? '',
+      acceptedRules: req.body.acceptedRules,
+      type: req.body.type,
+      relatedServiceId: req.body.relatedServiceId || null,
+    },
     files,
   );
   sendSuccess(res, { post }, 201);
+}
+
+export async function toggleSave(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.toggleSave(req.params.id, req.user!.id));
+}
+
+export async function savedPosts(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getSavedPosts(req.user!.id, pageOf(req.query)));
 }
 
 export async function feed(req: Request, res: Response): Promise<void> {
@@ -57,4 +72,34 @@ export async function deleteComment(req: Request, res: Response): Promise<void> 
 export async function report(req: Request, res: Response): Promise<void> {
   const { targetType, targetId, reason } = req.body;
   sendSuccess(res, await service.reportContent(req.user!.id, targetType, targetId, reason), 201);
+}
+
+// ── Stories ──
+export async function createStory(req: Request, res: Response): Promise<void> {
+  const story = await storyService.createStory(
+    req.user!.id,
+    { caption: req.body.caption ?? '', acceptedRules: req.body.acceptedRules },
+    req.file,
+  );
+  sendSuccess(res, { story }, 201);
+}
+
+export async function storiesFeed(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { groups: await storyService.getActiveStoriesGrouped(req.user?.id) });
+}
+
+export async function authorStories(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await storyService.getAuthorStories(req.params.authorId, req.user?.id));
+}
+
+export async function deleteStory(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await storyService.deleteStory(req.params.id, req.user!.id));
+}
+
+export async function markStorySeen(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await storyService.markSeen(req.params.id, req.user!.id));
+}
+
+export async function storyViewers(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await storyService.getStoryViewers(req.params.id, req.user!.id));
 }

@@ -33,3 +33,12 @@ export async function updatePersonal(req: Request, res: Response): Promise<void>
   const state = await service.getOnboardingState(req.user!.id);
   sendSuccess(res, state);
 }
+
+export async function requestNameEdit(req: Request, res: Response): Promise<void> {
+  const edit = await service.requestNameEdit(req.user!.id, req.body.firstName, req.body.lastName);
+  sendSuccess(res, { edit }, 201);
+}
+
+export async function getMyNameEdit(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, { edit: await service.getMyNameEdit(req.user!.id) });
+}
