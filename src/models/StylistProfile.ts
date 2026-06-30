@@ -1,5 +1,9 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { GeoPoint } from '../utils/geo';
+import {
+  ICancellationPolicy,
+  cancellationPolicySchema,
+} from './cancellationPolicy';
 
 export type WorkplaceType = 'freelance' | 'salon';
 
@@ -41,6 +45,18 @@ export function planAllowsSmsCampaign(tier: PlanTier): boolean {
 export interface IFreelanceInfo {
   address?: string;
   location?: GeoPoint;
+}
+
+/** A stylist's per-service cancellation policy override (gold plan only). */
+export interface IServiceCancellationPolicy {
+  serviceId: Types.ObjectId;
+  policy: ICancellationPolicy;
+}
+
+/** Bank payout details — SENSITIVE. Owner + admin only; masked elsewhere. */
+export interface IPayoutInfo {
+  shebaNumber?: string | null;
+  cardNumber?: string | null;
 }
 
 export interface IStylistProfile extends Document {
@@ -101,6 +117,15 @@ export interface IStylistProfile extends Document {
   documentsSubmittedAt: Date | null;
   /** When the sensitive ID images were deleted after a verification decision. */
   documentsDeletedAt: Date | null;
+  /**
+   * The stylist's OWN general cancellation policy (silver+). Null → the stylist
+   * follows the salon's policy (or the system default). See `src/modules/policy`.
+   */
+  cancellationPolicy?: ICancellationPolicy | null;
+  /** Per-service policy overrides (gold only) — take precedence over the general one. */
+  servicePolicies?: IServiceCancellationPolicy[];
+  /** Bank payout details (SHEBA + card) — sensitive; owner + admin only. */
+  payout?: IPayoutInfo | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -166,6 +191,33 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     nationalCardBack: { type: String, default: null },
     documentsSubmittedAt: { type: Date, default: null },
     documentsDeletedAt: { type: Date, default: null },
+    // Cancellation policy: own general policy (silver+) + per-service (gold).
+    // Null/empty → follow the salon policy (or the system default).
+    cancellationPolicy: { type: cancellationPolicySchema, default: null },
+    servicePolicies: {
+      type: [
+        new Schema<IServiceCancellationPolicy>(
+          {
+            serviceId: { type: Schema.Types.ObjectId, ref: 'Service', required: true },
+            policy: { type: cancellationPolicySchema, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    // Sensitive bank payout details (SHEBA + card). Owner + admin only; never
+    // serialized into public output, masked in non-essential views.
+    payout: {
+      type: new Schema<IPayoutInfo>(
+        {
+          shebaNumber: { type: String, default: null },
+          cardNumber: { type: String, default: null },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   { timestamps: true },
 );

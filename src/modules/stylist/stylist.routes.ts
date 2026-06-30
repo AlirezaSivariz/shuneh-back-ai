@@ -39,6 +39,10 @@ import {
   inviteIdParamsSchema,
   salonRequestIdParamsSchema,
   salonRequestsQuerySchema,
+  cancellationPolicySchema,
+  servicePolicySchema,
+  servicePolicyIdParamsSchema,
+  payoutSchema,
 } from './stylist.validators';
 
 const router = Router();
@@ -152,6 +156,29 @@ router.delete(
   validate(workingHourIdParamsSchema),
   asyncHandler(controller.deleteWorkingHour),
 );
+
+// ── Cancellation policy (plan-gated; per-service is gold-only) ──
+router.get('/cancellation-policy', asyncHandler(controller.getCancellationPolicy));
+router.put(
+  '/cancellation-policy',
+  validate(cancellationPolicySchema),
+  asyncHandler(controller.setCancellationPolicy),
+);
+router.delete('/cancellation-policy', asyncHandler(controller.clearCancellationPolicy));
+router.put(
+  '/cancellation-policy/services/:serviceId',
+  validate(servicePolicySchema),
+  asyncHandler(controller.setServiceCancellationPolicy),
+);
+router.delete(
+  '/cancellation-policy/services/:serviceId',
+  validate(servicePolicyIdParamsSchema),
+  asyncHandler(controller.removeServiceCancellationPolicy),
+);
+
+// ── Bank payout details (SHEBA + card) — sensitive; owner-only ──
+router.get('/payout-info', asyncHandler(controller.getPayoutInfo));
+router.put('/payout-info', validate(payoutSchema), asyncHandler(controller.setPayoutInfo));
 
 // Phase 2 — the stylist's own reservations (as the service provider).
 router.get(

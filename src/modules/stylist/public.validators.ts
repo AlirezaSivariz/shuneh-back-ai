@@ -28,6 +28,15 @@ export const stylistIdParamsSchema = {
   params: z.object({ id: objectId }),
 };
 
+// Booking-time cancellation policy: optional services (repeatable) + salon.
+export const cancellationPolicySchema = {
+  params: z.object({ id: objectId }),
+  query: z.object({
+    serviceIds: z.union([objectId, z.array(objectId)]).optional(),
+    salonId: objectId.optional(),
+  }),
+};
+
 const serviceIdsCsv = z
   .string()
   .min(1, 'serviceIds is required')

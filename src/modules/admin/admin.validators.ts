@@ -7,6 +7,21 @@ import { findProvince, isValidProvinceCity } from '../../data/iranGeo';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+
+// Cancellation policy body shared by admin salon-update + stylist-policy routes.
+const adminCancellationPolicy = z.object({
+  rules: z
+    .array(
+      z.object({
+        hoursBeforeStart: z.number().int().min(0).max(720),
+        refundPercent: z.number().int().min(0).max(100),
+      }),
+    )
+    .min(1)
+    .max(6),
+  freeRescheduleCount: z.number().int().min(0).max(10).default(1),
+  reschedulePenaltyPercent: z.number().int().min(0).max(100).default(0),
+});
 const pageQuery = {
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -272,6 +287,7 @@ export const adminUpdateSalonSchema = {
       lng: z.number().min(-180).max(180).optional(),
       lat: z.number().min(-90).max(90).optional(),
       openingHours: adminOpeningHours.optional(),
+      cancellationPolicy: adminCancellationPolicy.nullable().optional(),
     })
     .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update')
     .refine(
@@ -318,6 +334,11 @@ export const setStylistSmsCampaignSchema = {
 export const setStylistPlanSchema = {
   params: z.object({ id: objectId }),
   body: z.object({ tier: z.enum(['free', 'silver', 'gold']) }),
+};
+
+export const setStylistCancellationPolicySchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ policy: adminCancellationPolicy.nullable() }),
 };
 
 // ── Wallet manual adjust (signed Toman: + credit / − debit) ──

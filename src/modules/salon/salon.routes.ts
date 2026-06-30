@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as controller from './salon.controller';
 import { validate } from '../../middlewares/validate';
-import { authenticate, authorize } from '../../middlewares/auth';
+import { authenticate, authorize, optionalAuthenticate } from '../../middlewares/auth';
 import { requireSalonOwner } from '../../middlewares/salonOwner';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
@@ -11,14 +11,16 @@ import {
   byOwnerPhoneSchema,
   stylistApprovalParamsSchema,
   salonStylistsSchema,
+  salonDetailParamsSchema,
 } from './salon.validators';
 
 const router = Router();
 
-// Geo + name search (used during stylist workplace onboarding).
+// Public geo + name search (active salons). Also reused by the stylist workplace
+// onboarding flow (authenticated). optionalAuthenticate keeps both working.
 router.get(
   '/search',
-  authenticate,
+  optionalAuthenticate,
   validate(searchSalonsSchema),
   asyncHandler(controller.search),
 );
@@ -75,6 +77,15 @@ router.post(
   validate(stylistApprovalParamsSchema),
   requireSalonOwner,
   asyncHandler(controller.rejectStylist),
+);
+
+// Public salon detail + its bookable stylists. Registered LAST so the literal
+// routes above (/search, /by-owner-phone) are never shadowed by `:id`.
+router.get(
+  '/:id',
+  optionalAuthenticate,
+  validate(salonDetailParamsSchema),
+  asyncHandler(controller.salonDetail),
 );
 
 export default router;

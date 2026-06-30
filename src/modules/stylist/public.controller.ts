@@ -36,6 +36,18 @@ export async function profile(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { stylist });
 }
 
+/** Cancellation policy (with per-service breakdown) for a booking with this stylist. */
+export async function cancellationPolicy(req: Request, res: Response): Promise<void> {
+  const { serviceIds, salonId } = req.query as unknown as {
+    serviceIds?: string | string[];
+    salonId?: string;
+  };
+  const ids = Array.isArray(serviceIds) ? serviceIds : serviceIds ? [serviceIds] : [];
+  const result = await service.getStylistBookingPolicyBreakdown(req.params.id, ids, salonId ?? null);
+  // `policy` kept for back-compat; `services`/`uniform` drive the per-service modal.
+  sendSuccess(res, result);
+}
+
 export async function featured(_req: Request, res: Response): Promise<void> {
   const stylists = await service.getFeaturedStylists();
   sendSuccess(res, { stylists });

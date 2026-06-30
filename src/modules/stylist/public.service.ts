@@ -20,6 +20,11 @@ import { buildSlots, iranNow, WorkingInterval } from '../../utils/slots';
 import { getBookability, getBookabilityMap } from './bookability';
 import { clipToOpeningHours } from './hoursReconcile';
 import { getActivePromotionMap, isContextPromoted, isAnyPromoted } from './promotions';
+import {
+  resolveCancellationPolicy,
+  serializePolicy,
+  resolvePerServicePolicies,
+} from '../policy/policy.service';
 
 /** Effective price/duration: stylist override falls back to the service default. */
 export function effectivePrice(override: number | null, svc: IService): number {
@@ -39,6 +44,61 @@ export function isPromotedActive(p: {
   promotedUntil?: Date | null;
 }): boolean {
   return !!p.isPromoted && !!p.promotedUntil && new Date(p.promotedUntil).getTime() > Date.now();
+}
+
+/**
+ * The cancellation/reschedule policy that WOULD apply to a prospective booking
+ * (for the booking-confirm screen). Resolves stylist-per-service → stylist →
+ * salon → system. `salonId` is optional; when omitted the stylist's primary
+ * active salon is used so the customer still sees meaningful terms.
+ */
+export async function getStylistBookingPolicy(
+  stylistId: string,
+  serviceIds: string[],
+  salonId?: string | null,
+) {
+  let resolvedSalonId = salonId ?? null;
+  if (!resolvedSalonId) {
+    const link = await StylistSalon.findOne({ stylistId, status: 'active' }).select('salonId').lean();
+    resolvedSalonId = link ? String(link.salonId) : null;
+  }
+  const resolved = await resolveCancellationPolicy({
+    stylistId,
+    salonId: resolvedSalonId,
+    serviceIds: serviceIds ?? [],
+  });
+  return serializePolicy(resolved);
+}
+
+/**
+ * Booking-time policy WITH a per-service breakdown — so the booking modal can
+ * show each service's final policy when they differ. `uniform` tells the client
+ * whether a single box suffices.
+ */
+export async function getStylistBookingPolicyBreakdown(
+  stylistId: string,
+  serviceIds: string[],
+  salonId?: string | null,
+) {
+  let resolvedSalonId = salonId ?? null;
+  if (!resolvedSalonId) {
+    const link = await StylistSalon.findOne({ stylistId, status: 'active' }).select('salonId').lean();
+    resolvedSalonId = link ? String(link.salonId) : null;
+  }
+  const { uniform, services, common } = await resolvePerServicePolicies({
+    stylistId,
+    salonId: resolvedSalonId,
+    serviceIds: serviceIds ?? [],
+  });
+  return {
+    uniform,
+    policy: serializePolicy(common),
+    services: services.map((s) => ({
+      serviceId: s.serviceId,
+      serviceName: s.serviceName,
+      policy: serializePolicy(s.policy),
+    })),
+  };
 }
 
 /** Distance in meters between two [lng, lat] points (haversine). */

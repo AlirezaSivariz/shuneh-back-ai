@@ -302,6 +302,16 @@ export async function setStylistPlan(req: Request, res: Response): Promise<void>
   });
 }
 
+export async function setStylistCancellationPolicy(req: Request, res: Response): Promise<void> {
+  // body.policy may be null → clears the stylist's policy.
+  const result = await service.setStylistCancellationPolicy(
+    req.user!.id,
+    req.params.id,
+    req.body.policy ?? null,
+  );
+  sendSuccess(res, result);
+}
+
 // ── Promotions (general + category-targeted) ──
 export async function listPromotions(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, { promotions: await service.listActivePromotions() });

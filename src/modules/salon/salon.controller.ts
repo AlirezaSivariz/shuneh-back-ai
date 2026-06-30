@@ -16,6 +16,12 @@ export async function search(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { salons });
 }
 
+/** Public salon detail + its bookable stylists (for the customer to book). */
+export async function salonDetail(req: Request, res: Response): Promise<void> {
+  const result = await service.getSalonDetail(req.params.id);
+  sendSuccess(res, result);
+}
+
 export async function createSalon(req: Request, res: Response): Promise<void> {
   const { salon, onboardingStep } = await service.createOwnSalon(req.user!.id, req.body);
   sendSuccess(res, { salon, onboardingStep }, 201);
@@ -105,6 +111,7 @@ export async function updateSalon(req: Request, res: Response): Promise<void> {
       status: salon.status,
       serviceGender: salon.serviceGender,
       openingHours: salon.openingHours,
+      cancellationPolicy: salon.cancellationPolicy ?? null,
     },
   });
 }

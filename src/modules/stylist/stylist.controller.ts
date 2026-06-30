@@ -173,3 +173,39 @@ export async function deleteWorkingHour(req: Request, res: Response): Promise<vo
   const result = await service.deleteWorkingHour(req.user!.id, req.params.id);
   sendSuccess(res, result);
 }
+
+// ── Cancellation policy ──
+export async function getCancellationPolicy(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getCancellationPolicy(req.user!.id));
+}
+
+export async function setCancellationPolicy(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.setCancellationPolicy(req.user!.id, req.body));
+}
+
+export async function clearCancellationPolicy(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.clearCancellationPolicy(req.user!.id));
+}
+
+export async function setServiceCancellationPolicy(req: Request, res: Response): Promise<void> {
+  const result = await service.setServiceCancellationPolicy(
+    req.user!.id,
+    req.params.serviceId,
+    req.body,
+  );
+  sendSuccess(res, result);
+}
+
+export async function removeServiceCancellationPolicy(req: Request, res: Response): Promise<void> {
+  const result = await service.removeServiceCancellationPolicy(req.user!.id, req.params.serviceId);
+  sendSuccess(res, result);
+}
+
+// ── Payout details (SHEBA + card) ──
+export async function getPayoutInfo(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getPayoutInfo(req.user!.id));
+}
+
+export async function setPayoutInfo(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.setPayoutInfo(req.user!.id, req.body));
+}

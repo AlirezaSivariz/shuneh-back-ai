@@ -27,6 +27,9 @@ import { ProfileEditRequest } from '../../models/ProfileEditRequest';
 import { Story } from '../../models/Story';
 import { StoryView } from '../../models/StoryView';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
+import { maskSheba, maskCard } from '../stylist/stylist.service';
+import { validateOwnerPolicy } from '../policy/policy.service';
+import { ICancellationPolicy } from '../../models/cancellationPolicy';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
 import { nanoid } from 'nanoid';
@@ -237,6 +240,15 @@ export async function getUser(id: string) {
           smsCampaignEnabled: profile.smsCampaignEnabled ?? false,
           planTier: profile.planTier ?? 'free',
           promotions,
+          cancellationPolicy: profile.cancellationPolicy ?? null,
+          servicePolicyCount: profile.servicePolicies?.length ?? 0,
+          // Sensitive payout: present-flags + masked tails only (admin view).
+          payout: {
+            hasSheba: !!profile.payout?.shebaNumber,
+            hasCard: !!profile.payout?.cardNumber,
+            shebaMasked: maskSheba(profile.payout?.shebaNumber),
+            cardMasked: maskCard(profile.payout?.cardNumber),
+          },
         }
       : null,
     ownedSalons: ownedSalons.map((s) => ({
@@ -1905,6 +1917,27 @@ export async function setStylistSmsCampaign(adminId: string, stylistId: string, 
   await profile.save();
   await audit(adminId, 'stylist.setSmsCampaign', 'stylist', stylistId, { enabled });
   return { stylistId, smsCampaignEnabled: enabled };
+}
+
+/**
+ * Admin sets/clears a stylist's general cancellation policy (audited). Admins
+ * bypass the per-plan limits (support override); only structural validation
+ * applies. Pass `null` to clear (revert the stylist to the salon/system policy).
+ */
+export async function setStylistCancellationPolicy(
+  adminId: string,
+  stylistId: string,
+  policy: ICancellationPolicy | null,
+) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  profile.cancellationPolicy = policy ? validateOwnerPolicy(policy) : null;
+  await profile.save();
+  await audit(adminId, 'stylist.setCancellationPolicy', 'stylist', stylistId, {
+    cleared: !policy,
+  });
+  return { stylistId, cancellationPolicy: profile.cancellationPolicy ?? null };
 }
 
 /**

@@ -60,6 +60,12 @@ reservationRouter.post(
 );
 reservationRouter.get('/', validate(listReservationsSchema), asyncHandler(customer.list));
 reservationRouter.get('/:id', validate(reservationIdParamsSchema), asyncHandler(customer.detail));
+// Cancellation/reschedule policy + computed refund/penalty preview (no writes).
+reservationRouter.get(
+  '/:id/cancellation-preview',
+  validate(reservationIdParamsSchema),
+  asyncHandler(customer.cancellationPreview),
+);
 reservationRouter.post(
   '/:id/cancel',
   validate(reservationIdParamsSchema),

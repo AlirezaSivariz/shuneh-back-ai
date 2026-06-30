@@ -25,8 +25,31 @@ import { config } from '../../config/env';
 import { Tip } from '../../models/Tip';
 import { notificationService } from '../../utils/notification';
 import { paymentProvider } from '../../utils/payment';
+import {
+  resolveCancellationPolicy,
+  computeCancellationOutcome,
+  computeRescheduleOutcome,
+  resolvePerServicePolicies,
+  serializePolicy,
+  ResolvedPolicy,
+} from '../policy/policy.service';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/** The amount a reservation "paid" for refund/penalty math (net of discount). */
+function paidAmountOf(r: IReservation): number | null {
+  return r.finalPrice ?? r.price ?? null;
+}
+
+/** Resolve the cancellation policy that applies to a reservation. */
+function resolvePolicyFor(r: IReservation): Promise<ResolvedPolicy> {
+  const serviceIds = (r.serviceIds?.length ? r.serviceIds : [r.serviceId]).map(String);
+  return resolveCancellationPolicy({
+    stylistId: String(r.stylistId),
+    salonId: r.salonId ? String(r.salonId) : null,
+    serviceIds,
+  });
+}
 
 interface CreateInput {
   stylistId: string;
@@ -36,6 +59,8 @@ interface CreateInput {
   startTime: string; // HH:mm
   discountCode?: string;
   customerNote?: string;
+  /** Customer ticked the "I accept the cancellation/reschedule terms" box. */
+  acceptedPolicy?: boolean;
 }
 
 function endTimeFrom(startTime: string, durationMin: number): string {
@@ -192,6 +217,23 @@ export async function createReservation(customerId: string, input: CreateInput) 
   // Optional customer note for the stylist (trimmed; length capped by Zod).
   const customerNote = input.customerNote?.trim() || null;
 
+  // Record acceptance of the cancellation terms + snapshot the EXACT per-service
+  // policies the customer agreed to (legal transparency).
+  let policyAcceptedAt: Date | null = null;
+  let acceptedPolicies: { serviceId: Types.ObjectId; policy: unknown }[] = [];
+  if (input.acceptedPolicy) {
+    policyAcceptedAt = new Date();
+    const { services: perService } = await resolvePerServicePolicies({
+      stylistId,
+      salonId,
+      serviceIds,
+    });
+    acceptedPolicies = perService.map((s) => ({
+      serviceId: new Types.ObjectId(s.serviceId),
+      policy: s.policy.policy,
+    }));
+  }
+
   const reservation = await Reservation.create({
     customerId: new Types.ObjectId(customerId),
     stylistId: new Types.ObjectId(stylistId),
@@ -205,6 +247,8 @@ export async function createReservation(customerId: string, input: CreateInput) 
     price: totalPrice,
     ...discountSnapshot,
     customerNote,
+    policyAcceptedAt,
+    acceptedPolicies,
     status: 'confirmed', // auto-confirm
   });
 
@@ -370,6 +414,14 @@ export async function cancelReservation(customerId: string, reservationId: strin
     );
   }
 
+  // Compute (but do NOT execute) the refund/penalty per the resolved policy and
+  // snapshot it on the reservation. TODO(settlement): once a payment gateway /
+  // deposit exists, move the actual money here (refundAmount → customer wallet,
+  // penaltyAmount → stylist) and flip `settled` true.
+  const resolved = await resolvePolicyFor(reservation);
+  const outcome = computeCancellationOutcome(resolved, reservation.startAt, paidAmountOf(reservation));
+  reservation.cancellationOutcome = { ...outcome, settled: false };
+
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'customer';
   await reservation.save();
@@ -406,6 +458,11 @@ export async function cancelByStylist(
   if (reservation.startAt.getTime() <= Date.now()) {
     throw AppError.badRequest('رزرو گذشته قابل لغو نیست', 'RESERVATION_IN_PAST');
   }
+
+  // Snapshot the policy outcome (display/record only; see TODO(settlement)).
+  const resolvedS = await resolvePolicyFor(reservation);
+  const outcomeS = computeCancellationOutcome(resolvedS, reservation.startAt, paidAmountOf(reservation));
+  reservation.cancellationOutcome = { ...outcomeS, settled: false };
 
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'stylist';
@@ -501,6 +558,13 @@ export async function rescheduleReservation(
   );
   if (clash) throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
 
+  // Compute (display/record only) the reschedule penalty per the policy: the
+  // first `freeRescheduleCount` reschedules are free, then a penalty applies.
+  // TODO(settlement): charge `penaltyAmount` once a gateway/deposit exists.
+  const usedReschedules = reservation.rescheduleHistory?.length ?? 0;
+  const resolvedR = await resolvePolicyFor(reservation);
+  const rOut = computeRescheduleOutcome(resolvedR, usedReschedules, paidAmountOf(reservation));
+
   // Apply on the SAME record; append to history. startAt/endAt are recomputed
   // by the model's pre('validate') hook from date + start/endTime.
   const fromDate = reservation.date.toISOString().slice(0, 10);
@@ -511,7 +575,17 @@ export async function rescheduleReservation(
   reservation.salonId = newSalonId ? new Types.ObjectId(newSalonId) : null;
   reservation.rescheduleHistory = [
     ...(reservation.rescheduleHistory ?? []),
-    { fromDate, fromStartTime, toDate: date, toStartTime: startTime, by, at: new Date() },
+    {
+      fromDate,
+      fromStartTime,
+      toDate: date,
+      toStartTime: startTime,
+      by,
+      at: new Date(),
+      free: rOut.free,
+      penaltyPercent: rOut.penaltyPercent,
+      penaltyAmount: rOut.penaltyAmount,
+    },
   ];
   await reservation.save();
 
@@ -529,6 +603,52 @@ export async function rescheduleReservation(
   })();
 
   return serializeReservation(reservation, by === 'stylist' ? 'stylist' : 'customer');
+}
+
+/**
+ * Preview the cancellation/reschedule consequences of a reservation WITHOUT
+ * changing anything — the resolved policy + the refund/penalty that a cancel or
+ * the next reschedule would incur right now. Used by the customer/stylist UI to
+ * show the terms before they confirm. Owner (customer) or the stylist may view.
+ */
+export async function previewReservationPolicy(userId: string, reservationId: string) {
+  if (!Types.ObjectId.isValid(reservationId)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  const reservation = await Reservation.findById(reservationId);
+  if (!reservation) throw AppError.notFound('رزرو یافت نشد', 'RESERVATION_NOT_FOUND');
+  if (String(reservation.customerId) !== userId && String(reservation.stylistId) !== userId) {
+    throw AppError.forbidden('دسترسی غیرمجاز', 'FORBIDDEN');
+  }
+
+  const resolved = await resolvePolicyFor(reservation);
+  const paid = paidAmountOf(reservation);
+  const usedReschedules = reservation.rescheduleHistory?.length ?? 0;
+
+  // Per-service breakdown (so the dialog can show differing policies clearly).
+  const serviceIds = (reservation.serviceIds?.length ? reservation.serviceIds : [reservation.serviceId]).map(
+    String,
+  );
+  const { uniform, services } = await resolvePerServicePolicies({
+    stylistId: String(reservation.stylistId),
+    salonId: reservation.salonId ? String(reservation.salonId) : null,
+    serviceIds,
+  });
+
+  return {
+    reservationId: String(reservation._id),
+    status: reservation.status,
+    paidAmount: paid,
+    policy: serializePolicy(resolved),
+    uniform,
+    services: services.map((s) => ({
+      serviceId: s.serviceId,
+      serviceName: s.serviceName,
+      policy: serializePolicy(s.policy),
+    })),
+    cancellation: computeCancellationOutcome(resolved, reservation.startAt, paid),
+    reschedule: computeRescheduleOutcome(resolved, usedReschedules, paid),
+  };
 }
 
 /** Maximum tip we accept (sanity cap, toman). */
@@ -767,6 +887,8 @@ async function serializeReservation(
     customerNote: r.customerNote ?? null,
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
+    // Policy outcome captured at cancel time (display/record only; not settled).
+    cancellationOutcome: r.cancellationOutcome ?? null,
     rescheduleHistory: (r.rescheduleHistory ?? []).map((h) => ({
       fromDate: h.fromDate,
       fromStartTime: h.fromStartTime,

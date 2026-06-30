@@ -17,6 +17,8 @@ export const createReservationSchema = {
       discountCode: z.string().trim().min(1).max(32).optional(),
       // Optional free-text note from the customer to the stylist.
       customerNote: z.string().trim().max(500).optional(),
+      // The customer ticked "I accept the cancellation/reschedule terms".
+      acceptedPolicy: z.boolean().optional(),
     })
     .transform((b) => ({
       ...b,

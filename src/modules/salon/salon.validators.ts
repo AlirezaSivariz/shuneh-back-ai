@@ -41,6 +41,21 @@ const openingHoursSchema = z.array(
   }),
 );
 
+// Salon default cancellation policy (owner-defined; not plan-gated).
+export const cancellationPolicyBody = z.object({
+  rules: z
+    .array(
+      z.object({
+        hoursBeforeStart: z.number().int().min(0).max(720),
+        refundPercent: z.number().int().min(0).max(100),
+      }),
+    )
+    .min(1)
+    .max(6),
+  freeRescheduleCount: z.number().int().min(0).max(10).default(1),
+  reschedulePenaltyPercent: z.number().int().min(0).max(100).default(0),
+});
+
 export const searchSalonsSchema = {
   query: z.object({
     name: z.string().trim().optional(),
@@ -65,6 +80,7 @@ export const createSalonSchema = {
       lat: z.number().min(-90).max(90),
       serviceGender: serviceGender.optional(),
       openingHours: openingHoursSchema.default([]),
+      cancellationPolicy: cancellationPolicyBody.optional(),
     }),
   ),
 };
@@ -120,6 +136,7 @@ export const updateSalonSchema = {
         lat: z.number().min(-90).max(90).optional(),
         serviceGender: serviceGender.optional(),
         openingHours: openingHoursSchema.optional(),
+        cancellationPolicy: cancellationPolicyBody.nullable().optional(),
       })
       .refine((b) => Object.keys(b).length > 0, 'Provide at least one field to update')
       .refine(
@@ -131,6 +148,11 @@ export const updateSalonSchema = {
 
 export const salonIdParamsSchema = {
   params: z.object({ salonId: objectId }),
+};
+
+// Public salon-detail route uses `:id`.
+export const salonDetailParamsSchema = {
+  params: z.object({ id: objectId }),
 };
 
 export const inviteStylistSchema = {

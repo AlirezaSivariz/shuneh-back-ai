@@ -42,6 +42,12 @@ export async function cancel(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { reservation });
 }
 
+/** Resolved cancellation policy + refund/penalty preview (no writes). */
+export async function cancellationPreview(req: Request, res: Response): Promise<void> {
+  const preview = await service.previewReservationPolicy(req.user!.id, req.params.id);
+  sendSuccess(res, preview);
+}
+
 export async function stylistList(req: Request, res: Response): Promise<void> {
   const filter = req.query.filter as 'upcoming' | 'past' | undefined;
   const reservations = await service.listStylistReservations(req.user!.id, filter);

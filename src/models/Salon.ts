@@ -1,5 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { GeoPoint } from '../utils/geo';
+import { ICancellationPolicy, cancellationPolicySchema } from './cancellationPolicy';
 
 export type SalonStatus = 'active' | 'pending';
 
@@ -50,6 +51,8 @@ export interface ISalon extends Document {
   status: SalonStatus;
   serviceGender?: ServiceGender;
   openingHours: IOpeningHours[];
+  /** Default cancellation/reschedule policy for this salon (owner-defined). */
+  cancellationPolicy?: ICancellationPolicy | null;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -95,6 +98,8 @@ const salonSchema = new Schema<ISalon>(
     // those docs stay valid against this enum.
     serviceGender: { type: String, enum: SERVICE_GENDERS, index: true },
     openingHours: { type: [openingHoursSchema], default: [] },
+    // Owner-defined cancellation policy (default null → system default applies).
+    cancellationPolicy: { type: cancellationPolicySchema, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true },

@@ -1,5 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { iranWallClockToUtc } from '../utils/timezone';
+import { ICancellationPolicy, cancellationPolicySchema } from './cancellationPolicy';
 
 export type ReservationStatus =
   | 'pending'
@@ -60,7 +61,25 @@ export interface IReservation extends Document {
     toStartTime: string;
     by: 'customer' | 'stylist';
     at: Date;
+    /** Reschedule policy snapshot (display/record only — no money moved yet). */
+    free?: boolean;
+    penaltyPercent?: number;
+    penaltyAmount?: number | null;
   }[];
+  /**
+   * Cancellation policy outcome captured AT CANCEL TIME (display + record only).
+   * No money is moved yet — a future settlement engine consumes this.
+   * See `TODO(settlement)` in the reservation service.
+   */
+  cancellationOutcome?: {
+    source: string;
+    hoursBeforeStart: number;
+    refundPercent: number;
+    penaltyPercent: number;
+    refundAmount: number | null;
+    penaltyAmount: number | null;
+    settled: boolean;
+  } | null;
   status: ReservationStatus;
   completedAt?: Date;
   /** Set once the post-completion (review/tip) SMS has been sent — prevents duplicates. */
@@ -68,6 +87,13 @@ export interface IReservation extends Document {
   /** Who cancelled (set when status becomes 'cancelled'). */
   cancelledBy?: 'customer' | 'stylist' | 'admin' | null;
   cancelReason?: string | null;
+  /**
+   * When the customer accepted the cancellation/reschedule terms at booking
+   * (legal transparency). `acceptedPolicies` snapshots the EXACT per-service
+   * policies they agreed to.
+   */
+  policyAcceptedAt?: Date | null;
+  acceptedPolicies?: { serviceId: Types.ObjectId; policy: ICancellationPolicy }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -115,11 +141,31 @@ const reservationSchema = new Schema<IReservation>(
             toStartTime: { type: String, required: true },
             by: { type: String, enum: ['customer', 'stylist'], required: true },
             at: { type: Date, required: true },
+            free: { type: Boolean, default: true },
+            penaltyPercent: { type: Number, default: 0 },
+            penaltyAmount: { type: Number, default: null },
           },
           { _id: false },
         ),
       ],
       default: [],
+    },
+    // Cancellation policy outcome snapshot (display/record only — NOT settled).
+    cancellationOutcome: {
+      type: new Schema(
+        {
+          source: { type: String, required: true },
+          hoursBeforeStart: { type: Number, required: true },
+          refundPercent: { type: Number, required: true },
+          penaltyPercent: { type: Number, required: true },
+          refundAmount: { type: Number, default: null },
+          penaltyAmount: { type: Number, default: null },
+          // Will flip true once a real refund/penalty is executed (future gateway).
+          settled: { type: Boolean, default: false },
+        },
+        { _id: false },
+      ),
+      default: null,
     },
     completionNotifiedAt: { type: Date, default: null },
     status: {
@@ -131,6 +177,20 @@ const reservationSchema = new Schema<IReservation>(
     completedAt: { type: Date },
     cancelledBy: { type: String, enum: ['customer', 'stylist', 'admin', null], default: null },
     cancelReason: { type: String, default: null },
+    // Customer's acceptance of the cancellation terms at booking + snapshot.
+    policyAcceptedAt: { type: Date, default: null },
+    acceptedPolicies: {
+      type: [
+        new Schema(
+          {
+            serviceId: { type: Schema.Types.ObjectId, ref: 'Service', required: true },
+            policy: { type: cancellationPolicySchema, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true },
 );

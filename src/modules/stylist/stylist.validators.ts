@@ -4,6 +4,54 @@ import { isValidHHmm } from '../../utils/time';
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const hhmm = z.string().refine(isValidHHmm, 'Time must be in HH:mm format');
 
+// ── Cancellation policy ──
+const cancellationPolicyBody = z.object({
+  rules: z
+    .array(
+      z.object({
+        hoursBeforeStart: z.number().int().min(0).max(720),
+        refundPercent: z.number().int().min(0).max(100),
+      }),
+    )
+    .min(1, 'حداقل یک بازه لازم است')
+    .max(6),
+  freeRescheduleCount: z.number().int().min(0).max(10).default(1),
+  reschedulePenaltyPercent: z.number().int().min(0).max(100).default(0),
+});
+
+export const cancellationPolicySchema = { body: cancellationPolicyBody };
+
+export const servicePolicySchema = {
+  params: z.object({ serviceId: objectId }),
+  body: cancellationPolicyBody,
+};
+
+export const servicePolicyIdParamsSchema = {
+  params: z.object({ serviceId: objectId }),
+};
+
+// ── Payout details (SHEBA + card) — both optional, validated in the service. ──
+export const payoutSchema = {
+  body: z
+    .object({
+      shebaNumber: z
+        .string()
+        .trim()
+        .regex(/^IR\d{24}$/i, 'شماره شبا باید IR و ۲۴ رقم باشد')
+        .nullable()
+        .optional(),
+      cardNumber: z
+        .string()
+        .trim()
+        .regex(/^\d{16}$/, 'شماره کارت باید ۱۶ رقم باشد')
+        .nullable()
+        .optional(),
+    })
+    .refine((b) => b.shebaNumber !== undefined || b.cardNumber !== undefined, {
+      message: 'حداقل یکی از شبا یا کارت را وارد کنید',
+    }),
+};
+
 export const setServicesSchema = {
   body: z.object({
     // May be empty: a stylist who offers ONLY custom services sends no default

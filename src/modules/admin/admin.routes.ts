@@ -47,6 +47,7 @@ import {
   setStylistAcceptingSchema,
   setStylistSmsCampaignSchema,
   setStylistPlanSchema,
+  setStylistCancellationPolicySchema,
   addPromotionSchema,
   removePromotionSchema,
   socialReportsSchema,
@@ -143,6 +144,12 @@ adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema)
 adminRouter.post('/stylists/:id/sms-campaign', validate(setStylistSmsCampaignSchema), asyncHandler(controller.setStylistSmsCampaign));
 // Set a stylist's subscription plan tier (free/silver/gold); syncs SMS gate (audited).
 adminRouter.post('/stylists/:id/plan', validate(setStylistPlanSchema), asyncHandler(controller.setStylistPlan));
+// Set/clear a stylist's cancellation policy (admin override; audited).
+adminRouter.put(
+  '/stylists/:id/cancellation-policy',
+  validate(setStylistCancellationPolicySchema),
+  asyncHandler(controller.setStylistCancellationPolicy),
+);
 
 // ── Blog management (audited) ──
 const blogCoverUpload = createUploader('blog');

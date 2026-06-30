@@ -12,8 +12,13 @@ import { SalonInvite } from "../../models/SalonInvite";
 import { User } from "../../models/User";
 import { StylistProfile } from "../../models/StylistProfile";
 import { StylistService } from "../../models/StylistService";
+import { Service, IService } from "../../models/Service";
 import { WorkingHour } from "../../models/WorkingHour";
 import { Reservation } from "../../models/Reservation";
+import { getBookabilityMap } from "../stylist/bookability";
+import { effectivePrice, effectiveDuration } from "../stylist/public.service";
+import { validateOwnerPolicy } from "../policy/policy.service";
+import { ICancellationPolicy } from "../../models/cancellationPolicy";
 import { AppError } from "../../utils/AppError";
 import { toGeoPoint } from "../../utils/geo";
 import { storageProvider } from "../../utils/storage";
@@ -34,7 +39,9 @@ const validateOpeningHours = (
 ): IOpeningHours[] => assertValidOpeningHours(openingHours) as IOpeningHours[];
 
 /**
- * Geo + name search for salons. Any combination of filters is allowed.
+ * Geo + name search for ACTIVE salons. Any combination of filters is allowed.
+ * Public (customer-facing) + reused by the stylist workplace flow. Each card
+ * carries the count of currently-active stylists and up to 3 of their avatars.
  */
 export async function searchSalons(params: {
   name?: string;
@@ -45,7 +52,8 @@ export async function searchSalons(params: {
   radius?: number; // meters
   gender?: ServiceGender;
 }) {
-  const query: Record<string, unknown> = {};
+  // Only ACTIVE salons are discoverable (pending invite-salons never surface).
+  const query: Record<string, unknown> = { status: "active" };
 
   if (params.name) {
     query.name = { $regex: params.name, $options: "i" };
@@ -69,9 +77,14 @@ export async function searchSalons(params: {
   const salons = await Salon.find(query).limit(50).lean();
   // Hide salons whose owner is a foreign national still awaiting approval.
   const blockedOwners = await restrictedOwnerIds(salons.map((s) => s.ownerId));
-  return salons
-    .filter((s) => !s.ownerId || !blockedOwners.has(String(s.ownerId)))
-    .map((s) => ({
+  const visible = salons.filter(
+    (s) => !s.ownerId || !blockedOwners.has(String(s.ownerId)),
+  );
+
+  const stats = await salonStylistStats(visible.map((s) => String(s._id)));
+  return visible.map((s) => {
+    const stat = stats.get(String(s._id)) ?? { count: 0, photos: [] };
+    return {
       id: String(s._id),
       name: s.name,
       description: s.description,
@@ -82,7 +95,170 @@ export async function searchSalons(params: {
       status: s.status,
       serviceGender: s.serviceGender ?? null,
       openingHours: s.openingHours,
-    }));
+      activeStylistCount: stat.count,
+      stylistPhotos: stat.photos,
+    };
+  });
+}
+
+/**
+ * Per-salon stats for discovery cards: how many ACTIVE-member stylists work
+ * there (profile active + accepting) and up to 3 of their avatars. Bulk: two
+ * queries regardless of salon count.
+ */
+async function salonStylistStats(
+  salonIds: string[],
+): Promise<Map<string, { count: number; photos: string[] }>> {
+  const out = new Map<string, { count: number; photos: string[] }>();
+  if (salonIds.length === 0) return out;
+
+  const links = await StylistSalon.find({
+    salonId: { $in: salonIds },
+    status: "active",
+  })
+    .select("salonId stylistId")
+    .lean();
+  if (links.length === 0) return out;
+
+  const stylistIds = [...new Set(links.map((l) => String(l.stylistId)))];
+  const [profiles, users] = await Promise.all([
+    StylistProfile.find({
+      userId: { $in: stylistIds },
+      status: "active",
+      isAcceptingReservations: { $ne: false },
+    })
+      .select("userId")
+      .lean(),
+    User.find({ _id: { $in: stylistIds } })
+      .select("profilePhoto")
+      .lean(),
+  ]);
+  const activeStylistIds = new Set(profiles.map((p) => String(p.userId)));
+  const photoByUser = new Map(users.map((u) => [String(u._id), u.profilePhoto]));
+
+  for (const l of links) {
+    const sid = String(l.stylistId);
+    if (!activeStylistIds.has(sid)) continue;
+    const salonId = String(l.salonId);
+    const entry = out.get(salonId) ?? { count: 0, photos: [] };
+    entry.count += 1;
+    const photo = photoByUser.get(sid);
+    if (photo && entry.photos.length < 3) entry.photos.push(storageProvider.getUrl(photo));
+    out.set(salonId, entry);
+  }
+  return out;
+}
+
+/**
+ * Public salon detail: the salon's info + the list of its ACTIVE, bookable
+ * stylists (ready for the customer to book). Mirrors the stylist-card shape
+ * used by discovery so the frontend can reuse its booking flow.
+ */
+export async function getSalonDetail(salonId: string) {
+  if (!Types.ObjectId.isValid(salonId)) {
+    throw AppError.notFound("سالن یافت نشد", "SALON_NOT_FOUND");
+  }
+  const salon = await Salon.findOne({ _id: salonId, status: "active" }).lean();
+  if (!salon) throw AppError.notFound("سالن یافت نشد", "SALON_NOT_FOUND");
+  // A salon owned by a not-yet-approved foreign national stays hidden.
+  if (salon.ownerId) {
+    const blocked = await restrictedOwnerIds([salon.ownerId]);
+    if (blocked.has(String(salon.ownerId))) {
+      throw AppError.notFound("سالن یافت نشد", "SALON_NOT_FOUND");
+    }
+  }
+
+  const stylists = await getSalonBookableStylists(salonId);
+
+  return {
+    salon: {
+      id: String(salon._id),
+      name: salon.name,
+      description: salon.description ?? null,
+      address: salon.address ?? null,
+      province: salon.province ?? null,
+      city: salon.city ?? null,
+      location: salon.location ?? null,
+      serviceGender: salon.serviceGender ?? null,
+      openingHours: salon.openingHours ?? [],
+      cancellationPolicy: salon.cancellationPolicy ?? null,
+      activeStylistCount: stylists.length,
+    },
+    stylists,
+  };
+}
+
+/**
+ * The ACTIVE, bookable stylists working in a salon — ready for the customer to
+ * book. A stylist appears only when bookable (`getBookabilityMap`) AND their
+ * active workplace set actually includes THIS salon.
+ */
+async function getSalonBookableStylists(salonId: string) {
+  const links = await StylistSalon.find({ salonId, status: "active" })
+    .select("stylistId")
+    .lean();
+  const ids = [...new Set(links.map((l) => String(l.stylistId)))];
+  if (ids.length === 0) return [];
+
+  const profiles = await StylistProfile.find({
+    userId: { $in: ids },
+    status: "active",
+    isAcceptingReservations: { $ne: false },
+  }).lean();
+  if (profiles.length === 0) return [];
+  const profileIds = profiles.map((p) => String(p.userId));
+
+  const [users, stylistServices, allServices, bookMap] = await Promise.all([
+    User.find({ _id: { $in: profileIds } })
+      .select("firstName lastName profilePhoto")
+      .lean(),
+    StylistService.find({ stylistId: { $in: profileIds } }).lean(),
+    Service.find().lean(),
+    getBookabilityMap(profiles),
+  ]);
+  const userById = new Map(users.map((u) => [String(u._id), u]));
+  const serviceById = new Map(
+    allServices.map((s) => [String(s._id), s as unknown as IService]),
+  );
+
+  const result = [];
+  for (const profile of profiles) {
+    const uid = String(profile.userId);
+    const user = userById.get(uid);
+    if (!user) continue;
+    const book = bookMap.get(uid);
+    // Bookable AND actually active in THIS salon.
+    if (!book?.bookable || !book.activeSalonIds.includes(salonId)) continue;
+
+    const myServices = stylistServices.filter((s) => String(s.stylistId) === uid);
+    if (myServices.length === 0) continue;
+    const services = myServices
+      .map((ss) => {
+        const svc = serviceById.get(String(ss.serviceId));
+        if (!svc) return null;
+        return {
+          id: String(ss.serviceId),
+          name: svc.name,
+          price: effectivePrice(ss.price, svc),
+          durationMin: effectiveDuration(ss.durationMin, svc),
+        };
+      })
+      .filter(Boolean);
+
+    result.push({
+      id: uid,
+      fullName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "متخصص",
+      profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
+      rating: profile.ratingAverage ?? 0,
+      ratingCount: profile.ratingCount ?? 0,
+      isVerified: profile.isVerified === true,
+      services,
+    });
+  }
+  // Verified first, then by rating.
+  return result.sort(
+    (a, b) => Number(b.isVerified) - Number(a.isVerified) || b.rating - a.rating,
+  );
 }
 
 /** Owner ids (of the given salons) that belong to not-yet-approved foreign users. */
@@ -119,6 +295,7 @@ export async function createOwnSalon(
     lat: number;
     serviceGender?: ServiceGender;
     openingHours: OpeningHoursInput[];
+    cancellationPolicy?: ICancellationPolicy;
   },
 ): Promise<{ salon: ISalon; onboardingStep: string }> {
   const salon = await Salon.create({
@@ -132,6 +309,9 @@ export async function createOwnSalon(
     status: "active",
     serviceGender: data.serviceGender,
     openingHours: validateOpeningHours(data.openingHours),
+    cancellationPolicy: data.cancellationPolicy
+      ? validateOwnerPolicy(data.cancellationPolicy)
+      : null,
     createdBy: new Types.ObjectId(userId),
   });
 
@@ -274,6 +454,7 @@ export async function listOwnerSalons(ownerId: string) {
     status: s.status,
     serviceGender: s.serviceGender ?? null,
     openingHours: s.openingHours,
+    cancellationPolicy: s.cancellationPolicy ?? null,
   }));
 }
 
@@ -593,6 +774,7 @@ export async function updateSalon(
     lat?: number;
     serviceGender?: ServiceGender;
     openingHours?: OpeningHoursInput[];
+    cancellationPolicy?: ICancellationPolicy | null;
   },
 ): Promise<ISalon> {
   const salon = await Salon.findById(salonId);
@@ -605,6 +787,11 @@ export async function updateSalon(
   if (data.city !== undefined) salon.city = data.city;
   if (data.serviceGender !== undefined)
     salon.serviceGender = data.serviceGender;
+  if (data.cancellationPolicy !== undefined) {
+    salon.cancellationPolicy = data.cancellationPolicy
+      ? validateOwnerPolicy(data.cancellationPolicy)
+      : null;
+  }
   if (data.lng !== undefined && data.lat !== undefined) {
     salon.location = toGeoPoint(data.lng, data.lat);
   }

@@ -10,6 +10,7 @@ import {
   stylistIdParamsSchema,
   availabilitySchema,
   availableDaysSchema,
+  cancellationPolicySchema,
 } from './public.validators';
 import { stylistReviewsSchema } from '../review/review.validators';
 
@@ -37,6 +38,12 @@ router.get(
   optionalAuthenticate, // personalize for the logged-in author (their own review)
   validate(stylistReviewsSchema),
   asyncHandler(reviewController.listForStylist),
+);
+// Cancellation policy that would apply when booking this stylist (booking UI).
+router.get(
+  '/:id/cancellation-policy',
+  validate(cancellationPolicySchema),
+  asyncHandler(controller.cancellationPolicy),
 );
 router.get('/:id', validate(stylistIdParamsSchema), asyncHandler(controller.profile));
 

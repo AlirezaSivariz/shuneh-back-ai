@@ -19,6 +19,24 @@ import {
   getStylistProfile,
 } from '../onboarding/onboarding.service';
 import { reconcileStylistHours } from './hoursReconcile';
+import {
+  getStylistPolicyOverview,
+  validatePolicyForPlan,
+} from '../policy/policy.service';
+import { ICancellationPolicy } from '../../models/cancellationPolicy';
+
+/** Mask a card to «۶۲۱۹ **** **** ۱۲۳۴»-style for non-essential display. */
+export function maskCard(card?: string | null): string | null {
+  if (!card) return null;
+  if (card.length < 8) return card;
+  return `${card.slice(0, 4)} **** **** ${card.slice(-4)}`;
+}
+/** Mask a SHEBA to «IR…NNNN» (only the last 4 visible). */
+export function maskSheba(sheba?: string | null): string | null {
+  if (!sheba) return null;
+  if (sheba.length < 6) return sheba;
+  return `IR••••••••••••••••••${sheba.slice(-4)}`;
+}
 
 interface ServiceItem {
   serviceId: string;
@@ -835,3 +853,97 @@ export async function resolveVerificationDocument(stylistId: string, side: 'fron
 
 /** Read the stylist profile (used by the media step and others). */
 export { getStylistProfile };
+
+// ───────────────────────── Cancellation policy ─────────────────────────
+
+/** The stylist's policy settings overview (plan, own/per-service, salon, default). */
+export async function getCancellationPolicy(stylistId: string) {
+  return getStylistPolicyOverview(stylistId);
+}
+
+/** Set the stylist's OWN general cancellation policy (plan-enforced). */
+export async function setCancellationPolicy(stylistId: string, input: ICancellationPolicy) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'PROFILE_NOT_FOUND');
+  const normalized = validatePolicyForPlan(profile.planTier, input);
+  profile.cancellationPolicy = normalized;
+  await profile.save();
+  return getStylistPolicyOverview(stylistId);
+}
+
+/** Clear the stylist's own policy → fall back to the salon (or system default). */
+export async function clearCancellationPolicy(stylistId: string) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'PROFILE_NOT_FOUND');
+  profile.cancellationPolicy = null;
+  await profile.save();
+  return getStylistPolicyOverview(stylistId);
+}
+
+/** Set a per-service policy override (GOLD only). The service must be offered. */
+export async function setServiceCancellationPolicy(
+  stylistId: string,
+  serviceId: string,
+  input: ICancellationPolicy,
+) {
+  if (!Types.ObjectId.isValid(serviceId)) {
+    throw AppError.badRequest('شناسه‌ی خدمت نامعتبر است', 'INVALID_SERVICE');
+  }
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'PROFILE_NOT_FOUND');
+
+  const offered = await StylistService.exists({ stylistId, serviceId });
+  if (!offered) throw AppError.badRequest('این خدمت توسط شما ارائه نمی‌شود', 'SERVICE_NOT_OFFERED');
+
+  const normalized = validatePolicyForPlan(profile.planTier, input, { perService: true });
+  const list = (profile.servicePolicies ?? []).filter(
+    (sp) => String(sp.serviceId) !== serviceId,
+  );
+  list.push({ serviceId: new Types.ObjectId(serviceId), policy: normalized });
+  profile.servicePolicies = list;
+  await profile.save();
+  return getStylistPolicyOverview(stylistId);
+}
+
+/** Remove a per-service policy override. */
+export async function removeServiceCancellationPolicy(stylistId: string, serviceId: string) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'PROFILE_NOT_FOUND');
+  profile.servicePolicies = (profile.servicePolicies ?? []).filter(
+    (sp) => String(sp.serviceId) !== serviceId,
+  );
+  await profile.save();
+  return getStylistPolicyOverview(stylistId);
+}
+
+// ──────────────────── Payout details (SHEBA + card) ─────────────────────
+
+/** The stylist's own payout details (FULL — owner-only endpoint). */
+export async function getPayoutInfo(stylistId: string) {
+  const profile = await StylistProfile.findOne({ userId: stylistId }).select('payout').lean();
+  return {
+    shebaNumber: profile?.payout?.shebaNumber ?? null,
+    cardNumber: profile?.payout?.cardNumber ?? null,
+  };
+}
+
+/** Set/clear the stylist's bank payout details (validated; sensitive). */
+export async function setPayoutInfo(
+  stylistId: string,
+  input: { shebaNumber?: string | null; cardNumber?: string | null },
+) {
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'PROFILE_NOT_FOUND');
+
+  const sheba = input.shebaNumber?.trim().toUpperCase().replace(/\s+/g, '') || null;
+  const card = input.cardNumber?.replace(/\D/g, '') || null;
+  if (sheba && !/^IR\d{24}$/.test(sheba)) {
+    throw AppError.badRequest('شماره شبا نامعتبر است (IR و ۲۴ رقم)', 'INVALID_SHEBA');
+  }
+  if (card && !/^\d{16}$/.test(card)) {
+    throw AppError.badRequest('شماره کارت باید ۱۶ رقم باشد', 'INVALID_CARD');
+  }
+  profile.payout = { shebaNumber: sheba, cardNumber: card };
+  await profile.save();
+  return { shebaNumber: sheba, cardNumber: card };
+}
