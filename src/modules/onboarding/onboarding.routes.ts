@@ -5,6 +5,7 @@ import * as reservationController from '../reservation/reservation.customer.cont
 import * as mediaController from '../media/media.controller';
 import * as messageController from '../message/message.controller';
 import * as walletController from '../wallet/wallet.controller';
+import * as socialController from '../social/social.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -37,10 +38,22 @@ meRouter.post(
   profilePhotoUploader.single('photo'),
   asyncHandler(mediaController.uploadProfilePhoto),
 );
+
+// Passport image for foreign-national verification (PRIVATE; owner+admin only).
+const passportUploader = createUploader('passport', { private: true });
+meRouter.post(
+  '/passport-image',
+  passportUploader.single('image'),
+  asyncHandler(controller.uploadPassport),
+);
+meRouter.get('/passport-image', asyncHandler(controller.streamOwnPassport));
 // ── Wallet (customer; own wallet only) ──
 meRouter.get('/wallet', asyncHandler(walletController.getWallet));
 meRouter.get('/wallet/transactions', validate(walletTxListSchema), asyncHandler(walletController.listTransactions));
 meRouter.post('/wallet/topup', validate(topupSchema), asyncHandler(walletController.topup));
+
+// Stylists the user follows (شونه‌گرام «دنبال‌شده‌ها»).
+meRouter.get('/following', asyncHandler(socialController.following));
 
 // Customer activity/spending report (scoped to the authenticated user).
 meRouter.get('/reports', validate(reportRangeSchema), asyncHandler(reportsController.customerReport));

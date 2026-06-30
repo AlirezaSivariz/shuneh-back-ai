@@ -9,6 +9,7 @@ import { ServiceCategory } from '../../models/ServiceCategory';
 import { StylistProfile } from '../../models/StylistProfile';
 import { StylistService } from '../../models/StylistService';
 import { StylistSalon } from '../../models/StylistSalon';
+import { Follow } from '../../models/Follow';
 import { Salon, ISalon, salonMatchesGender } from '../../models/Salon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Reservation } from '../../models/Reservation';
@@ -455,7 +456,7 @@ export async function getHomeStylists(limit?: number) {
   });
 }
 
-export async function getStylistProfile(stylistId: string) {
+export async function getStylistProfile(stylistId: string, viewerId?: string) {
   if (!Types.ObjectId.isValid(stylistId)) {
     throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   }
@@ -515,8 +516,16 @@ export async function getStylistProfile(stylistId: string) {
   // "ویژه" badge on the profile when the stylist has ANY active promotion.
   const promoEntry = (await getActivePromotionMap([stylistId])).get(stylistId);
 
+  // Follow state (شونه‌گرام): the viewer's follow + the stylist's follower count.
+  const [followersCount, viewerFollows] = await Promise.all([
+    Follow.countDocuments({ stylistId }),
+    viewerId ? Follow.exists({ followerId: viewerId, stylistId }) : Promise.resolve(null),
+  ]);
+
   return {
     id: stylistId,
+    isFollowing: !!viewerFollows,
+    followersCount,
     firstName: user.firstName ?? null,
     lastName: user.lastName ?? null,
     fullName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'متخصص',

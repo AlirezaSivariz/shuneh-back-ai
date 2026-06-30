@@ -84,6 +84,13 @@ export interface AppConfig {
   smsCampaignPerSendMax: number;
   /** Max discount-campaign SMS a stylist may send PER DAY (anti-spam/cost). */
   smsCampaignDailyMax: number;
+  /** Payment gateway driver: 'stub' (no real money) | 'zibal'. */
+  paymentDriver: 'stub' | 'zibal';
+  /** Zibal IPG config. `merchant` = "zibal" for the sandbox. Server-only. */
+  zibal: {
+    merchant: string;
+    baseUrl: string; // https://gateway.zibal.ir
+  };
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -130,4 +137,10 @@ export const config: AppConfig = {
   limoSmsSenderNumber: process.env.LIMOSMS_SENDER_NUMBER || 'vip',
   smsCampaignPerSendMax: asNumber('SMS_CAMPAIGN_PER_SEND_MAX', 50),
   smsCampaignDailyMax: asNumber('SMS_CAMPAIGN_DAILY_MAX', 100),
+  paymentDriver: (process.env.PAYMENT_DRIVER || 'stub').toLowerCase() as AppConfig['paymentDriver'],
+  zibal: {
+    // "zibal" is Zibal's documented sandbox merchant; use the real merchant in prod.
+    merchant: process.env.ZIBAL_MERCHANT || 'zibal',
+    baseUrl: (process.env.ZIBAL_BASE_URL || 'https://gateway.zibal.ir').replace(/\/$/, ''),
+  },
 };

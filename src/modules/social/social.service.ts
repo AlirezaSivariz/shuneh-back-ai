@@ -12,6 +12,7 @@ import { Post, IPost, PostType } from '../../models/Post';
 import { PostComment } from '../../models/PostComment';
 import { PostLike } from '../../models/PostLike';
 import { SavedPost } from '../../models/SavedPost';
+import { Follow } from '../../models/Follow';
 import { ContentReport, ReportTargetType } from '../../models/ContentReport';
 import { Story } from '../../models/Story';
 import { User } from '../../models/User';
@@ -67,6 +68,8 @@ interface PostFlags {
   likedByMe: boolean;
   savedByMe: boolean;
   bookable: boolean;
+  isFollowing: boolean;
+  followersCount: number;
 }
 
 function postView(p: IPost, author: AuthorView, flags: PostFlags) {
@@ -87,6 +90,9 @@ function postView(p: IPost, author: AuthorView, flags: PostFlags) {
     // Booking shortcut: the post's stylist + whether they currently accept bookings.
     stylistId: String(p.authorId),
     bookable: flags.bookable,
+    // Follow state (for the logged-in viewer) + the author's follower count.
+    isFollowing: flags.isFollowing,
+    followersCount: flags.followersCount,
     createdAt: p.createdAt,
   };
 }
@@ -99,7 +105,7 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
   if (posts.length === 0) return [];
   const authorIds = [...new Set(posts.map((p) => String(p.authorId)))];
   const postIds = posts.map((p) => p._id);
-  const [users, profiles, likes, saves] = await Promise.all([
+  const [users, profiles, likes, saves, following, followerCounts] = await Promise.all([
     User.find({ _id: { $in: authorIds } }).select('firstName lastName profilePhoto').lean(),
     StylistProfile.find({ userId: { $in: authorIds } })
       .select('userId isVerified workplaceType freelance isAcceptingReservations')
@@ -110,11 +116,21 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
     viewerId
       ? SavedPost.find({ postId: { $in: postIds }, userId: viewerId }).select('postId').lean()
       : Promise.resolve([]),
+    viewerId
+      ? Follow.find({ followerId: viewerId, stylistId: { $in: authorIds } }).select('stylistId').lean()
+      : Promise.resolve([]),
+    // Follower count per author (one grouped query).
+    Follow.aggregate<{ _id: Types.ObjectId; count: number }>([
+      { $match: { stylistId: { $in: authorIds.map((id) => new Types.ObjectId(id)) } } },
+      { $group: { _id: '$stylistId', count: { $sum: 1 } } },
+    ]),
   ]);
   const userById = new Map(users.map((u) => [String(u._id), u]));
   const verifiedBy = new Map(profiles.map((pr) => [String(pr.userId), pr.isVerified === true]));
   const likedSet = new Set(likes.map((l) => String(l.postId)));
   const savedSet = new Set(saves.map((s) => String(s.postId)));
+  const followingSet = new Set((following as { stylistId: unknown }[]).map((f) => String(f.stylistId)));
+  const followerCountBy = new Map(followerCounts.map((f) => [String(f._id), f.count]));
   // Bookability per author (active workplace + accepting) — drives the post's رزرو button.
   const bookMap = await getBookabilityMap(profiles as unknown as { userId: unknown }[]);
   return posts.map((p) => {
@@ -123,6 +139,8 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
       likedByMe: likedSet.has(String(p._id)),
       savedByMe: savedSet.has(String(p._id)),
       bookable: bookMap.get(uid)?.bookable ?? false,
+      isFollowing: followingSet.has(uid),
+      followersCount: followerCountBy.get(uid) ?? 0,
     });
   });
 }
@@ -220,14 +238,99 @@ export async function createPost(
   return hydrated;
 }
 
-export async function getFeed(page: number, viewerId?: string) {
+export type FeedMode = 'all' | 'following';
+
+export async function getFeed(page: number, viewerId?: string, mode: FeedMode = 'all') {
   const p = Math.max(1, page);
   const skip = (p - 1) * PAGE_SIZE;
+
+  const filter: Record<string, unknown> = { status: 'active' };
+  if (mode === 'following') {
+    // Only the signed-in viewer can use the following feed.
+    if (!viewerId) throw AppError.unauthorized('برای فید دنبال‌شده‌ها باید وارد شوی', 'AUTH_REQUIRED');
+    const follows = await Follow.find({ followerId: viewerId }).select('stylistId').lean();
+    const stylistIds = follows.map((f) => f.stylistId);
+    // No follows → genuinely empty (no fallback to all), so the UI shows the
+    // "follow some stylists" empty state.
+    if (stylistIds.length === 0) {
+      return { items: [], page: p, limit: PAGE_SIZE, total: 0, mode };
+    }
+    filter.authorId = { $in: stylistIds };
+  }
+
   const [posts, total] = await Promise.all([
-    Post.find({ status: 'active' }).sort({ createdAt: -1 }).skip(skip).limit(PAGE_SIZE),
-    Post.countDocuments({ status: 'active' }),
+    Post.find(filter).sort({ createdAt: -1 }).skip(skip).limit(PAGE_SIZE),
+    Post.countDocuments(filter),
   ]);
-  return { items: await hydratePosts(posts, viewerId), page: p, limit: PAGE_SIZE, total };
+  return { items: await hydratePosts(posts, viewerId), page: p, limit: PAGE_SIZE, total, mode };
+}
+
+// ───────────────────────────── follow / unfollow ─────────────────────────
+/** Toggle following a stylist. Returns the new state + the stylist's count. */
+export async function toggleFollow(followerId: string, stylistId: string) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  if (followerId === stylistId) throw AppError.badRequest('نمی‌توانی خودت را دنبال کنی', 'SELF_FOLLOW');
+  await assertNotBanned(followerId);
+  // The target must be an actual stylist.
+  const target = await User.findById(stylistId).select('roles').lean();
+  if (!target || !(target.roles ?? []).includes('stylist')) {
+    throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  }
+
+  const existing = await Follow.findOne({ followerId, stylistId });
+  let following: boolean;
+  if (existing) {
+    await existing.deleteOne();
+    following = false;
+  } else {
+    try {
+      await Follow.create({ followerId, stylistId });
+    } catch {
+      // Unique-index race → already following.
+    }
+    following = true;
+  }
+  const followersCount = await Follow.countDocuments({ stylistId });
+  return { following, followersCount };
+}
+
+export async function getFollowersCount(stylistId: string) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  return { followersCount: await Follow.countDocuments({ stylistId }) };
+}
+
+/** Whether `viewerId` follows `stylistId` (false when not signed in). */
+export async function isFollowing(viewerId: string | undefined, stylistId: string): Promise<boolean> {
+  if (!viewerId || !Types.ObjectId.isValid(stylistId)) return false;
+  return !!(await Follow.exists({ followerId: viewerId, stylistId }));
+}
+
+/** The stylists a user follows — card list for «دنبال‌شده‌ها». */
+export async function getFollowing(userId: string) {
+  const follows = await Follow.find({ followerId: userId }).sort({ createdAt: -1 }).lean();
+  const ids = follows.map((f) => f.stylistId);
+  if (ids.length === 0) return { items: [] };
+  const [users, profiles] = await Promise.all([
+    User.find({ _id: { $in: ids } }).select('firstName lastName profilePhoto').lean(),
+    StylistProfile.find({ userId: { $in: ids } }).select('userId isVerified').lean(),
+  ]);
+  const userById = new Map(users.map((u) => [String(u._id), u]));
+  const verifiedBy = new Map(profiles.map((pr) => [String(pr.userId), pr.isVerified === true]));
+  // Preserve follow order (newest first); drop any deleted users.
+  const items = follows
+    .map((f) => {
+      const u = userById.get(String(f.stylistId));
+      if (!u) return null;
+      return {
+        id: String(u._id),
+        fullName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || 'متخصص',
+        profilePhoto: u.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
+        isVerified: verifiedBy.get(String(u._id)) ?? false,
+        followedAt: f.createdAt,
+      };
+    })
+    .filter(Boolean);
+  return { items };
 }
 
 export async function getPostById(id: string, viewerId?: string) {

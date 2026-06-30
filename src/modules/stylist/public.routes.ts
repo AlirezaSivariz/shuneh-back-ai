@@ -45,6 +45,6 @@ router.get(
   validate(cancellationPolicySchema),
   asyncHandler(controller.cancellationPolicy),
 );
-router.get('/:id', validate(stylistIdParamsSchema), asyncHandler(controller.profile));
+router.get('/:id', optionalAuthenticate, validate(stylistIdParamsSchema), asyncHandler(controller.profile));
 
 export default router;

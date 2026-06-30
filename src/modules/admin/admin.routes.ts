@@ -80,6 +80,8 @@ adminRouter.get('/verifications', validate(listVerificationsSchema), asyncHandle
 adminRouter.get('/foreign-approvals', validate(listForeignApprovalsSchema), asyncHandler(controller.listForeignApprovals));
 // Stream a stylist's national-ID image for review (admin-only; private).
 adminRouter.get('/stylists/:id/documents/:side', validate(stylistDocumentSchema), asyncHandler(controller.getStylistDocument));
+// Stream a foreign user's passport image for review (admin-only; private).
+adminRouter.get('/users/:id/passport-image', validate(idParamsSchema), asyncHandler(controller.getUserPassport));
 adminRouter.get('/audit-logs', validate(paginationSchema), asyncHandler(controller.auditLogs));
 adminRouter.get('/sms-logs', validate(listSmsLogsSchema), asyncHandler(controller.smsLogs));
 adminRouter.get('/reviews', validate(listReviewsSchema), asyncHandler(controller.listReviews));

@@ -18,7 +18,6 @@ import {
   IWalletTransaction,
 } from '../../models/WalletTransaction';
 import { AppError } from '../../utils/AppError';
-import { paymentProvider } from '../../utils/payment';
 
 export interface WalletChangeInput {
   type: 'credit' | 'debit';
@@ -112,30 +111,19 @@ export async function listTransactions(userId: string, page = 1, limit = 20) {
 }
 
 /**
- * Start a wallet top-up. With no real gateway, this records a PENDING 'topup'
- * ledger entry and DOES NOT change the balance (no money has moved). The
- * response is explicit about that so the client never promises a real charge.
+ * Start a wallet top-up. There is NO payment gateway connected yet, so instead
+ * of recording a confusing "pending" ledger entry, this simply reports that the
+ * gateway is disabled. The `PaymentProvider` seam (utils/payment) stays in place
+ * so a real gateway can be wired here later; admin manual credit
+ * (`applyWalletChange` via the admin wallet-adjust endpoint) is unaffected.
  */
-export async function startTopup(userId: string, amount: number) {
+export async function startTopup(_userId: string, amount: number) {
   const amt = Math.trunc(amount);
   if (!Number.isFinite(amt) || amt <= 0) throw AppError.badRequest('مبلغ نامعتبر است', 'INVALID_AMOUNT');
-
-  const init = await paymentProvider.startWalletTopup({ userId, amount: amt });
-  const tx = await WalletTransaction.create({
-    userId: new Types.ObjectId(userId),
-    type: 'credit',
-    amount: amt,
-    reason: 'topup',
-    status: 'pending',
-    meta: { reference: init.reference, paymentUrl: init.paymentUrl },
-  });
-
+  // TODO(payments): when a gateway is connected, begin the payment here and
+  // return its redirect info; credit the balance via applyWalletChange on verify.
   return {
-    transaction: { id: String(tx._id), amount: amt, status: tx.status, createdAt: tx.createdAt },
-    paymentUrl: init.paymentUrl,
-    // Honest signal: the gateway isn't connected, so the balance is unchanged.
-    gatewayConnected: init.paymentUrl !== null,
-    message:
-      'درخواست افزایش موجودی ثبت شد. اتصال درگاه پرداخت هنوز فعال نیست؛ پس از فعال‌سازی، مبلغ به کیف پول اضافه می‌شود.',
+    gatewayConnected: false,
+    message: 'در حال حاضر درگاه پرداخت فعال نیست.',
   };
 }

@@ -17,9 +17,15 @@ export const SELF_ASSIGNABLE_ROLES: Role[] = ['owner', 'stylist', 'customer'];
  *  - approved     : foreign user cleared by an admin — full access.
  *  - rejected     : foreign user declined — stays restricted (reason stored).
  */
-export type ForeignApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
+export type ForeignApprovalStatus =
+  | 'not_required'
+  | 'awaiting_documents' // foreign user who hasn't uploaded their passport yet — RESTRICTED.
+  | 'pending'
+  | 'approved'
+  | 'rejected';
 export const FOREIGN_APPROVAL_STATUSES: ForeignApprovalStatus[] = [
   'not_required',
+  'awaiting_documents',
   'pending',
   'approved',
   'rejected',
@@ -46,6 +52,12 @@ export interface IUser extends Document {
   isForeignNational: boolean;
   /** Foreign user's 12-digit assigned id (unique). Null for Iranian users. */
   foreignId?: string | null;
+  /**
+   * Passport image (SENSITIVE) — PRIVATE storage key, required for a foreign
+   * user's verification. Owner + admin only; never in public output. Null until
+   * uploaded.
+   */
+  passportImage?: string | null;
   /** Approval gate for foreign users (see ForeignApprovalStatus). */
   foreignApprovalStatus: ForeignApprovalStatus;
   /** Why a foreign user's approval was rejected (shown back to them). */
@@ -79,6 +91,8 @@ const userSchema = new Schema<IUser>(
     profilePhoto: { type: String },
     isForeignNational: { type: Boolean, default: false },
     foreignId: { type: String, trim: true, default: null },
+    // Private storage key for the passport image (foreign verification).
+    passportImage: { type: String, default: null },
     foreignApprovalStatus: {
       type: String,
       enum: FOREIGN_APPROVAL_STATUSES,

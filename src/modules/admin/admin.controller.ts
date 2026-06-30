@@ -213,6 +213,14 @@ export async function getStylistDocument(req: Request, res: Response): Promise<v
   res.send(data);
 }
 
+/** Stream a foreign user's passport image for review (admin-only; private). */
+export async function getUserPassport(req: Request, res: Response): Promise<void> {
+  const { data, contentType } = await service.resolveUserPassport(req.params.id);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(data);
+}
+
 // ── Service catalogue (categories + services) ──
 export async function listCatalogue(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.listCatalogue());

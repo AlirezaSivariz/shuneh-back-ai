@@ -117,6 +117,7 @@ export async function getOnboardingState(userId: string) {
       foreignId: user.foreignId ?? null,
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
+      hasPassportImage: !!user.passportImage,
     },
     onboardingStep: profile?.onboardingStep ?? 'role',
     status: profile?.status ?? 'draft',
@@ -224,6 +225,7 @@ export async function getUserState(userId: string) {
       foreignId: user.foreignId ?? null,
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
+      hasPassportImage: !!user.passportImage,
     },
     roles: user.roles,
     hasPersonalInfo,
@@ -275,10 +277,12 @@ export async function updatePersonal(
     user.isForeignNational = true;
     user.foreignId = foreignId;
     user.nationalCode = undefined; // mutually exclusive with a national code
-    // Enter (or re-enter) the approval gate when newly foreign or the id changed;
-    // never downgrade an already-approved user on an unrelated re-save.
+    // Enter (or re-enter) the gate when newly foreign or the id changed; never
+    // downgrade an already-approved user on an unrelated re-save. The review
+    // queue ('pending') is only entered once the passport image also exists —
+    // otherwise the user sits in 'awaiting_documents' (restricted) until upload.
     if (user.foreignApprovalStatus === 'not_required' || changedId) {
-      user.foreignApprovalStatus = 'pending';
+      user.foreignApprovalStatus = user.passportImage ? 'pending' : 'awaiting_documents';
       user.foreignRejectionReason = null;
     }
   } else {
@@ -368,4 +372,51 @@ export async function requestNameEdit(userId: string, firstName: string, lastNam
 export async function getMyNameEdit(userId: string) {
   const req = await ProfileEditRequest.findOne({ userId, status: 'pending' }).lean();
   return req ? serializeNameEdit(req) : null;
+}
+
+// ──────────────────── Foreign-national passport image ─────────────────────
+
+/**
+ * Upload/replace the passport image for a foreign user (SENSITIVE → PRIVATE
+ * storage). Once both foreignId + passport exist (and not already approved), the
+ * user enters the admin review queue ('pending'). TODO(retention): after an
+ * admin approves/rejects, schedule deletion of this sensitive image (mirror the
+ * stylist national-card retention policy).
+ */
+export async function uploadPassportImage(userId: string, file?: Express.Multer.File) {
+  if (!file) throw AppError.badRequest('عکس پاسپورت لازم است', 'NO_IMAGE');
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  if (!user.isForeignNational) {
+    throw AppError.badRequest('آپلود پاسپورت فقط برای کاربران اتباع است', 'NOT_FOREIGN');
+  }
+
+  const stored = await storageProvider.savePrivate(file, {
+    ownerType: 'user',
+    ownerId: userId,
+    kind: 'passport',
+  });
+  const old = user.passportImage;
+  user.passportImage = stored.path;
+  // Enter the review queue once the id + passport are both present.
+  if (user.foreignId && user.foreignApprovalStatus !== 'approved') {
+    user.foreignApprovalStatus = 'pending';
+    user.foreignRejectionReason = null;
+  }
+  await user.save();
+  if (old && old !== stored.path) await storageProvider.delete(old).catch(() => undefined);
+
+  return {
+    hasPassportImage: true,
+    foreignApprovalStatus: user.foreignApprovalStatus,
+  };
+}
+
+/** Stream the user's OWN passport image (owner-only; never a public URL). */
+export async function resolveOwnPassport(userId: string) {
+  const user = await User.findById(userId).select('passportImage').lean();
+  if (!user?.passportImage) throw AppError.notFound('سند یافت نشد', 'DOCUMENT_NOT_FOUND');
+  const image = await storageProvider.getPrivateImage(user.passportImage);
+  if (!image) throw AppError.notFound('فایل یافت نشد', 'FILE_NOT_FOUND');
+  return { data: image.data, contentType: image.mime };
 }

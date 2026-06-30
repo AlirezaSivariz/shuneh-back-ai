@@ -32,7 +32,7 @@ export async function search(req: Request, res: Response): Promise<void> {
 }
 
 export async function profile(req: Request, res: Response): Promise<void> {
-  const stylist = await service.getStylistProfile(req.params.id);
+  const stylist = await service.getStylistProfile(req.params.id, req.user?.id);
   sendSuccess(res, { stylist });
 }
 

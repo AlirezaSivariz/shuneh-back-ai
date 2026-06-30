@@ -42,3 +42,18 @@ export async function requestNameEdit(req: Request, res: Response): Promise<void
 export async function getMyNameEdit(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { edit: await service.getMyNameEdit(req.user!.id) });
 }
+
+// ── Foreign-national passport image ──
+export async function uploadPassport(req: Request, res: Response): Promise<void> {
+  const result = await service.uploadPassportImage(req.user!.id, req.file);
+  // Return the fresh state so the client reflects the new approval status.
+  const state = await service.getOnboardingState(req.user!.id);
+  sendSuccess(res, { ...result, state }, 201);
+}
+
+export async function streamOwnPassport(req: Request, res: Response): Promise<void> {
+  const { data, contentType } = await service.resolveOwnPassport(req.user!.id);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(data);
+}

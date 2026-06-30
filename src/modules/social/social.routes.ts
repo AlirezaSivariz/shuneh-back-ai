@@ -56,6 +56,15 @@ router.delete('/comments/:id', authenticate, validate(commentIdSchema), asyncHan
 
 router.post('/reports', authenticate, validate(reportSchema), asyncHandler(controller.report));
 
+// ── Follow / unfollow a stylist ──
+router.post('/stylists/:id/follow', authenticate, validate(postIdSchema), asyncHandler(controller.toggleFollow));
+router.get(
+  '/stylists/:id/followers-count',
+  optionalAuthenticate,
+  validate(postIdSchema),
+  asyncHandler(controller.followersCount),
+);
+
 // ── Stories (ephemeral 24h photos) ──
 router.get('/stories', optionalAuthenticate, asyncHandler(controller.storiesFeed));
 router.post(

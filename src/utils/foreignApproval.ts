@@ -25,6 +25,7 @@ export function isForeignRestricted(user: ForeignFields | null | undefined): boo
 /** Why an account is not fully active. Drives the client's "panel disabled" UI. */
 export type InactiveReason =
   | 'account_disabled' // admin-blocked (isActive=false)
+  | 'awaiting_documents' // foreign national who hasn't uploaded their passport yet
   | 'pending_foreign_approval' // foreign national awaiting admin review
   | 'foreign_rejected'; // foreign national whose review was declined
 
@@ -44,6 +45,9 @@ export function accountStatus(
   if (!user) return { active: false, reason: 'account_disabled' };
   if (user.isActive === false) return { active: false, reason: 'account_disabled' };
   if (user.isForeignNational === true) {
+    if (user.foreignApprovalStatus === 'awaiting_documents') {
+      return { active: false, reason: 'awaiting_documents' };
+    }
     if (user.foreignApprovalStatus === 'pending') {
       return { active: false, reason: 'pending_foreign_approval' };
     }

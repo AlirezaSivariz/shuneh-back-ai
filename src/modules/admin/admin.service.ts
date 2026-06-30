@@ -209,6 +209,7 @@ export async function getUser(id: string) {
       foreignId: user.foreignId ?? null, // admin-only sensitive field
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
+      hasPassportImage: !!user.passportImage,
       profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
       walletBalance: user.walletBalance ?? 0,
       createdAt: user.createdAt,
@@ -384,6 +385,7 @@ export async function listForeignApprovals(
       foreignId: u.foreignId ?? null,
       foreignApprovalStatus: u.foreignApprovalStatus,
       foreignRejectionReason: u.foreignRejectionReason ?? null,
+      hasPassportImage: !!u.passportImage,
       createdAt: u.createdAt,
     })),
     ...pageMeta(page, limit, total),
@@ -420,6 +422,16 @@ export async function rejectForeign(adminId: string, id: string, reason?: string
   await audit(adminId, 'foreignNational.reject', 'user', id, { reason: reason ?? null });
   await maybeSendMessage(adminId, id, message, 'foreign_rejected', 'تأیید حساب');
   return { id, foreignApprovalStatus: user.foreignApprovalStatus };
+}
+
+/** Stream a foreign user's passport image (admin-only; private storage). */
+export async function resolveUserPassport(id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(id).select('passportImage').lean();
+  if (!user?.passportImage) throw AppError.notFound('سند یافت نشد', 'DOCUMENT_NOT_FOUND');
+  const image = await storageProvider.getPrivateImage(user.passportImage);
+  if (!image) throw AppError.notFound('فایل یافت نشد', 'FILE_NOT_FOUND');
+  return { data: image.data, contentType: image.mime };
 }
 
 // ───────────────────────── reservations ─────────────────────────

@@ -37,7 +37,21 @@ export async function savedPosts(req: Request, res: Response): Promise<void> {
 }
 
 export async function feed(req: Request, res: Response): Promise<void> {
-  sendSuccess(res, await service.getFeed(pageOf(req.query), req.user?.id));
+  const mode = (req.query as { mode?: string }).mode === 'following' ? 'following' : 'all';
+  sendSuccess(res, await service.getFeed(pageOf(req.query), req.user?.id, mode));
+}
+
+// ── Follow / unfollow ──
+export async function toggleFollow(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.toggleFollow(req.user!.id, req.params.id));
+}
+
+export async function followersCount(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getFollowersCount(req.params.id));
+}
+
+export async function following(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.getFollowing(req.user!.id));
 }
 
 export async function getPost(req: Request, res: Response): Promise<void> {

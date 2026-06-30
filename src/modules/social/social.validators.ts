@@ -19,7 +19,11 @@ export const createPostSchema = {
 };
 
 export const feedSchema = {
-  query: z.object({ page: z.coerce.number().int().min(1).optional() }),
+  query: z.object({
+    page: z.coerce.number().int().min(1).optional(),
+    // 'following' → only posts from stylists the signed-in user follows.
+    mode: z.enum(['all', 'following']).optional(),
+  }),
 };
 
 export const postIdSchema = {
