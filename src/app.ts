@@ -23,6 +23,7 @@ import salonRoutes from "./modules/salon/salon.routes";
 import { ownerRouter } from "./modules/salon/owner.routes";
 import inviteRoutes from "./modules/invite/invite.routes";
 import { adminRouter } from "./modules/admin/admin.routes";
+import planRoutes from "./modules/plan/plan.routes";
 import blogRoutes from "./modules/blog/blog.routes";
 import socialRoutes from "./modules/social/social.routes";
 import {
@@ -69,6 +70,7 @@ export function createApp(): Application {
   app.use("/invite", inviteRoutes);
   app.use("/reservations", reservationRouter);
   app.use("/admin", adminRouter);
+  app.use("/plans", planRoutes);
   app.use("/internal", internalRouter);
 
   // 404 + central error handler (must be last).

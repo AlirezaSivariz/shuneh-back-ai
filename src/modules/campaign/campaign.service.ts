@@ -8,7 +8,7 @@
  */
 import { createHash } from 'crypto';
 import { Types } from 'mongoose';
-import { StylistProfile } from '../../models/StylistProfile';
+import { StylistProfile, getPlanSmsLimits } from '../../models/StylistProfile';
 import { DiscountCode } from '../../models/DiscountCode';
 import { Service } from '../../models/Service';
 import { Reservation } from '../../models/Reservation';
@@ -17,7 +17,6 @@ import { SmsCampaignLog } from '../../models/SmsCampaignLog';
 import { AppError } from '../../utils/AppError';
 import { smsProvider, toLimoMobile, maskMobile } from '../../utils/sms';
 import { toJalaliLabel } from '../../utils/jalali';
-import { config } from '../../config/env';
 
 const DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Single-part Persian (UCS-2) SMS budget — keep the campaign text within one part. */
@@ -91,8 +90,9 @@ function phoneHashOf(normalizedPhone: string) {
 /** The campaign's plan/limit status for a stylist (drives the lock state + caps). */
 export async function getStatus(stylistId: string) {
   const profile = await StylistProfile.findOne({ userId: stylistId })
-    .select('smsCampaignEnabled')
+    .select('smsCampaignEnabled planTier')
     .lean();
+  const { dailyMax, perSendMax } = getPlanSmsLimits(profile?.planTier ?? 'free');
   const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
   const sentToday = await SmsCampaignLog.countDocuments({
     stylistId,
@@ -100,10 +100,10 @@ export async function getStatus(stylistId: string) {
   });
   return {
     enabled: profile?.smsCampaignEnabled ?? false,
-    perSendMax: config.smsCampaignPerSendMax,
-    dailyMax: config.smsCampaignDailyMax,
+    perSendMax,
+    dailyMax,
     sentToday,
-    remainingToday: Math.max(0, config.smsCampaignDailyMax - sentToday),
+    remainingToday: Math.max(0, dailyMax - sentToday),
   };
 }
 
@@ -196,13 +196,14 @@ export interface SendInput {
 export async function sendCampaign(stylistId: string, input: SendInput) {
   const oid = new Types.ObjectId(stylistId);
 
-  // 1) Paid-plan gate.
+  // 1) Paid-plan gate + limits.
   const profile = await StylistProfile.findOne({ userId: stylistId })
-    .select('smsCampaignEnabled')
+    .select('smsCampaignEnabled planTier')
     .lean();
   if (!profile?.smsCampaignEnabled) {
     throw AppError.forbidden('این قابلیت برای حساب شما فعال نیست', 'SMS_CAMPAIGN_DISABLED');
   }
+  const { dailyMax, perSendMax } = getPlanSmsLimits(profile.planTier ?? 'free');
 
   // 2) The code must belong to THIS stylist.
   if (!Types.ObjectId.isValid(input.discountCodeId)) {
@@ -255,9 +256,9 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
   }
 
   // 4) Per-send cap.
-  if (normalized.length > config.smsCampaignPerSendMax) {
+  if (normalized.length > perSendMax) {
     throw AppError.badRequest(
-      `در هر ارسال حداکثر ${config.smsCampaignPerSendMax} گیرنده مجاز است`,
+      `در هر ارسال حداکثر ${perSendMax} گیرنده مجاز است`,
       'TOO_MANY_RECIPIENTS',
     );
   }
@@ -265,9 +266,9 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
   // 5) Per-day cap (rolling 24h).
   const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
   const sentRecent = await SmsCampaignLog.countDocuments({ stylistId: oid, createdAt: { $gte: since } });
-  if (sentRecent + normalized.length > config.smsCampaignDailyMax) {
+  if (sentRecent + normalized.length > dailyMax) {
     throw AppError.badRequest(
-      `سقف ارسال روزانه (${config.smsCampaignDailyMax} پیامک) اجازه نمی‌دهد. امروز ${sentRecent} پیامک ارسال شده است.`,
+      `سقف ارسال روزانه (${dailyMax} پیامک) اجازه نمی‌دهد. امروز ${sentRecent} پیامک ارسال شده است.`,
       'DAILY_LIMIT_REACHED',
     );
   }
