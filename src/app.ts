@@ -25,6 +25,7 @@ import inviteRoutes from "./modules/invite/invite.routes";
 import { adminRouter } from "./modules/admin/admin.routes";
 import blogRoutes from "./modules/blog/blog.routes";
 import socialRoutes from "./modules/social/social.routes";
+import paymentRoutes from "./modules/payment/payment.routes";
 import {
   internalRouter,
   reservationRouter,
@@ -67,6 +68,8 @@ export function createApp(): Application {
   app.use("/social", socialRoutes);
   app.use("/owner", ownerRouter);
   app.use("/invite", inviteRoutes);
+  // Zibal payment gateway: start top-up + public browser callback.
+  app.use("/payments", paymentRoutes);
   app.use("/reservations", reservationRouter);
   app.use("/admin", adminRouter);
   app.use("/internal", internalRouter);

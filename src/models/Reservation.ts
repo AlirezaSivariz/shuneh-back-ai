@@ -81,6 +81,18 @@ export interface IReservation extends Document {
     settled: boolean;
   } | null;
   status: ReservationStatus;
+  /**
+   * Online-payment lifecycle, independent of the booking `status`:
+   *  - not_required → no gateway charge (free service or gateway off) → auto-confirmed.
+   *  - awaiting     → a HOLD that blocks the slot until the customer pays; hidden
+   *                   from booking lists and released if the payment fails/expires.
+   *  - paid         → payment verified; the booking is a real, confirmed reservation.
+   */
+  paymentStatus: 'not_required' | 'awaiting' | 'paid';
+  /** The gateway PaymentTransaction that settled this booking (once paid). */
+  paymentTxId?: Types.ObjectId | null;
+  paymentRefNumber?: string | null;
+  paidAt?: Date | null;
   completedAt?: Date;
   /** Set once the post-completion (review/tip) SMS has been sent — prevents duplicates. */
   completionNotifiedAt?: Date | null;
@@ -174,6 +186,15 @@ const reservationSchema = new Schema<IReservation>(
       default: 'pending',
       index: true,
     },
+    paymentStatus: {
+      type: String,
+      enum: ['not_required', 'awaiting', 'paid'],
+      default: 'not_required',
+      index: true,
+    },
+    paymentTxId: { type: Schema.Types.ObjectId, ref: 'PaymentTransaction', default: null },
+    paymentRefNumber: { type: String, default: null },
+    paidAt: { type: Date, default: null },
     completedAt: { type: Date },
     cancelledBy: { type: String, enum: ['customer', 'stylist', 'admin', null], default: null },
     cancelReason: { type: String, default: null },

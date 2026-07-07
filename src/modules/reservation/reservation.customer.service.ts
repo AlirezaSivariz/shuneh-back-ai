@@ -234,6 +234,14 @@ export async function createReservation(customerId: string, input: CreateInput) 
     }));
   }
 
+  // Amount the customer actually pays (net of any discount). When the gateway is
+  // active and this is > 0, the booking is created as an AWAITING-PAYMENT HOLD
+  // (status 'pending' blocks the slot) and only becomes a real, confirmed
+  // reservation after the payment is verified on the gateway callback. Otherwise
+  // (gateway off, or a zero-price service) it auto-confirms as before.
+  const chargeToman = (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
+  const requiresPayment = config.paymentDriver === 'zibal' && chargeToman > 0;
+
   const reservation = await Reservation.create({
     customerId: new Types.ObjectId(customerId),
     stylistId: new Types.ObjectId(stylistId),
@@ -249,7 +257,8 @@ export async function createReservation(customerId: string, input: CreateInput) 
     customerNote,
     policyAcceptedAt,
     acceptedPolicies,
-    status: 'confirmed', // auto-confirm
+    status: requiresPayment ? 'pending' : 'confirmed',
+    paymentStatus: requiresPayment ? 'awaiting' : 'not_required',
   });
 
   // Concurrency guard (no DB transaction available on standalone Mongo): the
@@ -293,46 +302,147 @@ export async function createReservation(customerId: string, input: CreateInput) 
   // reservation shows in their customer panel and navigation treats them right.
   await User.updateOne({ _id: customerId }, { $addToSet: { roles: 'customer' } });
 
-  // Notify both parties of the new booking (best-effort; never blocks the flow).
-  void (async () => {
-    const [stylistUser, customerUser] = await Promise.all([
-      User.findById(stylistId).select('phone').lean(),
-      User.findById(customerId).select('phone').lean(),
-    ]);
-    if (stylistUser?.phone) {
-      void notificationService.reservationCreated(stylistUser.phone, {
-        date,
-        startTime,
-        audience: 'stylist',
-        hasNote: !!customerNote,
+  // Payment-required booking: start the gateway payment and return its redirect
+  // URL. The reservation stays a hold until the verified callback confirms it
+  // (see `confirmPaidReservation`). No "new booking" notifications are sent yet —
+  // they fire on payment success. If starting the payment fails, release the hold.
+  if (requiresPayment) {
+    try {
+      const { startPayment } = await import('../payment/payment.service');
+      const customerUser = await User.findById(customerId).select('phone').lean();
+      const pay = await startPayment(customerId, {
+        amountToman: chargeToman,
+        purpose: 'reservation_deposit',
+        orderId: String(reservation._id),
+        description: 'پرداخت رزرو نوبت شونه',
+        mobile: customerUser?.phone,
+        meta: { reservationId: String(reservation._id) },
       });
+      // Link the transaction to the hold (best-effort; the tx meta is authoritative).
+      reservation.paymentTxId = new Types.ObjectId(pay.transactionId);
+      await reservation.save();
+      return {
+        reservation: await serializeReservation(reservation),
+        payment: {
+          required: true as const,
+          paymentUrl: pay.paymentUrl,
+          trackId: pay.trackId,
+          transactionId: pay.transactionId,
+          amountToman: chargeToman,
+        },
+      };
+    } catch (err) {
+      // Roll back the hold so the slot is freed and the customer can retry.
+      await reservation.deleteOne().catch(() => {});
+      throw err;
     }
-    if (customerUser?.phone) {
-      void notificationService.reservationCreated(customerUser.phone, {
-        date,
-        startTime,
-        audience: 'customer',
-      });
-    }
-  })();
+  }
 
-  return serializeReservation(reservation);
+  // Auto-confirmed booking (gateway off / free service): notify both parties.
+  void sendReservationCreatedNotifications(reservation);
+
+  return {
+    reservation: await serializeReservation(reservation),
+    payment: { required: false as const },
+  };
+}
+
+/**
+ * Notify the stylist + customer of a newly-confirmed booking (best-effort; never
+ * blocks the caller). Used both on immediate auto-confirm and after a paid
+ * reservation is confirmed on the gateway callback.
+ */
+async function sendReservationCreatedNotifications(reservation: IReservation): Promise<void> {
+  const date = reservation.date.toISOString().slice(0, 10);
+  const { startTime } = reservation;
+  const [stylistUser, customerUser] = await Promise.all([
+    User.findById(reservation.stylistId).select('phone').lean(),
+    User.findById(reservation.customerId).select('phone').lean(),
+  ]);
+  if (stylistUser?.phone) {
+    void notificationService.reservationCreated(stylistUser.phone, {
+      date,
+      startTime,
+      audience: 'stylist',
+      hasNote: !!reservation.customerNote,
+    });
+  }
+  if (customerUser?.phone) {
+    void notificationService.reservationCreated(customerUser.phone, {
+      date,
+      startTime,
+      audience: 'customer',
+    });
+  }
+}
+
+/**
+ * Confirm a reservation whose gateway payment just verified. Idempotent: only a
+ * still-`awaiting` hold flips to a paid, confirmed booking (and triggers the
+ * "new booking" notifications); a repeat/duplicate callback is a no-op.
+ */
+export async function confirmPaidReservation(
+  reservationId: string,
+  payment: { paymentTxId: string; refNumber?: string | null },
+): Promise<void> {
+  if (!Types.ObjectId.isValid(reservationId)) return;
+  const reservation = await Reservation.findOneAndUpdate(
+    { _id: reservationId, paymentStatus: 'awaiting' },
+    {
+      $set: {
+        status: 'confirmed',
+        paymentStatus: 'paid',
+        paymentTxId: new Types.ObjectId(payment.paymentTxId),
+        paymentRefNumber: payment.refNumber ?? null,
+        paidAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+  if (!reservation) return; // already confirmed or released — nothing to do
+  void sendReservationCreatedNotifications(reservation);
+}
+
+/**
+ * Release the slot held by an unpaid reservation (payment failed / canceled).
+ * Only deletes a still-`awaiting` hold, so a paid booking is never removed.
+ */
+export async function releaseUnpaidReservation(reservationId: string): Promise<void> {
+  if (!Types.ObjectId.isValid(reservationId)) return;
+  await Reservation.deleteOne({ _id: reservationId, paymentStatus: 'awaiting' });
+}
+
+/**
+ * Sweep abandoned payment holds (customer left the gateway without returning).
+ * Deletes `awaiting` holds older than `olderThanMinutes` so their slots free up.
+ * The TTL comfortably exceeds a gateway session, so a late callback rarely loses
+ * a booking.
+ */
+export async function releaseExpiredHolds(olderThanMinutes = 30): Promise<{ removed: number }> {
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+  const result = await Reservation.deleteMany({
+    paymentStatus: 'awaiting',
+    createdAt: { $lt: cutoff },
+  });
+  return { removed: result.deletedCount ?? 0 };
 }
 
 type Filter = 'upcoming' | 'past' | undefined;
 
 function filterQuery(base: Record<string, unknown>, filter: Filter) {
   const now = new Date();
+  // Never surface unpaid holds (awaiting payment) as real bookings in any list.
+  const visible = { ...base, paymentStatus: { $ne: 'awaiting' } };
   if (filter === 'upcoming') {
-    return { ...base, status: { $in: ['pending', 'confirmed'] }, startAt: { $gte: now } };
+    return { ...visible, status: { $in: ['pending', 'confirmed'] }, startAt: { $gte: now } };
   }
   if (filter === 'past') {
     return {
-      ...base,
+      ...visible,
       $or: [{ status: { $in: ['completed', 'cancelled', 'no_show'] } }, { startAt: { $lt: now } }],
     };
   }
-  return base;
+  return visible;
 }
 
 export async function listCustomerReservations(customerId: string, filter: Filter) {

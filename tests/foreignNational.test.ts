@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import {
   api,
   auth,
@@ -8,6 +9,15 @@ import {
   futureDate,
 } from "./helpers";
 import { User } from "../src/models/User";
+
+/** A small valid PNG buffer to upload as a passport image. */
+function samplePng(): Promise<Buffer> {
+  return sharp({
+    create: { width: 64, height: 64, channels: 3, background: { r: 5, g: 90, b: 60 } },
+  })
+    .png()
+    .toBuffer();
+}
 
 /** Register the logged-in user as a foreign-national with a 12-digit id. */
 async function setForeignPersonal(token: string, foreignId: string) {
@@ -23,10 +33,25 @@ async function setForeignPersonal(token: string, foreignId: string) {
     });
 }
 
+/**
+ * Register foreign personal info AND upload a passport so the user reaches the
+ * 'pending' admin-review queue. Submitting personal info alone only reaches
+ * 'awaiting_documents' (restricted) — the passport upload promotes it to 'pending'.
+ */
+async function setForeignPending(token: string, foreignId: string) {
+  const res = await setForeignPersonal(token, foreignId);
+  const png = await samplePng();
+  await api()
+    .post("/me/passport-image")
+    .set(...auth(token))
+    .attach("image", png, "passport.png");
+  return res;
+}
+
 describe("Foreign national — personal info", () => {
   it("accepts a 12-digit foreignId and enters the pending approval gate", async () => {
     const s = await login();
-    const res = await setForeignPersonal(s.token, "100000000001");
+    const res = await setForeignPending(s.token, "100000000001");
     expect(res.status).toBe(200);
 
     const state = await api().get("/me/state").set(...auth(s.token));
@@ -38,7 +63,7 @@ describe("Foreign national — personal info", () => {
 
   it("accepts a foreignId of any length/format (only non-empty + unique)", async () => {
     const s = await login();
-    const res = await setForeignPersonal(s.token, "AB-12345"); // not 12 digits
+    const res = await setForeignPending(s.token, "AB-12345"); // not 12 digits
     expect(res.status).toBe(200);
     const state = await api().get("/me/state").set(...auth(s.token));
     expect(state.body.data.user.foreignId).toBe("AB-12345");
@@ -47,7 +72,7 @@ describe("Foreign national — personal info", () => {
 
   it("a pending foreign user is reported as NOT active (with reason) in /me/state", async () => {
     const s = await login();
-    await setForeignPersonal(s.token, "100000000099");
+    await setForeignPending(s.token, "100000000099");
     const state = await api().get("/me/state").set(...auth(s.token));
     expect(state.body.data.isActive).toBe(false);
     expect(state.body.data.inactiveReason).toBe("pending_foreign_approval");
@@ -159,7 +184,7 @@ describe("Foreign national — admin endpoints", () => {
     const admin = await createAdmin();
 
     const c = await login();
-    await setForeignPersonal(c.token, "100000000020");
+    await setForeignPending(c.token, "100000000020");
     const id = (await api().get("/me/state").set(...auth(c.token))).body.data.user.id as string;
 
     const list = await api()
@@ -231,7 +256,7 @@ describe("Foreign national — admin endpoints", () => {
   it("the admin users list reports a pending foreign user as not-active (not 'فعال')", async () => {
     const admin = await createAdmin();
     const c = await login();
-    await setForeignPersonal(c.token, "100000000040");
+    await setForeignPending(c.token, "100000000040");
     const id = (await api().get("/me/state").set(...auth(c.token))).body.data.user.id as string;
 
     const list = await api()

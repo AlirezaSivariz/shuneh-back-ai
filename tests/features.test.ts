@@ -263,8 +263,11 @@ describe("Discount codes", () => {
       .post("/reservations/validate-discount")
       .set(...auth(customer.token))
       .send({ stylistId: stylist.id, code: "DAYONLY", serviceIds: [stylist.serviceIds[0]], date, startTime });
-    expect(validate.status).toBe(400);
-    expect(validate.body.error.code).toBe("DISCOUNT_DAY_NOT_ALLOWED");
+    // validate-discount returns a 200 preview (never throws) so the UI can show
+    // the reason + full terms; an unusable code comes back as valid:false.
+    expect(validate.status).toBe(200);
+    expect(validate.body.data.valid).toBe(false);
+    expect(validate.body.data.reason.code).toBe("DISCOUNT_DAY_NOT_ALLOWED");
   });
 
   it("applies a discount at booking time and stores finalPrice", async () => {
@@ -312,8 +315,9 @@ describe("Discount codes", () => {
       .post("/reservations/validate-discount")
       .set(...auth(customer.token))
       .send({ stylistId: stylist.id, code: "ONCE", serviceIds: [stylist.serviceIds[0]], date: date2, startTime: startTime2 });
-    expect(validate.status).toBe(400);
-    expect(validate.body.error.code).toBe("DISCOUNT_LIMIT_REACHED");
+    expect(validate.status).toBe(200);
+    expect(validate.body.data.valid).toBe(false);
+    expect(validate.body.data.reason.code).toBe("DISCOUNT_LIMIT_REACHED");
   });
 
   it("an unknown code is rejected (INVALID_DISCOUNT_CODE)", async () => {
@@ -325,8 +329,9 @@ describe("Discount codes", () => {
       .post("/reservations/validate-discount")
       .set(...auth(customer.token))
       .send({ stylistId: stylist.id, code: "NOPE", serviceIds: [stylist.serviceIds[0]], date, startTime });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe("INVALID_DISCOUNT_CODE");
+    expect(res.status).toBe(200);
+    expect(res.body.data.valid).toBe(false);
+    expect(res.body.data.reason.code).toBe("INVALID_DISCOUNT_CODE");
   });
 });
 
@@ -529,12 +534,15 @@ describe("Promotion and search ordering", () => {
     const plain = await createStylist();
     const admin = await createAdmin();
 
-    const until = new Date(Date.now() + 7 * 86400000).toISOString();
+    // Search ranks by the Promotion collection (general when categoryId omitted),
+    // so promote via the promotions endpoint — the legacy /promote flag alone
+    // isn't read by search.
+    const promotedUntil = new Date(Date.now() + 7 * 86400000).toISOString();
     const promote = await api()
-      .post(`/admin/stylists/${promoted.id}/promote`)
+      .post(`/admin/stylists/${promoted.id}/promotions`)
       .set(...auth(admin.token))
-      .send({ until });
-    expect(promote.status).toBe(200);
+      .send({ promotedUntil });
+    expect(promote.status).toBe(201);
 
     const search = await api().get("/stylists/search");
     expect(search.status).toBe(200);

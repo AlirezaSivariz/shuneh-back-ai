@@ -4,8 +4,11 @@ import * as discountService from '../discount/discount.service';
 import { sendSuccess } from '../../utils/response';
 
 export async function create(req: Request, res: Response): Promise<void> {
-  const reservation = await service.createReservation(req.user!.id, req.body);
-  sendSuccess(res, { reservation }, 201);
+  // Returns { reservation, payment }. When payment.required is true the booking is
+  // a hold and the client must redirect the browser to payment.paymentUrl; the
+  // reservation is confirmed only after the verified gateway callback.
+  const result = await service.createReservation(req.user!.id, req.body);
+  sendSuccess(res, result, 201);
 }
 
 /** Preview/validate a discount code for a prospective booking (no writes). */

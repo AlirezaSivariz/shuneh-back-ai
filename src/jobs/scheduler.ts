@@ -1,5 +1,6 @@
 import { config } from '../config/env';
 import { completeDueReservations } from '../modules/reservation/reservation.service';
+import { releaseExpiredHolds } from '../modules/reservation/reservation.customer.service';
 import { purgeExpiredStories } from '../modules/social/story.service';
 
 /** How often expired 24h stories are purged (record + image). Read-time filtering
@@ -32,6 +33,19 @@ async function runReservationAutoComplete(): Promise<void> {
   }
 }
 
+async function runHoldCleanup(): Promise<void> {
+  try {
+    const { removed } = await releaseExpiredHolds();
+    if (removed > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[cron] released ${removed} abandoned payment hold(s)`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[cron] reservation hold cleanup failed:', err);
+  }
+}
+
 async function runStoryPurge(): Promise<void> {
   try {
     const { removed } = await purgeExpiredStories();
@@ -61,6 +75,12 @@ export function startScheduledJobs(): void {
   // Don't keep the event loop alive solely for this timer.
   timer.unref?.();
   timers.push(timer);
+
+  // Release abandoned payment holds on the same cadence as auto-complete.
+  void runHoldCleanup();
+  const holdTimer = setInterval(runHoldCleanup, intervalMs);
+  holdTimer.unref?.();
+  timers.push(holdTimer);
 
   // Expired-story cleanup (storage reclaim; read-time filter handles visibility).
   void runStoryPurge();

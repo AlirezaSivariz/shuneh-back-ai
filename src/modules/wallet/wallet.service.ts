@@ -18,6 +18,7 @@ import {
   IWalletTransaction,
 } from '../../models/WalletTransaction';
 import { AppError } from '../../utils/AppError';
+import { config } from '../../config/env';
 
 export interface WalletChangeInput {
   type: 'credit' | 'debit';
@@ -111,17 +112,23 @@ export async function listTransactions(userId: string, page = 1, limit = 20) {
 }
 
 /**
- * Start a wallet top-up. There is NO payment gateway connected yet, so instead
- * of recording a confusing "pending" ledger entry, this simply reports that the
- * gateway is disabled. The `PaymentProvider` seam (utils/payment) stays in place
- * so a real gateway can be wired here later; admin manual credit
+ * Start a wallet top-up. When `PAYMENT_DRIVER=zibal` this delegates to the Zibal
+ * payment orchestration (creates a PaymentTransaction, requests a trackId, and
+ * returns the gateway redirect URL); the balance is credited only on a verified
+ * callback via `applyWalletChange`. With the default `stub` driver no gateway is
+ * connected, so it just reports that top-up is disabled. Admin manual credit
  * (`applyWalletChange` via the admin wallet-adjust endpoint) is unaffected.
+ *
+ * The payment module is loaded lazily to avoid a static import cycle
+ * (payment.service already imports `applyWalletChange` from here).
  */
-export async function startTopup(_userId: string, amount: number) {
+export async function startTopup(userId: string, amount: number) {
   const amt = Math.trunc(amount);
   if (!Number.isFinite(amt) || amt <= 0) throw AppError.badRequest('مبلغ نامعتبر است', 'INVALID_AMOUNT');
-  // TODO(payments): when a gateway is connected, begin the payment here and
-  // return its redirect info; credit the balance via applyWalletChange on verify.
+  if (config.paymentDriver === 'zibal') {
+    const { startWalletTopup } = await import('../payment/payment.service');
+    return { gatewayConnected: true, ...(await startWalletTopup(userId, amt)) };
+  }
   return {
     gatewayConnected: false,
     message: 'در حال حاضر درگاه پرداخت فعال نیست.',

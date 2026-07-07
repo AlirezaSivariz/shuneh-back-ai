@@ -23,10 +23,12 @@ describe("Discount validation access (multi-role)", () => {
         startTime: "10:00",
       });
 
-    // NOT a 403 role error — it's a normal Persian discount error instead.
+    // NOT a 403 role error — it reaches the discount preview (200) and reports the
+    // code as unusable via reason.code instead of throwing a role error.
     expect(res.status).not.toBe(403);
     expect(res.body.error?.code).not.toBe("FORBIDDEN_ROLE");
-    expect(res.body.error?.code).toBe("INVALID_DISCOUNT_CODE");
+    expect(res.body.data.valid).toBe(false);
+    expect(res.body.data.reason.code).toBe("INVALID_DISCOUNT_CODE");
   });
 
   it("the role guard returns a Persian message (no raw English)", async () => {
