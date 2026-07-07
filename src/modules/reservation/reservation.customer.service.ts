@@ -895,6 +895,8 @@ async function serializeReservation(
     salon: salon ? { id: String(r.salonId), name: salon.name, address: salon.address ?? null } : null,
     customerNote: r.customerNote ?? null,
     companionsCount: r.companionsCount ?? 0,
+    totalPersons: (r.companionsCount ?? 0) + 1,
+    totalDuration: Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime)),
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
     // Policy outcome captured at cancel time (display/record only; not settled).
