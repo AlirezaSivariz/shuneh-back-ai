@@ -19,6 +19,8 @@ export const createReservationSchema = {
       customerNote: z.string().trim().max(500).optional(),
       // The customer ticked "I accept the cancellation/reschedule terms".
       acceptedPolicy: z.boolean().optional(),
+      // Optional number of companions (extra people receiving the same service).
+      companionsCount: z.number().int().min(0).optional(),
     })
     .transform((b) => ({
       ...b,
