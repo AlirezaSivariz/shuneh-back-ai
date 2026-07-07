@@ -61,6 +61,8 @@ interface CreateInput {
   customerNote?: string;
   /** Customer ticked the "I accept the cancellation/reschedule terms" box. */
   acceptedPolicy?: boolean;
+  /** Number of companions (extra people). 0 = customer only. */
+  companionsCount?: number;
 }
 
 function endTimeFrom(startTime: string, durationMin: number): string {
@@ -141,6 +143,12 @@ export async function createReservation(customerId: string, input: CreateInput) 
     items.push({ serviceId: ss.serviceId, price: itemPrice, durationMin: itemDuration });
   }
   if (totalDuration <= 0) throw AppError.badRequest('مدت سرویس نامعتبر است', 'INVALID_DURATION');
+
+  // Apply companions multiplier (each extra person adds the same service).
+  const companionsCount = input.companionsCount ?? 0;
+  const persons = 1 + companionsCount;
+  totalDuration *= persons;
+  totalPrice *= persons;
 
   const endTime = endTimeFrom(startTime, totalDuration);
 
@@ -255,6 +263,7 @@ export async function createReservation(customerId: string, input: CreateInput) 
     price: totalPrice,
     ...discountSnapshot,
     customerNote,
+    companionsCount,
     policyAcceptedAt,
     acceptedPolicies,
     status: requiresPayment ? 'pending' : 'confirmed',
@@ -995,6 +1004,9 @@ async function serializeReservation(
         : null,
     salon: salon ? { id: String(r.salonId), name: salon.name, address: salon.address ?? null } : null,
     customerNote: r.customerNote ?? null,
+    companionsCount: r.companionsCount ?? 0,
+    totalPersons: (r.companionsCount ?? 0) + 1,
+    totalDuration: Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime)),
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
     // Policy outcome captured at cancel time (display/record only; not settled).

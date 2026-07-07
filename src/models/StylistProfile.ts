@@ -42,6 +42,18 @@ export function planAllowsSmsCampaign(tier: PlanTier): boolean {
   return tier === 'silver' || tier === 'gold';
 }
 
+/** Per-plan SMS campaign daily limits (per-send = daily for each paid tier). */
+export function getPlanSmsLimits(tier: PlanTier): { perSendMax: number; dailyMax: number } {
+  switch (tier) {
+    case 'silver':
+      return { perSendMax: 49, dailyMax: 49 };
+    case 'gold':
+      return { perSendMax: 100, dailyMax: 100 };
+    default:
+      return { perSendMax: 0, dailyMax: 0 };
+  }
+}
+
 export interface IFreelanceInfo {
   address?: string;
   location?: GeoPoint;

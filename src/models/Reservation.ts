@@ -53,6 +53,8 @@ export interface IReservation extends Document {
   finalPrice?: number | null;
   /** Optional free-text note from the customer to the stylist (read-only for stylist). */
   customerNote?: string | null;
+  /** Number of companions (extra people receiving the same service). 0 = customer only. */
+  companionsCount?: number;
   /** Audit trail of reschedules (oldest → newest). */
   rescheduleHistory?: {
     fromDate: string;
@@ -143,6 +145,7 @@ const reservationSchema = new Schema<IReservation>(
     originalPrice: { type: Number, default: null, min: 0 },
     finalPrice: { type: Number, default: null, min: 0 },
     customerNote: { type: String, default: null, maxlength: 500 },
+    companionsCount: { type: Number, default: 0, min: 0 },
     rescheduleHistory: {
       type: [
         new Schema(

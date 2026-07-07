@@ -80,10 +80,7 @@ export interface AppConfig {
   limoSmsFooter: string;
   /** LimoSMS sender line number for notification SMS (sendsms). From env only. */
   limoSmsSenderNumber?: string;
-  /** Max recipients a stylist may target in ONE discount-SMS campaign send. */
-  smsCampaignPerSendMax: number;
-  /** Max discount-campaign SMS a stylist may send PER DAY (anti-spam/cost). */
-  smsCampaignDailyMax: number;
+  /** Per-plan SMS caps live in `StylistProfile.getPlanSmsLimits()`. */
   /** Payment gateway driver: 'stub' (no real money) | 'zibal'. */
   paymentDriver: 'stub' | 'zibal';
   /** Zibal IPG config. `merchant` = "zibal" for the sandbox. Server-only. */
@@ -135,8 +132,6 @@ export const config: AppConfig = {
   // LimoSMS expects the literal string "vip" as the sender (per their support),
   // not a line number. Overridable via env if that ever changes.
   limoSmsSenderNumber: process.env.LIMOSMS_SENDER_NUMBER || 'vip',
-  smsCampaignPerSendMax: asNumber('SMS_CAMPAIGN_PER_SEND_MAX', 50),
-  smsCampaignDailyMax: asNumber('SMS_CAMPAIGN_DAILY_MAX', 100),
   paymentDriver: (process.env.PAYMENT_DRIVER || 'stub').toLowerCase() as AppConfig['paymentDriver'],
   zibal: {
     // "zibal" is Zibal's documented sandbox merchant; use the real merchant in prod.
