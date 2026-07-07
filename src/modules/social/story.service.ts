@@ -22,10 +22,10 @@ interface AuthorView {
   isVerified: boolean;
 }
 
-async function authorMap(authorIds: string[]): Promise<Map<string, AuthorView>> {
+async function authorMap(authorIds: string[]): Promise<Map<string, AuthorView & { phone?: string }>> {
   const ids = [...new Set(authorIds)];
   const [users, profiles] = await Promise.all([
-    User.find({ _id: { $in: ids } }).select('firstName lastName profilePhoto').lean(),
+    User.find({ _id: { $in: ids } }).select('firstName lastName profilePhoto phone').lean(),
     StylistProfile.find({ userId: { $in: ids } }).select('userId isVerified').lean(),
   ]);
   const verified = new Map(profiles.map((p) => [String(p.userId), p.isVerified === true]));
@@ -37,6 +37,7 @@ async function authorMap(authorIds: string[]): Promise<Map<string, AuthorView>> 
         fullName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || 'متخصص',
         profilePhoto: u.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
         isVerified: verified.get(String(u._id)) ?? false,
+        phone: (u as unknown as { phone?: string }).phone ?? undefined,
       },
     ]),
   );
@@ -118,7 +119,8 @@ export async function getActiveStoriesGrouped(viewerId?: string) {
     const author = authors.get(uid);
     if (!author) continue;
     const seen = seenSet.has(String(s._id));
-    const g = groups.get(uid) ?? { author, stories: [], hasUnseen: false, latestAt: 0 };
+    const { phone: _phone, ...authorPublic } = author;
+    const g = groups.get(uid) ?? { author: authorPublic, stories: [], hasUnseen: false, latestAt: 0 };
     g.stories.push(storyView(s, seen));
     if (!seen) g.hasUnseen = true;
     g.latestAt = Math.max(g.latestAt, new Date(s.createdAt).getTime());
@@ -138,7 +140,8 @@ export async function getActiveStoriesGrouped(viewerId?: string) {
 export async function getAuthorStories(authorId: string, viewerId?: string) {
   if (!Types.ObjectId.isValid(authorId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   const stories = await Story.find({ authorId, ...ACTIVE() }).sort({ createdAt: 1 }).lean();
-  const author = (await authorMap([authorId])).get(authorId) ?? null;
+  const rawAuthor = (await authorMap([authorId])).get(authorId) ?? null;
+  const author = rawAuthor ? { id: rawAuthor.id, fullName: rawAuthor.fullName, profilePhoto: rawAuthor.profilePhoto, isVerified: rawAuthor.isVerified } : null;
   const seenSet = viewerId
     ? new Set(
         (await StoryView.find({ storyId: { $in: stories.map((s) => s._id) }, viewerId }).select('storyId').lean()).map(
@@ -180,6 +183,7 @@ export async function getStoryViewers(storyId: string, requesterId: string) {
         fullName: a?.fullName ?? 'کاربر',
         profilePhoto: a?.profilePhoto ?? null,
         isVerified: a?.isVerified ?? false,
+        phone: (a as { phone?: string } | undefined)?.phone ?? null,
         seenAt: v.seenAt,
       };
     }),
