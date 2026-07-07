@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # استفاده از میرور npm ایران
-RUN npm config set registry https://mirror-npm.runflare.com/ \
+RUN npm config set registry https://package-mirror.liara.ir/repository/npm/ \
     && npm install
 
 COPY . .
@@ -26,7 +26,7 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 
-RUN npm config set registry https://mirror-npm.runflare.com/ \
+RUN npm config set registry https://package-mirror.liara.ir/repository/npm/ \
     && npm install --omit=dev \
     && npm cache clean --force
 
