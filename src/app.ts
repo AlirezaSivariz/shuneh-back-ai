@@ -31,6 +31,10 @@ import {
   internalRouter,
   reservationRouter,
 } from "./modules/reservation/reservation.routes";
+import {
+  createCustomerTransactionRoutes,
+  createStylistTransactionRoutes,
+} from "./modules/transaction/transaction.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -71,6 +75,8 @@ export function createApp(): Application {
   app.use("/invite", inviteRoutes);
   // Zibal payment gateway: start top-up + public browser callback.
   app.use("/payments", paymentRoutes);
+  app.use("/me/transactions", createCustomerTransactionRoutes());
+  app.use("/stylist/transactions", createStylistTransactionRoutes());
   app.use("/reservations", reservationRouter);
   app.use("/admin", adminRouter);
   app.use("/plans", planRoutes);
