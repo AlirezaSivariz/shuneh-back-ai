@@ -33,12 +33,19 @@ import {
   serializePolicy,
   ResolvedPolicy,
 } from '../policy/policy.service';
+import { calculateDeposit, calculateRefund } from '../finance/finance.service';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-/** The amount a reservation "paid" for refund/penalty math (net of discount). */
+/** The deposit amount the customer actually paid online (for refund/penalty math). */
 function paidAmountOf(r: IReservation): number | null {
+  if (r.deposit?.amount != null) return r.deposit.amount;
   return r.finalPrice ?? r.price ?? null;
+}
+
+/** The net deposit (minus booking fee) that accrues to the stylist. */
+function stylistShare(r: IReservation): number {
+  return (r.deposit?.amount ?? 0) - (r.deposit?.bookingFee ?? 0);
 }
 
 /** Resolve the cancellation policy that applies to a reservation. */
@@ -242,12 +249,11 @@ export async function createReservation(customerId: string, input: CreateInput) 
     }));
   }
 
-  // Amount the customer actually pays (net of any discount). When the gateway is
-  // active and this is > 0, the booking is created as an AWAITING-PAYMENT HOLD
-  // (status 'pending' blocks the slot) and only becomes a real, confirmed
-  // reservation after the payment is verified on the gateway callback. Otherwise
-  // (gateway off, or a zero-price service) it auto-confirms as before.
-  const chargeToman = (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
+  // Deposit-only: charge a deposit (not the full price) plus a small booking fee.
+  // The deposit model is computed by the centralized finance service.
+  const netPrice = (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
+  const depositBreakdown = calculateDeposit(netPrice);
+  const chargeToman = depositBreakdown.totalCharge;
   const requiresPayment = config.paymentDriver === 'zibal' && chargeToman > 0;
 
   const reservation = await Reservation.create({
@@ -262,6 +268,12 @@ export async function createReservation(customerId: string, input: CreateInput) 
     endTime,
     price: totalPrice,
     ...discountSnapshot,
+    deposit: {
+      amount: depositBreakdown.depositAmount,
+      bookingFee: depositBreakdown.bookingFee,
+      totalCharge: depositBreakdown.totalCharge,
+      payableOnSite: depositBreakdown.payableOnSite,
+    },
     customerNote,
     companionsCount,
     policyAcceptedAt,
@@ -1010,6 +1022,7 @@ async function serializeReservation(
     cancelledBy: r.cancelledBy ?? null,
     cancelReason: r.cancelReason ?? null,
     // Policy outcome captured at cancel time (display/record only; not settled).
+    deposit: r.deposit ?? null,
     cancellationOutcome: r.cancellationOutcome ?? null,
     rescheduleHistory: (r.rescheduleHistory ?? []).map((h) => ({
       fromDate: h.fromDate,
@@ -1018,6 +1031,8 @@ async function serializeReservation(
       toStartTime: h.toStartTime,
       by: h.by,
       at: h.at,
+      free: h.free ?? true,
+      penaltyAmount: h.penaltyAmount ?? null,
     })),
     tip: tip ? { amount: tip.amount, status: tip.status } : null,
     /**

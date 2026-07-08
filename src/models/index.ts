@@ -4,6 +4,7 @@ export * from './StylistProfile';
 export * from './ServiceCategory';
 export * from './Service';
 export * from './StylistService';
+export * from './StylistSettlement';
 export * from './Salon';
 export * from './StylistSalon';
 export * from './WorkingHour';

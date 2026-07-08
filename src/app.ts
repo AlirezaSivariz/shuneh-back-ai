@@ -35,6 +35,11 @@ import {
   createCustomerTransactionRoutes,
   createStylistTransactionRoutes,
 } from "./modules/transaction/transaction.routes";
+import {
+  createStylistSettlementRoutes,
+  createAdminSettlementRoutes,
+} from "./modules/settlement/settlement.routes";
+import { createInvoiceRoutes } from "./modules/invoice/invoice.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -80,6 +85,9 @@ export function createApp(): Application {
   app.use("/reservations", reservationRouter);
   app.use("/admin", adminRouter);
   app.use("/plans", planRoutes);
+  app.use("/stylist/settlements", createStylistSettlementRoutes());
+  app.use("/admin/settlements", createAdminSettlementRoutes());
+  app.use("/invoices", createInvoiceRoutes());
   app.use("/internal", internalRouter);
 
   // 404 + central error handler (must be last).

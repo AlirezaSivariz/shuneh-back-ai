@@ -7,6 +7,7 @@
  * user should never fail a domain operation.
  */
 import { smsProvider } from './sms';
+import type { SettlementStatus } from '../models/StylistSettlement';
 import { toJalaliLabel } from './jalali';
 
 export interface NotificationService {
@@ -33,6 +34,10 @@ export interface NotificationService {
    * their current working hours and need their attention (no auto-cancel).
    */
   workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
+  /** Notify admin about a new settlement request from a stylist. */
+  adminNewSettlementRequest(phone: string, info: { stylistId: string; amount: number }): Promise<void>;
+  /** Notify a stylist that their settlement request status changed. */
+  settlementStatusChanged(phone: string, info: { amount: number; status: SettlementStatus; adminNote?: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -110,6 +115,29 @@ class SmsNotificationService implements NotificationService {
       phone,
       `با تغییر ساعت کاری، ${info.count} نوبت آینده‌ی شما خارج از ساعت کاری فعلی قرار گرفت. این نوبت‌ها لغو نشده‌اند؛ لطفاً در پنل شونه بررسی و ساعت کاری را به‌روزرسانی کنید.`,
       'hours_review',
+    );
+  }
+
+  async adminNewSettlementRequest(phone: string, info: { stylistId: string; amount: number }) {
+    await safeSend(
+      phone,
+      `درخواست تسویه جدید به مبلغ ${info.amount.toLocaleString('fa')} تومان ثبت شده است. لطفاً در بخش مدیریت تسویه‌ها بررسی کنید.`,
+      'settlement_request',
+    );
+  }
+
+  async settlementStatusChanged(phone: string, info: { amount: number; status: SettlementStatus; adminNote?: string }) {
+    const statusLabels: Record<SettlementStatus, string> = {
+      pending: 'در انتظار بررسی',
+      approved: 'تأیید شده',
+      paid: 'پرداخت شده',
+      rejected: 'رد شده',
+    };
+    const note = info.adminNote ? ` (توضیحات: ${info.adminNote})` : '';
+    await safeSend(
+      phone,
+      `وضعیت درخواست تسویه‌ی شما به مبلغ ${info.amount.toLocaleString('fa')} تومان به "${statusLabels[info.status]}" تغییر کرد.${note}`,
+      'settlement_status',
     );
   }
 

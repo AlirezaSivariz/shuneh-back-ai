@@ -51,6 +51,13 @@ export interface IReservation extends Document {
   discountAmount?: number | null;
   originalPrice?: number | null;
   finalPrice?: number | null;
+  /** Deposit-related financial breakdown snapshotted at booking time. */
+  deposit?: {
+    amount: number;
+    bookingFee: number;
+    totalCharge: number;
+    payableOnSite: number;
+  } | null;
   /** Optional free-text note from the customer to the stylist (read-only for stylist). */
   customerNote?: string | null;
   /** Number of companions (extra people receiving the same service). 0 = customer only. */
@@ -202,6 +209,18 @@ const reservationSchema = new Schema<IReservation>(
     cancelledBy: { type: String, enum: ['customer', 'stylist', 'admin', null], default: null },
     cancelReason: { type: String, default: null },
     // Customer's acceptance of the cancellation terms at booking + snapshot.
+    deposit: {
+      type: new Schema(
+        {
+          amount: { type: Number, required: true, min: 0 },
+          bookingFee: { type: Number, required: true, min: 0 },
+          totalCharge: { type: Number, required: true, min: 0 },
+          payableOnSite: { type: Number, required: true, min: 0 },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     policyAcceptedAt: { type: Date, default: null },
     acceptedPolicies: {
       type: [

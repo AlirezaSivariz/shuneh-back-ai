@@ -46,8 +46,8 @@ const PLANS: PlanDefinition[] = [
     label: 'نقره‌ای',
     tagline: 'رشد کسب‌وکار',
     icon: '🥈',
-    price: null,
-    priceLabel: 'با پشتیبانی تماس بگیرید',
+    price: 200_000,
+    priceLabel: '۲۰۰,۰۰۰ تومان',
     durationLabel: 'ماهانه',
     smsCount: getPlanSmsLimits('silver').dailyMax,
     features: [
@@ -66,8 +66,8 @@ const PLANS: PlanDefinition[] = [
     label: 'طلایی',
     tagline: 'حرفه‌ای',
     icon: '🥇',
-    price: null,
-    priceLabel: 'با پشتیبانی تماس بگیرید',
+    price: 349_000,
+    priceLabel: '۳۴۹,۰۰۰ تومان',
     durationLabel: 'ماهانه',
     smsCount: getPlanSmsLimits('gold').dailyMax,
     features: [
