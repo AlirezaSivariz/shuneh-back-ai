@@ -305,7 +305,23 @@ export const adminUpdateSalonSchema = {
     .refine((b) => b.province === undefined || isValidProvinceCity(b.province, b.city), {
       message: 'city does not belong to the selected province',
       path: ['city'],
-    }),
+  }),
+};
+
+// ── Debt management ──
+export const setDebtLockSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    locked: z.boolean(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+};
+
+export const clearDebtSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    reason: z.string().trim().max(500).optional(),
+  }),
 };
 
 export const setSalonStatusSchema = {

@@ -21,6 +21,12 @@ export interface ICancellationPolicy {
   freeRescheduleCount: number;
   /** Penalty percent applied to a reschedule once the free count is exhausted. */
   reschedulePenaltyPercent: number;
+  /**
+   * Maximum total reschedules allowed for this reservation.
+   * -1 = unlimited (silver/gold default), 2 = free plan limit.
+   * Once reached, only cancellation is allowed.
+   */
+  maxRescheduleCount: number;
 }
 
 export const cancellationRuleSchema = new Schema<ICancellationRule>(
@@ -36,6 +42,7 @@ export const cancellationPolicySchema = new Schema<ICancellationPolicy>(
     rules: { type: [cancellationRuleSchema], default: [] },
     freeRescheduleCount: { type: Number, default: 1, min: 0, max: 10 },
     reschedulePenaltyPercent: { type: Number, default: 0, min: 0, max: 100 },
+    maxRescheduleCount: { type: Number, default: 10, min: -1, max: 50 },
   },
   { _id: false },
 );

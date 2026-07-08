@@ -33,7 +33,15 @@ import {
   serializePolicy,
   ResolvedPolicy,
 } from '../policy/policy.service';
-import { calculateDeposit, calculateRefund } from '../finance/finance.service';
+import {
+  calculateDeposit,
+  calculateRefund,
+  calculatePenalty,
+  computeFinance,
+  makeAdjustment,
+  FinanceComputation,
+} from '../finance/finance.service';
+import type { IFinancialAdjustment } from '../../models/Reservation';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -91,12 +99,19 @@ export async function createReservation(customerId: string, input: CreateInput) 
 
   // A foreign customer awaiting admin approval cannot book yet.
   const customer = await User.findById(customerId)
-    .select('isForeignNational foreignApprovalStatus')
+    .select('isForeignNational foreignApprovalStatus debtBalance isDebtLocked')
     .lean();
   if (isForeignRestricted(customer)) {
     throw AppError.forbidden(
       'حساب شما در انتظار تأیید پشتیبانی است؛ پس از تأیید می‌توانید نوبت رزرو کنید.',
       'FOREIGN_NOT_APPROVED',
+    );
+  }
+  // Debt-locked customer cannot book.
+  if (customer?.isDebtLocked) {
+    throw AppError.forbidden(
+      `به دلیل بدهی معوق (${(customer.debtBalance ?? 0).toLocaleString('fa')} تومان)، امکان ثبت رزرو جدید وجود ندارد. لطفاً ابتدا با پشتیبانی جهت تسویه و رفع محدودیت تماس بگیرید.`,
+      'DEBT_LOCKED',
     );
   }
 
@@ -256,6 +271,25 @@ export async function createReservation(customerId: string, input: CreateInput) 
   const chargeToman = depositBreakdown.totalCharge;
   const requiresPayment = config.paymentDriver === 'zibal' && chargeToman > 0;
 
+  // Resolve policy to get maxRescheduleCount for this reservation.
+  const policyForCreate = await resolveCancellationPolicy({
+    stylistId,
+    salonId,
+    serviceIds,
+  });
+  const maxReschedules = policyForCreate.policy.maxRescheduleCount;
+
+  // Create financial adjustments for the booking.
+  const bookingAdjustments: IFinancialAdjustment[] = [
+    makeAdjustment('deposit', 'بیعانه', depositBreakdown.depositAmount, 'debit', 'پرداخت بیعانه هنگام رزرو'),
+    makeAdjustment('booking_fee', 'هزینه پردازش', depositBreakdown.bookingFee, 'debit', 'کارمزد پردازش رزرو'),
+  ];
+  if (depositBreakdown.payableOnSite > 0) {
+    bookingAdjustments.push(
+      makeAdjustment('payable_on_site', 'قابل پرداخت در محل', depositBreakdown.payableOnSite, 'credit', 'مبلغ قابل پرداخت در محل'),
+    );
+  }
+
   const reservation = await Reservation.create({
     customerId: new Types.ObjectId(customerId),
     stylistId: new Types.ObjectId(stylistId),
@@ -280,6 +314,9 @@ export async function createReservation(customerId: string, input: CreateInput) 
     acceptedPolicies,
     status: requiresPayment ? 'pending' : 'confirmed',
     paymentStatus: requiresPayment ? 'awaiting' : 'not_required',
+    financialAdjustments: bookingAdjustments,
+    rescheduleCount: 0,
+    maxReschedules,
   });
 
   // Concurrency guard (no DB transaction available on standalone Mongo): the
@@ -526,6 +563,89 @@ function notifyReservationCancelled(
   })();
 }
 
+/**
+ * Apply a cancellation's financial adjustments to a reservation: create refund
+ * and penalty adjustments, compute net result, and update customer debt.
+ * Shared by customer and stylist cancel paths.
+ */
+async function applyCancellationFinance(
+  reservation: IReservation,
+  resolved: ResolvedPolicy,
+  depositAmount: number,
+  cancelledBy: 'customer' | 'stylist' | 'admin',
+): Promise<{ debtCreated: number }> {
+  const paidAmt = paidAmountOf(reservation) ?? depositAmount;
+  const outcome = computeCancellationOutcome(resolved, reservation.startAt, paidAmt);
+  const grossRefund = calculateRefund(depositAmount, outcome.refundPercent);
+  const cancelPenalty = calculatePenalty(depositAmount, outcome.penaltyPercent);
+
+  // Create the cancellation adjustments.
+  const newAdjustments: IFinancialAdjustment[] = [];
+  if (grossRefund > 0) {
+    newAdjustments.push(
+      makeAdjustment('refund', 'بازگشت وجه', grossRefund, 'credit', `لغو نوبت ${outcome.hoursBeforeStart} ساعت قبل از شروع (${outcome.refundPercent}٪ بازگشت)`),
+    );
+  }
+  if (cancelPenalty > 0) {
+    newAdjustments.push(
+      makeAdjustment('penalty_cancellation', 'جریمه لغو', cancelPenalty, 'debit', `جریمه لغو ${outcome.hoursBeforeStart} ساعت قبل از شروع`),
+    );
+  }
+
+  // Merge with existing adjustments and compute net.
+  const allAdjustments = [...(reservation.financialAdjustments ?? []), ...newAdjustments];
+  const finance = computeFinance(allAdjustments);
+
+  // Create debt adjustment if penalties exceed refund.
+  if (finance.debt > 0) {
+    newAdjustments.push(
+      makeAdjustment('debt', 'بدهی', finance.debt, 'debit', `مازاد جریمه‌ها بر بازگشت وجه (${finance.totalPenalties.toLocaleString('fa')} - ${finance.grossRefund.toLocaleString('fa')})`),
+    );
+  }
+
+  // Snapshot the cancellation outcome.
+  reservation.cancellationOutcome = {
+    ...outcome,
+    refundAmount: finance.netRefund,
+    penaltyAmount: finance.totalPenalties,
+    settled: false,
+  };
+
+  // Append new adjustments.
+  reservation.financialAdjustments.push(...newAdjustments);
+  reservation.status = 'cancelled';
+
+  // Update customer debt.
+  const customerIdStr = String(reservation.customerId);
+  const customerUser = await User.findById(customerIdStr).select('debtBalance isDebtLocked phone').lean();
+  const existingDebt = customerUser?.debtBalance ?? 0;
+
+  if (finance.debt > 0 || existingDebt > 0) {
+    const newDebtBalance = existingDebt + finance.debt;
+    await User.updateOne(
+      { _id: reservation.customerId },
+      { $set: { debtBalance: newDebtBalance } },
+    );
+
+    // Check if debt exceeds threshold → lock the customer.
+    if (newDebtBalance > config.maxDebtThreshold && !customerUser?.isDebtLocked) {
+      await User.updateOne(
+        { _id: reservation.customerId },
+        { $set: { isDebtLocked: true, debtLockedAt: new Date() } },
+      );
+      // Notify customer about the lock.
+      if (customerUser?.phone) {
+        void notificationService.debtLocked(customerUser.phone, {
+          amount: newDebtBalance,
+          threshold: config.maxDebtThreshold,
+        });
+      }
+    }
+  }
+
+  return { debtCreated: finance.debt };
+}
+
 export async function cancelReservation(customerId: string, reservationId: string) {
   if (!Types.ObjectId.isValid(reservationId)) {
     throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
@@ -545,19 +665,12 @@ export async function cancelReservation(customerId: string, reservationId: strin
     );
   }
 
-  // Compute (but do NOT execute) the refund/penalty per the resolved policy and
-  // snapshot it on the reservation. TODO(settlement): once a payment gateway /
-  // deposit exists, move the actual money here (refundAmount → customer wallet,
-  // penaltyAmount → stylist) and flip `settled` true.
+  const depositAmount = reservation.deposit?.amount ?? 0;
   const resolved = await resolvePolicyFor(reservation);
-  const outcome = computeCancellationOutcome(resolved, reservation.startAt, paidAmountOf(reservation));
-  reservation.cancellationOutcome = { ...outcome, settled: false };
-
-  reservation.status = 'cancelled';
+  await applyCancellationFinance(reservation, resolved, depositAmount, 'customer');
   reservation.cancelledBy = 'customer';
   await reservation.save();
 
-  // Inform BOTH the customer (confirmation) and the stylist (the gap before).
   notifyReservationCancelled(reservation);
   return serializeReservation(reservation);
 }
@@ -590,17 +703,13 @@ export async function cancelByStylist(
     throw AppError.badRequest('رزرو گذشته قابل لغو نیست', 'RESERVATION_IN_PAST');
   }
 
-  // Snapshot the policy outcome (display/record only; see TODO(settlement)).
+  const depositAmount = reservation.deposit?.amount ?? 0;
   const resolvedS = await resolvePolicyFor(reservation);
-  const outcomeS = computeCancellationOutcome(resolvedS, reservation.startAt, paidAmountOf(reservation));
-  reservation.cancellationOutcome = { ...outcomeS, settled: false };
-
-  reservation.status = 'cancelled';
+  await applyCancellationFinance(reservation, resolvedS, depositAmount, 'stylist');
   reservation.cancelledBy = 'stylist';
   reservation.cancelReason = reason ?? null;
   await reservation.save();
 
-  // Inform BOTH parties (customer + the stylist who cancelled).
   notifyReservationCancelled(reservation, reason);
 
   return serializeReservation(reservation, 'stylist');
@@ -689,21 +798,42 @@ export async function rescheduleReservation(
   );
   if (clash) throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
 
-  // Compute (display/record only) the reschedule penalty per the policy: the
-  // first `freeRescheduleCount` reschedules are free, then a penalty applies.
-  // TODO(settlement): charge `penaltyAmount` once a gateway/deposit exists.
+  // Check reschedule limit: free plan = max 2, silver/gold = configurable.
+  const currentReschedules = reservation.rescheduleCount ?? 0;
+  const maxAllowed = reservation.maxReschedules ?? 2;
+  if (maxAllowed >= 0 && currentReschedules >= maxAllowed) {
+    throw AppError.badRequest(
+      `حداکثر ${maxAllowed} بار جابه‌جایی برای این رزرو مجاز است. برای تغییر زمان، ابتدا نوبت را لغو کنید.`,
+      'RESCHEDULE_LIMIT_REACHED',
+    );
+  }
+
+  // Compute the reschedule penalty per the policy.
   const usedReschedules = reservation.rescheduleHistory?.length ?? 0;
   const resolvedR = await resolvePolicyFor(reservation);
   const rOut = computeRescheduleOutcome(resolvedR, usedReschedules, paidAmountOf(reservation));
 
-  // Apply on the SAME record; append to history. startAt/endAt are recomputed
-  // by the model's pre('validate') hook from date + start/endTime.
+  // Create penalty adjustment if the reschedule is not free.
+  if (!rOut.free && rOut.penaltyAmount !== null && rOut.penaltyAmount > 0) {
+    reservation.financialAdjustments.push(
+      makeAdjustment(
+        'penalty_reschedule',
+        'جریمه جابجایی',
+        rOut.penaltyAmount,
+        'debit',
+        `جابجایی ${by === 'customer' ? 'توسط مشتری' : 'توسط متخصص'} — ${rOut.penaltyPercent}٪ جریمه`,
+      ),
+    );
+  }
+
+  // Apply on the SAME record; append to history.
   const fromDate = reservation.date.toISOString().slice(0, 10);
   const fromStartTime = reservation.startTime;
   reservation.date = dayDate;
   reservation.startTime = startTime;
   reservation.endTime = endTime;
   reservation.salonId = newSalonId ? new Types.ObjectId(newSalonId) : null;
+  reservation.rescheduleCount = currentReschedules + 1;
   reservation.rescheduleHistory = [
     ...(reservation.rescheduleHistory ?? []),
     {
@@ -766,6 +896,11 @@ export async function previewReservationPolicy(userId: string, reservationId: st
     serviceIds,
   });
 
+  // Compute current financial state from adjustments.
+  const rPrice = reservation.finalPrice ?? reservation.price ?? 0;
+  const rActive = !['cancelled', 'no_show'].includes(reservation.status);
+  const finance = computeFinance(reservation.financialAdjustments ?? [], rPrice, rActive);
+
   return {
     reservationId: String(reservation._id),
     status: reservation.status,
@@ -779,6 +914,17 @@ export async function previewReservationPolicy(userId: string, reservationId: st
     })),
     cancellation: computeCancellationOutcome(resolved, reservation.startAt, paid),
     reschedule: computeRescheduleOutcome(resolved, usedReschedules, paid),
+    finance: {
+      totalDeposit: finance.totalDeposit,
+      totalBookingFee: finance.totalBookingFee,
+      totalPaidOnline: finance.totalPaidOnline,
+      payableOnSite: finance.payableOnSite,
+      grossRefund: finance.grossRefund,
+      totalPenalties: finance.totalPenalties,
+      netRefund: finance.netRefund,
+      debt: finance.debt,
+      penaltyDetails: finance.penaltyDetails,
+    },
   };
 }
 
@@ -1034,6 +1180,18 @@ async function serializeReservation(
       free: h.free ?? true,
       penaltyAmount: h.penaltyAmount ?? null,
     })),
+    // Financial adjustments (single source of truth).
+    financialAdjustments: (r.financialAdjustments ?? []).map((a) => ({
+      type: a.type,
+      label: a.label,
+      amount: a.amount,
+      direction: a.direction,
+      status: a.status,
+      reason: a.reason,
+      createdAt: a.createdAt,
+    })),
+    rescheduleCount: r.rescheduleCount ?? 0,
+    maxReschedules: r.maxReschedules ?? 2,
     tip: tip ? { amount: tip.amount, status: tip.status } : null,
     /**
      * For the stylist view: this future reservation no longer falls inside the

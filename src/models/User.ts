@@ -68,6 +68,20 @@ export interface IUser extends Document {
    * ledger entry (see `wallet.service`). Defaults to 0.
    */
   walletBalance: number;
+  /**
+   * Accumulated debt balance (Toman). Set when total penalties exceed refund
+   * amount on a cancelled reservation. Cleared when settled by the customer.
+   */
+  debtBalance: number;
+  /**
+   * When true the customer is blocked from creating new reservations because
+   * their debtBalance exceeds the system threshold. Admin may re-activate.
+   */
+  isDebtLocked: boolean;
+  /** When the debt lock was applied. */
+  debtLockedAt?: Date | null;
+  /** Admin note about the debt lock. */
+  debtNote?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -103,6 +117,11 @@ const userSchema = new Schema<IUser>(
     // Wallet balance in whole Toman (integer). Mutated only via wallet.service
     // (atomic with a WalletTransaction). min:0 — balance never goes negative.
     walletBalance: { type: Number, default: 0, min: 0 },
+    // Debt tracking — accumulated when penalties exceed refund.
+    debtBalance: { type: Number, default: 0, min: 0 },
+    isDebtLocked: { type: Boolean, default: false },
+    debtLockedAt: { type: Date, default: null },
+    debtNote: { type: String, default: null },
   },
   { timestamps: true },
 );

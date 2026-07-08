@@ -40,6 +40,7 @@ export const SYSTEM_DEFAULT_POLICY: ICancellationPolicy = {
   ],
   freeRescheduleCount: 1,
   reschedulePenaltyPercent: 20,
+  maxRescheduleCount: 2,
 };
 
 /** Silver stylists may only use these standard thresholds (hours before start). */
@@ -66,6 +67,7 @@ export function normalizePolicy(policy: ICancellationPolicy): ICancellationPolic
     rules,
     freeRescheduleCount: Math.max(0, Math.trunc(policy.freeRescheduleCount ?? 0)),
     reschedulePenaltyPercent: clampPercent(policy.reschedulePenaltyPercent ?? 0),
+    maxRescheduleCount: policy.maxRescheduleCount ?? 10,
   };
 }
 
@@ -270,6 +272,7 @@ function policyKey(p: ICancellationPolicy): string {
     n.rules.map((r) => [r.hoursBeforeStart, r.refundPercent]),
     n.freeRescheduleCount,
     n.reschedulePenaltyPercent,
+    n.maxRescheduleCount,
   ]);
 }
 
@@ -414,5 +417,6 @@ export function serializePolicy(resolved: ResolvedPolicy) {
     })),
     freeRescheduleCount: resolved.policy.freeRescheduleCount,
     reschedulePenaltyPercent: resolved.policy.reschedulePenaltyPercent,
+    maxRescheduleCount: resolved.policy.maxRescheduleCount,
   };
 }

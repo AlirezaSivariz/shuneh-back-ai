@@ -8,6 +8,7 @@
  */
 import { Types } from 'mongoose';
 import { User, Role, ROLES } from '../../models/User';
+import type { IFinancialAdjustment } from '../../models/Reservation';
 import {
   StylistProfile,
   IStylistProfile,
@@ -28,8 +29,9 @@ import { Story } from '../../models/Story';
 import { StoryView } from '../../models/StoryView';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { maskSheba, maskCard } from '../stylist/stylist.service';
-import { validateOwnerPolicy } from '../policy/policy.service';
+import { validateOwnerPolicy, resolveCancellationPolicy } from '../policy/policy.service';
 import { ICancellationPolicy } from '../../models/cancellationPolicy';
+import { calculateRefund, calculatePenalty, computeFinance, makeAdjustment } from '../finance/finance.service';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
 import { nanoid } from 'nanoid';
@@ -37,6 +39,7 @@ import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } fr
 import { DiscountCode } from '../../models/DiscountCode';
 import { WalletTransaction } from '../../models/WalletTransaction';
 import { AuditLog } from '../../models/AuditLog';
+import { config } from '../../config/env';
 import { SmsLog } from '../../models/SmsLog';
 import { Review } from '../../models/Review';
 import { recomputeStylistRating, VISIBLE_REVIEW_FILTER } from '../review/review.service';
@@ -534,12 +537,85 @@ export async function cancelReservation(adminId: string, id: string, reason?: st
     throw AppError.badRequest('این رزرو قابل لغو نیست', 'NOT_CANCELLABLE');
   }
 
+  // Apply cancellation finance (refund + penalties + debt).
+  const depositAmount = reservation.deposit?.amount ?? 0;
+  const serviceIds = (reservation.serviceIds?.length ? reservation.serviceIds : [reservation.serviceId]).map(String);
+  const resolved = await resolveCancellationPolicy({
+    stylistId: String(reservation.stylistId),
+    salonId: reservation.salonId ? String(reservation.salonId) : null,
+    serviceIds,
+  });
+  const hrs = (reservation.startAt.getTime() - Date.now()) / 3_600_000;
+  const rules = [...resolved.policy.rules].sort((a, b) => b.hoursBeforeStart - a.hoursBeforeStart);
+  let refundPercent = 0;
+  for (const r of rules) {
+    if (hrs >= r.hoursBeforeStart) { refundPercent = r.refundPercent; break; }
+  }
+  const penaltyPercent = 100 - refundPercent;
+  const grossRefund = calculateRefund(depositAmount, refundPercent);
+  const cancelPenalty = calculatePenalty(depositAmount, penaltyPercent);
+
+  const newAdjustments: IFinancialAdjustment[] = [];
+  if (grossRefund > 0) {
+    newAdjustments.push(
+      { type: 'refund', label: 'بازگشت وجه', amount: grossRefund, direction: 'credit', status: 'applied', reason: `لغو توسط پشتیبانی (${refundPercent}٪ بازگشت)`, createdAt: new Date() },
+    );
+  }
+  if (cancelPenalty > 0) {
+    newAdjustments.push(
+      { type: 'penalty_cancellation', label: 'جریمه لغو', amount: cancelPenalty, direction: 'debit', status: 'applied', reason: 'لغو توسط پشتیبانی', createdAt: new Date() },
+    );
+  }
+
+  const allAdjustments = [...(reservation.financialAdjustments ?? []), ...newAdjustments];
+  const finance = computeFinance(allAdjustments);
+
+  if (finance.debt > 0) {
+    newAdjustments.push(
+      { type: 'debt', label: 'بدهی', amount: finance.debt, direction: 'debit', status: 'applied', reason: `مازاد جریمه‌ها بر بازگشت وجه (لغو توسط پشتیبانی)`, createdAt: new Date() },
+    );
+  }
+
+  reservation.cancellationOutcome = {
+    source: resolved.source,
+    hoursBeforeStart: Math.max(0, Math.round(hrs * 10) / 10),
+    refundPercent,
+    penaltyPercent,
+    refundAmount: finance.netRefund,
+    penaltyAmount: finance.totalPenalties,
+    settled: false,
+  };
+
+  reservation.financialAdjustments.push(...newAdjustments);
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'admin';
   reservation.cancelReason = reason ?? 'cancelled_by_admin';
+
+  // Update customer debt.
+  const customerUser = await User.findById(reservation.customerId).select('debtBalance isDebtLocked phone').lean();
+  const existingDebt = customerUser?.debtBalance ?? 0;
+  if (finance.debt > 0 || existingDebt > 0) {
+    const newDebtBalance = existingDebt + finance.debt;
+    await User.updateOne(
+      { _id: reservation.customerId },
+      { $set: { debtBalance: newDebtBalance } },
+    );
+    if (newDebtBalance > config.maxDebtThreshold && !customerUser?.isDebtLocked) {
+      await User.updateOne(
+        { _id: reservation.customerId },
+        { $set: { isDebtLocked: true, debtLockedAt: new Date() } },
+      );
+      if (customerUser?.phone) {
+        void notificationService.debtLocked(customerUser.phone, {
+          amount: newDebtBalance,
+          threshold: config.maxDebtThreshold,
+        });
+      }
+    }
+  }
+
   await reservation.save();
 
-  // Notify BOTH parties (best-effort).
   void (async () => {
     const parties = await User.find({ _id: { $in: [reservation.customerId, reservation.stylistId] } })
       .select('phone')
@@ -1750,6 +1826,65 @@ export async function adjustUserWallet(
     balance: result.balance,
     transaction: { id: String(result.transaction._id), type, amount: Math.abs(amt) },
   };
+}
+
+// ──────────────── debt management ────────────────
+
+/** Admin toggles a customer's debt lock. When `locked` is false, clears debt. */
+export async function setUserDebtLock(
+  adminId: string,
+  userId: string,
+  locked: boolean,
+  note?: string,
+) {
+  if (!Types.ObjectId.isValid(userId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(userId).select('debtBalance isDebtLocked debtNote phone').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const update: Record<string, unknown> = { isDebtLocked: locked };
+  if (locked) {
+    update.debtLockedAt = new Date();
+    update.debtNote = note ?? null;
+  } else {
+    // Unlocking: clear debt balance and note.
+    update.debtBalance = 0;
+    update.debtLockedAt = null;
+    update.debtNote = null;
+  }
+
+  await User.updateOne({ _id: userId }, { $set: update });
+  await audit(adminId, 'user.debt_lock', 'user', userId, { locked, note: note ?? null });
+
+  // Notify user if unlocked.
+  if (!locked && user.phone && user.debtBalance > 0) {
+    void notificationService.debtUnlocked(user.phone, { amount: user.debtBalance });
+  }
+
+  return { userId, debtBalance: locked ? user.debtBalance : 0, isDebtLocked: locked };
+}
+
+/** Admin clears a user's accumulated debt manually. */
+export async function clearUserDebt(
+  adminId: string,
+  userId: string,
+  note?: string,
+) {
+  if (!Types.ObjectId.isValid(userId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(userId).select('debtBalance phone').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const previousDebt = user.debtBalance ?? 0;
+  await User.updateOne(
+    { _id: userId },
+    { $set: { debtBalance: 0, isDebtLocked: false, debtLockedAt: null, debtNote: note ?? null } },
+  );
+  await audit(adminId, 'user.debt_clear', 'user', userId, { previousDebt, note: note ?? null });
+
+  if (user.phone && previousDebt > 0) {
+    void notificationService.debtUnlocked(user.phone, { amount: previousDebt });
+  }
+
+  return { userId, previousDebt, note: note ?? null };
 }
 
 // ───────────────────── pending work counts (sidebar badges) ─────────────────────

@@ -263,6 +263,26 @@ export async function setSalonStatus(req: Request, res: Response): Promise<void>
   sendSuccess(res, { salon: await service.setSalonStatus(req.user!.id, req.params.id, req.body.status) });
 }
 
+// ── Debt management ──
+export async function setDebtLock(req: Request, res: Response): Promise<void> {
+  const result = await service.setUserDebtLock(
+    req.user!.id,
+    req.params.id,
+    req.body.locked,
+    req.body?.reason,
+  );
+  sendSuccess(res, { debt: result });
+}
+
+export async function clearDebt(req: Request, res: Response): Promise<void> {
+  const result = await service.clearUserDebt(
+    req.user!.id,
+    req.params.id,
+    req.body?.reason,
+  );
+  sendSuccess(res, { debt: result });
+}
+
 // ── Wallet (manual adjust) ──
 export async function adjustWallet(req: Request, res: Response): Promise<void> {
   const result = await service.adjustUserWallet(

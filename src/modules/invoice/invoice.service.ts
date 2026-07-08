@@ -6,13 +6,14 @@ import { PaymentTransaction } from '../../models/PaymentTransaction';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { resolveCancellationPolicy, serializePolicy } from '../policy/policy.service';
-import { calculateDeposit, calculateRefund, calculatePenalty } from '../finance/finance.service';
+import { computeFinance, labelForType } from '../finance/finance.service';
+import type { AdjustmentType } from '../../models/Reservation';
 
-/**
- * Generate a comprehensive invoice for a reservation. Accessible to both
- * the customer and the stylist who own the reservation.
- */
-export async function getReservationInvoice(userId: string, reservationId: string) {
+export async function getReservationInvoice(
+  userId: string,
+  reservationId: string,
+  viewer: 'customer' | 'stylist' | 'admin' = 'customer',
+) {
   if (!Types.ObjectId.isValid(reservationId)) {
     throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   }
@@ -23,7 +24,8 @@ export async function getReservationInvoice(userId: string, reservationId: strin
   }
   if (
     String(reservation.customerId) !== userId &&
-    String(reservation.stylistId) !== userId
+    String(reservation.stylistId) !== userId &&
+    !['admin'].includes(viewer)
   ) {
     throw AppError.forbidden('دسترسی غیرمجاز', 'FORBIDDEN');
   }
@@ -36,65 +38,63 @@ export async function getReservationInvoice(userId: string, reservationId: strin
     .lean();
   const svcNames = services.map((s) => s.name);
 
-  // Resolve current policy for display.
+  const price = reservation.finalPrice ?? reservation.price ?? 0;
+  const depositAmount = reservation.deposit?.amount ?? 0;
+
   const resolved = await resolveCancellationPolicy({
     stylistId: String(reservation.stylistId),
     salonId: reservation.salonId ? String(reservation.salonId) : null,
     serviceIds: serviceIds.map(String),
   });
 
-  // Financial breakdown.
-  const price = reservation.finalPrice ?? reservation.price ?? 0;
-  const deposit = reservation.deposit;
-  const depositAmount = deposit?.amount ?? price; // fallback for legacy rows
-  const bookingFee = deposit?.bookingFee ?? 0;
-  const totalPaidOnline = deposit?.totalCharge ?? price;
-  const payableOnSite = deposit?.payableOnSite ?? 0;
+  const isActive = !['cancelled', 'no_show'].includes(reservation.status);
+  const finance = computeFinance(reservation.financialAdjustments ?? [], price, isActive);
 
-  // Related payment transaction.
   const paymentTx = reservation.paymentTxId
     ? await PaymentTransaction.findById(reservation.paymentTxId)
         .select('amountToman refNumber paidAt status purpose')
         .lean()
     : null;
 
-  // Cancellation/refund info.
-  let refundInfo = null;
-  let penaltyInfo = null;
-  let policyViolation = null;
+  const customerUser = await User.findById(reservation.customerId)
+    .select('debtBalance isDebtLocked')
+    .lean();
 
-  if (reservation.status === 'cancelled') {
-    const outcome = reservation.cancellationOutcome;
-    if (outcome) {
-      const actualRefund = calculateRefund(depositAmount, outcome.refundPercent);
-      const actualPenalty = calculatePenalty(depositAmount, outcome.penaltyPercent);
-      refundInfo = {
-        refundPercent: outcome.refundPercent,
-        refundAmount: actualRefund,
-        source: outcome.source,
-      };
-      penaltyInfo = {
-        penaltyPercent: outcome.penaltyPercent,
-        penaltyAmount: actualPenalty,
-      };
-    }
-  }
+  // Build grouped penalty details with count.
+  const penaltyTypes: AdjustmentType[] = [
+    'penalty_reschedule',
+    'penalty_cancellation',
+    'penalty_no_show',
+    'penalty_policy_violation',
+  ];
 
-  // Policy violation detection.
-  if (reservation.status === 'cancelled') {
-    const outcome = reservation.cancellationOutcome;
-    if (outcome && outcome.penaltyPercent > 0) {
-      policyViolation = {
-        type: 'cancellation',
-        reason: `لغو نوبت ${outcome.hoursBeforeStart} ساعت قبل از شروع`,
-        penaltyPercent: outcome.penaltyPercent,
-        penaltyAmount: outcome.penaltyAmount ?? (depositAmount * outcome.penaltyPercent) / 100,
-        appliedPolicy: outcome.source,
-      };
-    }
-  }
+  const allAdjustments = (reservation.financialAdjustments ?? []).map((a) => ({
+    type: a.type,
+    label: labelForType(a.type),
+    amount: a.amount,
+    direction: a.direction,
+    reason: a.reason,
+    createdAt: a.createdAt instanceof Date ? a.createdAt.toISOString() : String(a.createdAt),
+  }));
 
-  // Reschedule policy check.
+  const penaltyDetails = penaltyTypes
+    .map((t) => {
+      const items = allAdjustments.filter((a) => a.type === t && a.direction === 'debit');
+      const total = items.reduce((s, i) => s + i.amount, 0);
+      return total > 0
+        ? {
+            type: t,
+            label: labelForType(t),
+            amount: total,
+            count: items.length,
+            items: items.map((i) => ({ reason: i.reason, amount: i.amount })),
+          }
+        : null;
+    })
+    .filter((x) => x !== null);
+
+  const debtAdj = allAdjustments.filter((a) => a.type === 'debt');
+
   const rescheduleHistory = (reservation.rescheduleHistory ?? []).map((h) => ({
     fromDate: h.fromDate,
     fromStartTime: h.fromStartTime,
@@ -106,19 +106,32 @@ export async function getReservationInvoice(userId: string, reservationId: strin
     penaltyAmount: h.penaltyAmount ?? null,
   }));
 
-  const penalizedReschedules = rescheduleHistory.filter((h) => !h.free);
-  if (penalizedReschedules.length > 0) {
-    policyViolation = {
-      ...(policyViolation ?? {}),
-      type: 'reschedule',
-      reason: 'جابه‌جایی با جریمه',
-      penaltyPercent: resolved.policy.reschedulePenaltyPercent,
-      penaltyAmount: penalizedReschedules.reduce((s, h) => s + (h.penaltyAmount ?? 0), 0),
-      appliedPolicy: resolved.source,
-    };
+  // Policy violation info.
+  let policyViolation: {
+    type: string;
+    reason: string;
+    penaltyPercent: number;
+    penaltyAmount: number;
+    appliedPolicy: string;
+  } | null = null;
+
+  if (reservation.status === 'cancelled') {
+    const outcome = reservation.cancellationOutcome;
+    if (outcome && outcome.source) {
+      const cancelPenaltyDetail = penaltyDetails.find((p) => p.type === 'penalty_cancellation');
+      if (cancelPenaltyDetail) {
+        policyViolation = {
+          type: 'cancellation',
+          reason: `لغو نوبت ${outcome.hoursBeforeStart} ساعت قبل از شروع`,
+          penaltyPercent: outcome.penaltyPercent,
+          penaltyAmount: cancelPenaltyDetail.amount,
+          appliedPolicy: outcome.source,
+        };
+      }
+    }
   }
 
-  // Related transactions (payment + settlements).
+  // Related transactions.
   const relatedTransactions: Array<{
     type: string;
     amount: number;
@@ -139,7 +152,6 @@ export async function getReservationInvoice(userId: string, reservationId: strin
     });
   }
 
-  // Check if any settlement covers this reservation.
   const settlements = await StylistSettlement.find({
     depositReservationIds: reservation._id,
   })
@@ -155,34 +167,41 @@ export async function getReservationInvoice(userId: string, reservationId: strin
     });
   }
 
-  // Site fee = booking fee (our platform fee).
-  const siteFee = bookingFee;
-
-  return {
+  const base = {
     reservationId: String(reservation._id),
     status: reservation.status,
+    services: svcNames,
+    view: viewer,
     price,
     discount: reservation.discountCode
-      ? {
-          code: reservation.discountCode,
-          amount: reservation.discountAmount ?? 0,
-        }
+      ? { code: reservation.discountCode, amount: reservation.discountAmount ?? 0 }
       : null,
-    services: svcNames,
     deposit: {
-      amount: depositAmount,
-      bookingFee,
-      totalPaidOnline,
-      payableOnSite,
+      amount: finance.totalDeposit,
+      bookingFee: finance.totalBookingFee,
+      totalPaidOnline: finance.totalPaidOnline,
     },
-    refund: refundInfo,
-    penalty: penaltyInfo,
-    siteFee,
-    policy: serializePolicy(resolved),
-    policyViolation,
-    rescheduleHistory,
-    relatedTransactions: relatedTransactions.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    ),
+    payableOnSite: finance.payableOnSite,
+    totalPenalties: finance.totalPenalties,
+    grossRefund: finance.grossRefund,
+    netRefund: finance.netRefund,
+    debt: finance.debt,
+    customerDebtBalance: customerUser?.debtBalance ?? 0,
+    customerDebtLocked: customerUser?.isDebtLocked ?? false,
+    siteFee: finance.totalBookingFee,
+    penaltyDetails,
+    details: {
+      adjustments: viewer === 'admin' ? allAdjustments : [],
+      policy: serializePolicy(resolved),
+      policyViolation,
+      rescheduleHistory,
+      rescheduleCount: reservation.rescheduleCount ?? 0,
+      maxReschedules: reservation.maxReschedules ?? 2,
+      relatedTransactions: relatedTransactions.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    },
   };
+
+  return base;
 }

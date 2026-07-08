@@ -2,6 +2,61 @@ import { Schema, model, Document, Types } from 'mongoose';
 import { iranWallClockToUtc } from '../utils/timezone';
 import { ICancellationPolicy, cancellationPolicySchema } from './cancellationPolicy';
 
+// ── Financial Adjustment Types ──────────────────────────────────────────────
+
+export type AdjustmentType =
+  | 'deposit'
+  | 'booking_fee'
+  | 'payable_on_site'
+  | 'penalty_reschedule'
+  | 'penalty_cancellation'
+  | 'penalty_no_show'
+  | 'penalty_policy_violation'
+  | 'refund'
+  | 'debt'
+  | 'adjustment';
+
+export const ADJUSTMENT_TYPES: AdjustmentType[] = [
+  'deposit',
+  'booking_fee',
+  'payable_on_site',
+  'penalty_reschedule',
+  'penalty_cancellation',
+  'penalty_no_show',
+  'penalty_policy_violation',
+  'refund',
+  'debt',
+  'adjustment',
+];
+
+/**
+ * Every financial event that touches a reservation is recorded here.
+ * Positive `amount` with `direction: 'debit'` = money collected from customer.
+ * Positive `amount` with `direction: 'credit'` = money returned to customer.
+ */
+export interface IFinancialAdjustment {
+  type: AdjustmentType;
+  label: string;
+  amount: number;
+  direction: 'debit' | 'credit';
+  status: 'pending' | 'applied' | 'settled';
+  reason: string;
+  createdAt: Date;
+}
+
+export const financialAdjustmentSchema = new Schema<IFinancialAdjustment>(
+  {
+    type: { type: String, enum: ADJUSTMENT_TYPES, required: true },
+    label: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    direction: { type: String, enum: ['debit', 'credit'], required: true },
+    status: { type: String, enum: ['pending', 'applied', 'settled'], default: 'applied' },
+    reason: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 export type ReservationStatus =
   | 'pending'
   | 'confirmed'
@@ -115,6 +170,15 @@ export interface IReservation extends Document {
    */
   policyAcceptedAt?: Date | null;
   acceptedPolicies?: { serviceId: Types.ObjectId; policy: ICancellationPolicy }[];
+  /**
+   * Independent financial adjustment records — the single source of truth for
+   * every money event (deposit, fee, penalties, refunds, debt).
+   */
+  financialAdjustments: IFinancialAdjustment[];
+  /** Current reschedule count (derived from rescheduleHistory.length). */
+  rescheduleCount: number;
+  /** Maximum reschedules allowed per the policy at booking/reschedule time. */
+  maxReschedules: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -234,6 +298,13 @@ const reservationSchema = new Schema<IReservation>(
       ],
       default: [],
     },
+    // Financial Adjustments — the single source of truth for every money event.
+    financialAdjustments: {
+      type: [financialAdjustmentSchema],
+      default: [],
+    },
+    rescheduleCount: { type: Number, default: 0, min: 0 },
+    maxReschedules: { type: Number, default: 2, min: -1, max: 50 },
   },
   { timestamps: true },
 );

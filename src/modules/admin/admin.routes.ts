@@ -57,6 +57,8 @@ import {
   banSocialSchema,
   profileEditsSchema,
   rejectProfileEditSchema,
+  setDebtLockSchema,
+  clearDebtSchema,
 } from './admin.validators';
 
 /**
@@ -139,6 +141,10 @@ adminRouter.patch('/salons/:id/status', validate(setSalonStatusSchema), asyncHan
 
 // ── Wallet manual adjust (audited) ──
 adminRouter.post('/users/:id/wallet/adjust', validate(adminWalletAdjustSchema), asyncHandler(controller.adjustWallet));
+
+// ── Debt management (audited) ──
+adminRouter.post('/users/:id/debt/lock', validate(setDebtLockSchema), asyncHandler(controller.setDebtLock));
+adminRouter.post('/users/:id/debt/clear', validate(clearDebtSchema), asyncHandler(controller.clearDebt));
 
 // ── Act-on-behalf (audited) ──
 adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));

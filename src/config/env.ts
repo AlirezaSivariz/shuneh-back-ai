@@ -80,6 +80,8 @@ export interface AppConfig {
   limoSmsFooter: string;
   /** LimoSMS sender line number for notification SMS (sendsms). From env only. */
   limoSmsSenderNumber?: string;
+  /** Max debt threshold in Toman. When customer debt exceeds this, they are blocked from booking. */
+  maxDebtThreshold: number;
   /** Per-plan SMS caps live in `StylistProfile.getPlanSmsLimits()`. */
   /** Payment gateway driver: 'stub' (no real money) | 'zibal'. */
   paymentDriver: 'stub' | 'zibal';
@@ -122,6 +124,7 @@ export const config: AppConfig = {
     forcePathStyle: asBool('S3_FORCE_PATH_STYLE', true),
   },
   disableCron: asBool('DISABLE_CRON', false),
+  maxDebtThreshold: asNumber('MAX_DEBT_THRESHOLD', 100_000),
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),
   internalApiKey: process.env.INTERNAL_API_KEY || undefined,

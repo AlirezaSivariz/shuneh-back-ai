@@ -34,6 +34,10 @@ export interface NotificationService {
    * their current working hours and need their attention (no auto-cancel).
    */
   workingHoursNeedReview(phone: string, info: { count: number }): Promise<void>;
+  /** Notify a customer that their debt exceeded the threshold and they are locked. */
+  debtLocked(phone: string, info: { amount: number; threshold: number }): Promise<void>;
+  /** Notify a customer that their debt was cleared / lock was removed. */
+  debtUnlocked(phone: string, info: { amount: number }): Promise<void>;
   /** Notify admin about a new settlement request from a stylist. */
   adminNewSettlementRequest(phone: string, info: { stylistId: string; amount: number }): Promise<void>;
   /** Notify a stylist that their settlement request status changed. */
@@ -115,6 +119,22 @@ class SmsNotificationService implements NotificationService {
       phone,
       `با تغییر ساعت کاری، ${info.count} نوبت آینده‌ی شما خارج از ساعت کاری فعلی قرار گرفت. این نوبت‌ها لغو نشده‌اند؛ لطفاً در پنل شونه بررسی و ساعت کاری را به‌روزرسانی کنید.`,
       'hours_review',
+    );
+  }
+
+  async debtLocked(phone: string, info: { amount: number; threshold: number }) {
+    await safeSend(
+      phone,
+      `مبلغ بدهی شما به ${info.amount.toLocaleString('fa')} تومان رسیده است و از سقف مجاز (${info.threshold.toLocaleString('fa')} تومان) بیشتر شده است. امکان ثبت رزرو جدید تا تسویه بدهی وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.`,
+      'debt_locked',
+    );
+  }
+
+  async debtUnlocked(phone: string, info: { amount: number }) {
+    await safeSend(
+      phone,
+      `بدهی شما به مبلغ ${info.amount.toLocaleString('fa')} تومان تسویه شد. اکنون می‌توانید مجدداً رزرو ثبت کنید.`,
+      'debt_unlocked',
     );
   }
 
