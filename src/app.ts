@@ -40,6 +40,12 @@ import {
   createAdminSettlementRoutes,
 } from "./modules/settlement/settlement.routes";
 import { createInvoiceRoutes } from "./modules/invoice/invoice.routes";
+import {
+  createCustomerTicketRoutes,
+  createStylistTicketRoutes,
+  createAdminTicketRoutes,
+} from "./modules/ticket/ticket.routes";
+import { adminFeatureRouter, userFeatureRouter } from "./modules/feature/feature.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -88,6 +94,11 @@ export function createApp(): Application {
   app.use("/stylist/settlements", createStylistSettlementRoutes());
   app.use("/admin/settlements", createAdminSettlementRoutes());
   app.use("/invoices", createInvoiceRoutes());
+  app.use("/me/tickets", createCustomerTicketRoutes());
+  app.use("/stylist/tickets", createStylistTicketRoutes());
+  app.use("/admin/tickets", createAdminTicketRoutes());
+  app.use("/admin/features", adminFeatureRouter);
+  app.use("/me", userFeatureRouter);
   app.use("/internal", internalRouter);
 
   // 404 + central error handler (must be last).

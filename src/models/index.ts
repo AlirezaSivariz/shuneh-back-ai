@@ -11,3 +11,5 @@ export * from './WorkingHour';
 export * from './SalonInvite';
 export * from './Reservation';
 export * from './Review';
+export * from './SupportTicket';
+export * from './UserFeatureOverride';
