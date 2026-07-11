@@ -42,6 +42,10 @@ export interface NotificationService {
   adminNewSettlementRequest(phone: string, info: { stylistId: string; amount: number }): Promise<void>;
   /** Notify a stylist that their settlement request status changed. */
   settlementStatusChanged(phone: string, info: { amount: number; status: SettlementStatus; adminNote?: string }): Promise<void>;
+  /** Tell a user their support ticket was created successfully. */
+  ticketCreated(phone: string): Promise<void>;
+  /** Tell a ticket owner that an admin replied to their ticket. */
+  ticketAdminReplied(phone: string): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -161,6 +165,13 @@ class SmsNotificationService implements NotificationService {
     );
   }
 
+  async ticketCreated(phone: string) {
+    await safeSend(phone, "تیکت شما با موفقیت ثبت شد", "ticket_created");
+  }
+
+  async ticketAdminReplied(phone: string) {
+    await safeSend(phone, "پاسخ جدیدی برای تیکت شما ثبت شده است.", "ticket_admin_replied");
+  }
 }
 
 export const notificationService: NotificationService = new SmsNotificationService();

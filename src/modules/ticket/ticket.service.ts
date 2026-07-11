@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { SupportTicket, TicketStatus, TicketPriority } from '../../models/SupportTicket';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
+import { notificationService } from '../../utils/notification';
 
 interface ListQuery {
   page?: number;
@@ -103,6 +104,12 @@ export async function createTicket(
       },
     ],
   });
+
+  // Best-effort SMS notification — must never fail the ticket creation.
+  try {
+    const user = await User.findById(userId).select('phone').lean();
+    if (user) await notificationService.ticketCreated(user.phone);
+  } catch { /* swallow */ }
 
   return toTicketResponse(ticket.toObject());
 }
@@ -279,6 +286,12 @@ export async function adminAddMessage(
   ticket.messages.push(msg as any);
   ticket.status = 'answered';
   await ticket.save();
+
+  // Best-effort SMS notification — must never fail the admin reply.
+  try {
+    const owner = await User.findById(ticket.userId).select('phone').lean();
+    if (owner) await notificationService.ticketAdminReplied(owner.phone);
+  } catch { /* swallow */ }
 
   const lastMsg = ticket.messages[ticket.messages.length - 1] as any;
   return {
