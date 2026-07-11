@@ -5,7 +5,7 @@ import { Request } from 'express';
 import { config } from '../config/env';
 import { AppError } from '../utils/AppError';
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
