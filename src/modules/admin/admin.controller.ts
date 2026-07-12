@@ -32,6 +32,11 @@ export async function setUserStatus(req: Request, res: Response): Promise<void> 
   sendSuccess(res, result);
 }
 
+export async function updateUser(req: Request, res: Response): Promise<void> {
+  const result = await service.adminUpdateUser(req.user!.id, req.params.id, req.body);
+  sendSuccess(res, result);
+}
+
 // ── Review moderation ──
 export async function listReviews(req: Request, res: Response): Promise<void> {
   const q = req.query as Record<string, string>;
@@ -73,6 +78,10 @@ export async function messageTemplates(_req: Request, res: Response): Promise<vo
 
 export async function deleteProfilePhoto(req: Request, res: Response): Promise<void> {
   sendSuccess(res, await service.deleteUserProfilePhoto(req.user!.id, req.params.id, req.body?.message));
+}
+
+export async function uploadProfilePhoto(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.adminUploadProfilePhoto(req.user!.id, req.params.id, req.file));
 }
 
 export async function deletePortfolioItem(req: Request, res: Response): Promise<void> {
@@ -316,6 +325,10 @@ export async function setStylistAccepting(req: Request, res: Response): Promise<
   sendSuccess(res, {
     stylist: await service.setStylistAccepting(req.user!.id, req.params.id, req.body.accepting),
   });
+}
+
+export async function setStylistStatus(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.adminSetStylistStatus(req.user!.id, req.params.id, req.body.status));
 }
 
 export async function setStylistSmsCampaign(req: Request, res: Response): Promise<void> {

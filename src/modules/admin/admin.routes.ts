@@ -17,6 +17,7 @@ import {
   idParamsSchema,
   listUsersSchema,
   setUserStatusSchema,
+  updateUserSchema,
   listReservationsSchema,
   cancelReservationSchema,
   listSalonsSchema,
@@ -45,6 +46,7 @@ import {
   adminWalletAdjustSchema,
   reservationAnalyticsSchema,
   setStylistAcceptingSchema,
+  setStylistStatusSchema,
   setStylistSmsCampaignSchema,
   setStylistPlanSchema,
   setStylistCancellationPolicySchema,
@@ -94,6 +96,7 @@ adminRouter.get('/salons/:id', validate(idParamsSchema), asyncHandler(controller
 
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));
+adminRouter.patch('/users/:id', validate(updateUserSchema), asyncHandler(controller.updateUser));
 adminRouter.post('/messages', validate(sendMessageSchema), asyncHandler(controller.sendMessage));
 adminRouter.delete('/users/:id/profile-photo', validate(deleteImageSchema), asyncHandler(controller.deleteProfilePhoto));
 adminRouter.delete('/users/:id/portfolio/:imageId', validate(deletePortfolioImageSchema), asyncHandler(controller.deletePortfolioItem));
@@ -148,6 +151,8 @@ adminRouter.post('/users/:id/debt/clear', validate(clearDebtSchema), asyncHandle
 
 // ── Act-on-behalf (audited) ──
 adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));
+// Set a stylist's status (draft / active) — for onboarding lifecycle (audited).
+adminRouter.patch('/stylists/:id/status', validate(setStylistStatusSchema), asyncHandler(controller.setStylistStatus));
 // Enable/disable the paid SMS discount-campaign plan for a stylist (audited).
 adminRouter.post('/stylists/:id/sms-campaign', validate(setStylistSmsCampaignSchema), asyncHandler(controller.setStylistSmsCampaign));
 // Set a stylist's subscription plan tier (free/silver/gold); syncs SMS gate (audited).
@@ -167,3 +172,12 @@ adminRouter.post('/blog/cover', blogCoverUpload.single('image'), asyncHandler(bl
 adminRouter.get('/blog/:id', validate(blogIdSchema), asyncHandler(blogController.adminGet));
 adminRouter.patch('/blog/:id', validate(updateBlogSchema), asyncHandler(blogController.update));
 adminRouter.delete('/blog/:id', validate(blogIdSchema), asyncHandler(blogController.remove));
+
+// ── Profile photo upload (audited) ──
+const profilePhotoUpload = createUploader('profile');
+adminRouter.post(
+  '/users/:id/profile-photo',
+  validate(idParamsSchema),
+  profilePhotoUpload.single('photo'),
+  asyncHandler(controller.uploadProfilePhoto),
+);

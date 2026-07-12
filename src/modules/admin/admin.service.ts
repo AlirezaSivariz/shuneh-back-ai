@@ -298,6 +298,48 @@ export async function setUserStatus(
   return { id, isActive, suspendedReason: user.suspendedReason };
 }
 
+/** Admin updates a user's profile fields (firstName, lastName, nationalCode, birthDate, foreignId). */
+export async function adminUpdateUser(
+  adminId: string,
+  id: string,
+  data: {
+    firstName?: string;
+    lastName?: string;
+    nationalCode?: string;
+    birthDate?: string;
+    foreignId?: string;
+  },
+) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(id);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  if (data.firstName !== undefined) user.firstName = data.firstName;
+  if (data.lastName !== undefined) user.lastName = data.lastName;
+  if (data.nationalCode !== undefined) {
+    const existing = await User.findOne({ nationalCode: data.nationalCode, _id: { $ne: id } }).select('_id').lean();
+    if (existing) throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+    user.nationalCode = data.nationalCode;
+  }
+  if (data.birthDate !== undefined) user.birthDate = new Date(data.birthDate);
+  if (data.foreignId !== undefined) {
+    const existing = await User.findOne({ foreignId: data.foreignId, _id: { $ne: id } }).select('_id').lean();
+    if (existing) throw AppError.conflict('این کد اتباع قبلاً ثبت شده است', 'FOREIGN_ID_TAKEN');
+    user.foreignId = data.foreignId;
+  }
+
+  await user.save();
+  await audit(adminId, 'user.update', 'user', id, { fields: Object.keys(data) });
+  return {
+    id,
+    firstName: user.firstName ?? null,
+    lastName: user.lastName ?? null,
+    nationalCode: user.nationalCode ?? null,
+    birthDate: user.birthDate ?? null,
+    foreignId: user.foreignId ?? null,
+  };
+}
+
 // ──────────────── messages + image moderation ────────────────
 
 /** Admin sends a standalone in-app message to a user. */
@@ -338,6 +380,28 @@ export async function deleteUserProfilePhoto(adminId: string, id: string, messag
   await audit(adminId, 'user.deleteProfilePhoto', 'user', id);
   await maybeSendMessage(adminId, id, message, 'image_removed', 'عکس پروفایل');
   return { id, profilePhoto: null };
+}
+
+/** Admin uploads/replaces a user's profile photo. */
+export async function adminUploadProfilePhoto(adminId: string, userId: string, file?: Express.Multer.File) {
+  if (!file) throw AppError.badRequest('عکسی انتخاب نشده است', 'NO_FILE');
+  const user = await User.findById(userId).select('_id profilePhoto');
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  // Delete the old photo if it exists.
+  if (user.profilePhoto) {
+    await storageProvider.delete(user.profilePhoto).catch(() => undefined);
+  }
+
+  const stored = await storageProvider.save(file, {
+    ownerType: 'user',
+    ownerId: userId,
+    kind: 'profile',
+  });
+  user.profilePhoto = stored.path;
+  await user.save();
+  await audit(adminId, 'user.uploadProfilePhoto', 'user', userId);
+  return { profilePhoto: storageProvider.getUrl(stored.path) };
 }
 
 /** Admin removes a single portfolio image of a stylist. Optional message. */
@@ -2049,6 +2113,16 @@ export async function setStylistAccepting(adminId: string, stylistId: string, ac
   await profile.save();
   await audit(adminId, 'stylist.setAccepting', 'stylist', stylistId, { accepting });
   return { stylistId, isAcceptingReservations: accepting };
+}
+
+export async function adminSetStylistStatus(adminId: string, stylistId: string, status: 'draft' | 'active') {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  profile.status = status;
+  await profile.save();
+  await audit(adminId, 'stylist.setStatus', 'stylist', stylistId, { status });
+  return { stylistId, status };
 }
 
 /**

@@ -48,6 +48,19 @@ export const setUserStatusSchema = {
   }),
 };
 
+export const updateUserSchema = {
+  params: z.object({ id: objectId }),
+  body: z
+    .object({
+      firstName: z.string().trim().max(100).optional(),
+      lastName: z.string().trim().max(100).optional(),
+      nationalCode: z.string().trim().regex(/^\d{10}$/, 'کد ملی باید ۱۰ رقم باشد').optional(),
+      birthDate: dateStr.optional(),
+      foreignId: z.string().trim().max(20).optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'حداقل یک فیلد برای ویرایش انتخاب کنید'),
+};
+
 export const listReviewsSchema = {
   query: z.object({
     status: z.enum(['pending', 'approved', 'rejected', 'all']).optional(),
@@ -340,6 +353,11 @@ export const reservationAnalyticsSchema = {
 export const setStylistAcceptingSchema = {
   params: z.object({ id: objectId }),
   body: z.object({ accepting: z.boolean() }),
+};
+
+export const setStylistStatusSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({ status: z.enum(['draft', 'active']) }),
 };
 
 export const setStylistSmsCampaignSchema = {
