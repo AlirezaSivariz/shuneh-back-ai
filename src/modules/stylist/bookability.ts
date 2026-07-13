@@ -2,11 +2,12 @@
  * Single source of truth for "is this stylist bookable?".
  *
  * A stylist is bookable only when they have at least one ACTIVE workplace —
- * freelance with a set location, OR an active membership (StylistSalon.status =
- * 'active') in an active salon (Salon.status = 'active') — AND they are accepting
- * reservations. Rejected/left/pending memberships and pending salons do NOT
- * count. Centralizing this here removes the scattered, drifting checks that let
- * a rejected-but-still-"active"-profile stylist stay bookable.
+ * freelance (regardless of fixed location), OR an active membership
+ * (StylistSalon.status = 'active') in an active salon (Salon.status = 'active')
+ * — AND they are accepting reservations. Rejected/left/pending memberships
+ * and pending salons do NOT count. Centralizing this here removes the scattered,
+ * drifting checks that let a rejected-but-still-"active"-profile stylist stay
+ * bookable.
  */
 import { StylistSalon } from '../../models/StylistSalon';
 import { Salon } from '../../models/Salon';
@@ -22,7 +23,7 @@ export type BookabilityReason =
 export interface Bookability {
   bookable: boolean;
   reason: BookabilityReason | null;
-  /** True when the stylist is a freelancer with a set location. */
+  /** True when the stylist is a freelancer (regardless of fixed location). */
   freelance: boolean;
   /** Salon ids where the stylist is an active member of an active salon. */
   activeSalonIds: string[];
@@ -55,7 +56,7 @@ export function decideBookability(
   hasPendingMembership: boolean,
   foreignRestricted = false,
 ): Bookability {
-  const freelance = profile.workplaceType === 'freelance' && !!profile.freelance?.location;
+  const freelance = profile.workplaceType === 'freelance';
 
   // A foreign stylist awaiting approval is never bookable (nor listed).
   if (foreignRestricted) {

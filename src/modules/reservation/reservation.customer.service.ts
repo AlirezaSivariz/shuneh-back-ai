@@ -130,10 +130,11 @@ export async function createReservation(customerId: string, input: CreateInput) 
     throw AppError.badRequest('این متخصص فعلاً رزرو نمی‌پذیرد', 'NOT_ACCEPTING_RESERVATIONS');
   }
 
-  // The stylist must have at least one ACTIVE workplace (freelance, or an active
-  // membership in an active salon). Rejected/left/pending salons don't count.
+  // The stylist must have at least one ACTIVE workplace:
+  // - Freelancer (workplaceType === 'freelance') — location is optional
+  // - Active membership in an active salon
   const { activeSalonIds } = await resolveActiveSalons(stylistId);
-  const isFreelance = profile.workplaceType === 'freelance' && !!profile.freelance?.location;
+  const isFreelance = profile.workplaceType === 'freelance';
   if (activeSalonIds.length === 0 && !isFreelance) {
     throw AppError.badRequest(
       'این متخصص در حال حاضر محل کار فعالی برای رزرو ندارد',
