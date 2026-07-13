@@ -109,6 +109,8 @@ export interface FinanceComputation {
    *   max(0, totalPenalties - grossRefund)
    */
   debt: number;
+  /** Net amount payable to stylist: totalDeposit - totalBookingFee - netRefund */
+  netStylistShare: number;
   /** Detailed breakdown per adjustment for the invoice. */
   adjustments: IFinancialAdjustment[];
   /** Penalty details grouped by type. */
@@ -179,6 +181,12 @@ export function computeFinance(
       ? Math.max(0, servicePrice - totalDeposit + totalPenalties)
       : rawPayableOnSite;
 
+  // Net amount payable to stylist:
+  // Only the deposit collected from customer goes to stylist.
+  // Penalties are on customer's invoice, NOT subtracted from stylist.
+  // Refunds are also not subtracted (handled separately).
+  const netStylistShare = totalDeposit;
+
   return {
     totalDeposit,
     totalBookingFee,
@@ -188,6 +196,7 @@ export function computeFinance(
     grossRefund,
     netRefund,
     debt,
+    netStylistShare,
     adjustments,
     penaltyDetails,
   };

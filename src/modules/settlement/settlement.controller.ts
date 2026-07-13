@@ -7,6 +7,11 @@ export async function getBalance(req: Request, res: Response): Promise<void> {
   sendSuccess(res, result);
 }
 
+export async function getSettlableReservations(req: Request, res: Response): Promise<void> {
+  const result = await service.getSettlableReservations(req.user!.id);
+  sendSuccess(res, { items: result });
+}
+
 export async function create(req: Request, res: Response): Promise<void> {
   const result = await service.createSettlementRequest(req.user!.id, req.body);
   sendSuccess(res, result, 201);

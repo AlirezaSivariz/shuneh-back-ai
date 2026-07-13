@@ -9,7 +9,11 @@ import { z } from 'zod';
 
 const createSettlementSchema = {
   body: z.object({
-    amount: z.number().min(1, 'مبلغ باید بیشتر از صفر باشد'),
+    amount: z.number().min(1, 'مبلغ باید بیشتر از صفر باشد').optional(),
+    depositReservationIds: z.array(z.string()).optional(),
+  }).refine((data) => data.amount !== undefined || (data.depositReservationIds && data.depositReservationIds.length > 0), {
+    message: 'باید مبلغ یا رزروهای انتخاب‌شده مشخص شود',
+    path: ['amount'],
   }),
 };
 
@@ -33,13 +37,14 @@ const idParamsSchema = {
 
 /**
  * Stylist-facing settlement routes — the stylist can view balance,
- * create requests, and list their own requests.
+ * get available reservations, create requests, and list their own requests.
  */
 export function createStylistSettlementRoutes(): Router {
   const router = Router();
   router.use(authenticate);
 
   router.get('/balance', asyncHandler(controller.getBalance));
+  router.get('/available-reservations', asyncHandler(controller.getSettlableReservations));
   router.post('/', validate(createSettlementSchema), asyncHandler(controller.create));
   router.get('/', asyncHandler(controller.list));
 
