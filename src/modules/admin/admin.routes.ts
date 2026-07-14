@@ -44,7 +44,6 @@ import {
   adminUpdateSalonSchema,
   setSalonStatusSchema,
   adminWalletAdjustSchema,
-  reservationAnalyticsSchema,
   setStylistAcceptingSchema,
   setStylistStatusSchema,
   setStylistSmsCampaignSchema,
@@ -52,6 +51,7 @@ import {
   setStylistCancellationPolicySchema,
   addPromotionSchema,
   removePromotionSchema,
+  reservationAnalyticsSchema,
   socialReportsSchema,
   socialPostsSchema,
   socialStoriesSchema,
@@ -61,6 +61,11 @@ import {
   rejectProfileEditSchema,
   setDebtLockSchema,
   clearDebtSchema,
+  stylistServiceIdParamsSchema,
+  addStylistServiceSchema,
+  updateStylistServiceAdminSchema,
+  removeStylistServiceSchema,
+  stylistServicesParamsSchema,
 } from './admin.validators';
 
 /**
@@ -181,3 +186,9 @@ adminRouter.post(
   profilePhotoUpload.single('photo'),
   asyncHandler(controller.uploadProfilePhoto),
 );
+
+// ── Stylist service management (audited) ──
+adminRouter.get('/stylists/:stylistId/services', validate(stylistServicesParamsSchema), asyncHandler(controller.listStylistServices));
+adminRouter.post('/stylists/:stylistId/services', validate(addStylistServiceSchema), asyncHandler(controller.addStylistService));
+adminRouter.patch('/stylists/:stylistId/services/:serviceId', validate(updateStylistServiceAdminSchema), asyncHandler(controller.updateStylistService));
+adminRouter.delete('/stylists/:stylistId/services/:serviceId', validate(removeStylistServiceSchema), asyncHandler(controller.removeStylistService));

@@ -571,15 +571,27 @@ export async function listStylistServices(stylistId: string) {
     .populate<{ serviceId: IService }>('serviceId')
     .sort({ createdAt: 1 });
 
+  // Resolve category names for all unique category IDs.
+  const categoryIds = [...new Set(links.map((l) => {
+    const svc = l.serviceId as unknown as IService | null;
+    return svc?.categoryId ? String(svc.categoryId) : null;
+  }).filter(Boolean))];
+  const categories = categoryIds.length > 0
+    ? await ServiceCategory.find({ _id: { $in: categoryIds } }).select('name').lean()
+    : [];
+  const categoryNameById = new Map(categories.map((c) => [String(c._id), c.name]));
+
   const services = links
     .map((link) => {
       const svc = link.serviceId as unknown as IService | null;
       if (!svc) return null;
+      const catId = svc.categoryId ? String(svc.categoryId) : null;
       return {
         id: String(link._id),
         serviceId: String(svc._id),
         name: svc.name,
-        categoryId: String(svc.categoryId),
+        categoryId: catId,
+        categoryName: catId ? categoryNameById.get(catId) ?? null : null,
         price: link.price ?? svc.defaultPrice, // effective
         durationMin: link.durationMin ?? svc.durationMin, // effective
         customPrice: link.price,

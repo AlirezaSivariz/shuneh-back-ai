@@ -28,7 +28,7 @@ import { ProfileEditRequest } from '../../models/ProfileEditRequest';
 import { Story } from '../../models/Story';
 import { StoryView } from '../../models/StoryView';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
-import { maskSheba, maskCard } from '../stylist/stylist.service';
+import { maskSheba, maskCard, listStylistServices as ssListStylistServices, addStylistService as ssAddStylistService, updateStylistService as ssUpdateStylistService, removeStylistService as ssRemoveStylistService, createCustomService as ssCreateCustomService } from '../stylist/stylist.service';
 import { validateOwnerPolicy, resolveCancellationPolicy } from '../policy/policy.service';
 import { ICancellationPolicy } from '../../models/cancellationPolicy';
 import { calculateRefund, calculatePenalty, computeFinance, makeAdjustment } from '../finance/finance.service';
@@ -175,12 +175,14 @@ export async function getUser(id: string) {
   const user = await User.findById(id).lean();
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
-  const [profile, ownedSalons, memberships, services, reservationRows, walletTxRows] =
+  const [profile, ownedSalons, memberships, serviceRows, reservationRows, walletTxRows] =
     await Promise.all([
       StylistProfile.findOne({ userId: id }).lean(),
       Salon.find({ ownerId: id }).select('name address status').lean(),
       StylistSalon.find({ stylistId: id }).populate('salonId', 'name status').lean(),
-      StylistService.find({ stylistId: id }).populate('serviceId', 'name').lean(),
+      StylistService.find({ stylistId: id })
+        .populate<{ serviceId: { _id: Types.ObjectId; name: string; durationMin: number; defaultPrice: number; categoryId: Types.ObjectId; isCustom?: boolean } }>('serviceId')
+        .lean(),
       // The user's reservations (as customer OR stylist), most recent first.
       Reservation.find({ $or: [{ customerId: id }, { stylistId: id }] })
         .sort({ startAt: -1 })
@@ -192,6 +194,16 @@ export async function getUser(id: string) {
   const reservations = await enrichReservations(reservationRows as unknown as IReservation[]);
   // Promotions (general + category) for the admin promotion-management panel.
   const promotions = profile ? await getStylistPromotions(id) : [];
+
+  // Resolve category names for services
+  const categoryIds = [...new Set(serviceRows.map((s) => {
+    const svc = s.serviceId as unknown as { categoryId?: Types.ObjectId } | null;
+    return svc?.categoryId ? String(svc.categoryId) : null;
+  }).filter(Boolean))];
+  const categories = categoryIds.length > 0
+    ? await ServiceCategory.find({ _id: { $in: categoryIds } }).select('name').lean()
+    : [];
+  const categoryNameById = new Map(categories.map((c) => [String(c._id), c.name]));
 
   return {
     user: {
@@ -268,10 +280,23 @@ export async function getUser(id: string) {
         salon: salon ? { id: String(salon._id), name: salon.name, status: salon.status } : null,
       };
     }),
-    services: services
+    services: serviceRows
       .map((ss) => {
-        const svc = ss.serviceId as unknown as { _id: Types.ObjectId; name: string } | null;
-        return svc ? { id: String(svc._id), name: svc.name } : null;
+        const svc = ss.serviceId as unknown as { _id: Types.ObjectId; name: string; durationMin: number; defaultPrice: number; categoryId?: Types.ObjectId; isCustom?: boolean } | null;
+        if (!svc) return null;
+        return {
+          id: String(svc._id),
+          name: svc.name,
+          price: ss.price ?? svc.defaultPrice,
+          durationMin: ss.durationMin ?? svc.durationMin,
+          customPrice: ss.price,
+          customDurationMin: ss.durationMin,
+          defaultPrice: svc.defaultPrice,
+          defaultDurationMin: svc.durationMin,
+          categoryId: svc.categoryId ? String(svc.categoryId) : null,
+          categoryName: svc.categoryId ? categoryNameById.get(String(svc.categoryId)) ?? null : null,
+          isCustom: svc.isCustom ?? false,
+        };
       })
       .filter(Boolean),
   };
@@ -2175,4 +2200,84 @@ export async function setStylistPlan(adminId: string, stylistId: string, tier: P
   await profile.save();
   await audit(adminId, 'stylist.setPlan', 'stylist', stylistId, { tier });
   return { stylistId, planTier: tier, smsCampaignEnabled: profile.smsCampaignEnabled };
+}
+
+// ─────────────────── Stylist service management (admin) ──────────────────
+
+/**
+ * List a stylist's services with full details (reuses stylist service logic).
+ */
+export async function adminListStylistServices(stylistId: string) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  return ssListStylistServices(stylistId);
+}
+
+/**
+ * Add a service to a stylist's offering (audited).
+ * Supports two modes:
+ *   1. Catalog service — provide `serviceId`
+ *   2. Custom service — provide `isCustom: true` + `name`
+ */
+export async function adminAddStylistService(
+  adminId: string,
+  stylistId: string,
+  body: { serviceId?: string; isCustom?: boolean; name?: string; price?: number | null; durationMin?: number | null },
+) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId }).select('_id').lean();
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'STYLIST_PROFILE_NOT_FOUND');
+
+  let result: Awaited<ReturnType<typeof ssListStylistServices>>;
+  if (body.serviceId) {
+    // Mode 1: catalog service
+    result = await ssAddStylistService(stylistId, body.serviceId, {
+      price: body.price,
+      durationMin: body.durationMin,
+    });
+    await audit(adminId, 'stylist.addService', 'stylist', stylistId, { serviceId: body.serviceId, price: body.price ?? null });
+  } else if (body.isCustom && body.name) {
+    // Mode 2: custom service
+    const customSvc = await ssCreateCustomService(stylistId, {
+      name: body.name,
+      price: body.price ?? 0,
+      durationMin: body.durationMin ?? 30,
+    });
+    result = customSvc;
+    await audit(adminId, 'stylist.addService', 'stylist', stylistId, { customName: body.name, price: body.price ?? null });
+  } else {
+    throw AppError.badRequest('serviceId یا isCustom + name الزامی است', 'VALIDATION_ERROR');
+  }
+
+  return result;
+}
+
+/**
+ * Update a stylist's service price/duration override (audited).
+ */
+export async function adminUpdateStylistService(
+  adminId: string,
+  stylistId: string,
+  serviceId: string,
+  data: { price?: number | null; durationMin?: number | null },
+) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId }).select('_id').lean();
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'STYLIST_PROFILE_NOT_FOUND');
+
+  const result = await ssUpdateStylistService(stylistId, serviceId, data);
+  await audit(adminId, 'stylist.updateService', 'stylist', stylistId, { serviceId, price: data.price ?? null });
+  return result;
+}
+
+/**
+ * Remove a service from a stylist's offering (audited).
+ */
+export async function adminRemoveStylistService(adminId: string, stylistId: string, serviceId: string) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId }).select('_id').lean();
+  if (!profile) throw AppError.notFound('پروفایل متخصص یافت نشد', 'STYLIST_PROFILE_NOT_FOUND');
+
+  const result = await ssRemoveStylistService(stylistId, serviceId);
+  await audit(adminId, 'stylist.removeService', 'stylist', stylistId, { serviceId });
+  return result;
 }

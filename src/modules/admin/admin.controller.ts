@@ -438,3 +438,36 @@ export async function auditLogs(req: Request, res: Response): Promise<void> {
   const q = req.query as Record<string, string>;
   sendSuccess(res, await service.listAuditLogs({ page: Number(q.page), limit: Number(q.limit) }));
 }
+
+// ── Stylist service management ──
+export async function listStylistServices(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.adminListStylistServices(req.params.stylistId));
+}
+
+export async function addStylistService(req: Request, res: Response): Promise<void> {
+  const result = await service.adminAddStylistService(
+    req.user!.id,
+    req.params.stylistId,
+    { serviceId: req.body.serviceId, isCustom: req.body.isCustom, name: req.body.name, price: req.body.price, durationMin: req.body.durationMin },
+  );
+  sendSuccess(res, result, 201);
+}
+
+export async function updateStylistService(req: Request, res: Response): Promise<void> {
+  const result = await service.adminUpdateStylistService(
+    req.user!.id,
+    req.params.stylistId,
+    req.params.serviceId,
+    { price: req.body.price, durationMin: req.body.durationMin },
+  );
+  sendSuccess(res, result);
+}
+
+export async function removeStylistService(req: Request, res: Response): Promise<void> {
+  const result = await service.adminRemoveStylistService(
+    req.user!.id,
+    req.params.stylistId,
+    req.params.serviceId,
+  );
+  sendSuccess(res, result);
+}

@@ -388,3 +388,42 @@ export const adminWalletAdjustSchema = {
     reason: z.string().trim().max(500).optional(),
   }),
 };
+
+// ── Stylist service management (admin) ──
+export const stylistServiceIdParamsSchema = {
+  params: z.object({ stylistId: objectId, serviceId: objectId }),
+};
+
+export const addStylistServiceSchema = {
+  params: z.object({ stylistId: objectId }),
+  body: z
+    .object({
+      serviceId: objectId.optional(),
+      isCustom: z.literal(true).optional(),
+      name: z.string().trim().min(1).max(120).optional(),
+      price: z.number().int().min(0).max(1_000_000_000).optional().nullable(),
+      durationMin: z.number().int().min(1).max(1440).optional().nullable(),
+    })
+    .refine(
+      (b) => !!(b.serviceId || (b.isCustom && b.name)),
+      { message: 'serviceId یا isCustom + name الزامی است', path: ['serviceId'] },
+    ),
+};
+
+export const updateStylistServiceAdminSchema = {
+  params: z.object({ stylistId: objectId, serviceId: objectId }),
+  body: z
+    .object({
+      price: z.number().int().min(0).max(1_000_000_000).optional().nullable(),
+      durationMin: z.number().int().min(1).max(1440).optional().nullable(),
+    })
+    .refine((b) => b.price !== undefined || b.durationMin !== undefined, 'حداقل یک فیلد را وارد کنید'),
+};
+
+export const removeStylistServiceSchema = {
+  params: z.object({ stylistId: objectId, serviceId: objectId }),
+};
+
+export const stylistServicesParamsSchema = {
+  params: z.object({ stylistId: objectId }),
+};
