@@ -227,6 +227,8 @@ export async function getUser(id: string) {
       hasPassportImage: !!user.passportImage,
       profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
       walletBalance: user.walletBalance ?? 0,
+      cardNumber: user.cardNumber ?? null,
+      shebaNumber: user.shebaNumber ?? null,
       createdAt: user.createdAt,
     },
     // Recent wallet ledger (newest first) for the admin wallet panel.

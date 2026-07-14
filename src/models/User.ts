@@ -82,6 +82,10 @@ export interface IUser extends Document {
   debtLockedAt?: Date | null;
   /** Admin note about the debt lock. */
   debtNote?: string | null;
+  /** Bank card number (۱۶ digits). Stored by the user in their bank-info panel. */
+  cardNumber?: string | null;
+  /** Bank SHEBA/IBAN number (IR + ۲۴ digits). Stored by the user in their bank-info panel. */
+  shebaNumber?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -122,6 +126,9 @@ const userSchema = new Schema<IUser>(
     isDebtLocked: { type: Boolean, default: false },
     debtLockedAt: { type: Date, default: null },
     debtNote: { type: String, default: null },
+    // Bank info (user-managed, accessible by any role).
+    cardNumber: { type: String, trim: true, default: null },
+    shebaNumber: { type: String, trim: true, default: null },
   },
   { timestamps: true },
 );

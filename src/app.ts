@@ -46,6 +46,7 @@ import {
   createAdminTicketRoutes,
 } from "./modules/ticket/ticket.routes";
 import { adminFeatureRouter, userFeatureRouter } from "./modules/feature/feature.routes";
+import bankRoutes from "./modules/bank/bank.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -99,6 +100,7 @@ export function createApp(): Application {
   app.use("/admin/tickets", createAdminTicketRoutes());
   app.use("/admin/features", adminFeatureRouter);
   app.use("/me", userFeatureRouter);
+  app.use("/me", bankRoutes);
   app.use("/internal", internalRouter);
 
   // 404 + central error handler (must be last).
