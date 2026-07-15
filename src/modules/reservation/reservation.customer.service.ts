@@ -1115,7 +1115,7 @@ async function serializeReservation(
   const ids = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
   const [services, stylist, customer, salon, tip] = await Promise.all([
     Service.find({ _id: { $in: ids } }).select('name durationMin').lean(),
-    User.findById(r.stylistId).select('firstName lastName profilePhoto').lean(),
+    User.findById(r.stylistId).select('firstName lastName profilePhoto phone').lean(),
     viewer === 'stylist'
       ? User.findById(r.customerId).select('firstName lastName phone').lean()
       : Promise.resolve(null),
@@ -1151,6 +1151,7 @@ async function serializeReservation(
           fullName:
             `${stylist.firstName ?? ''} ${stylist.lastName ?? ''}`.trim() || 'متخصص',
           profilePhoto: photo ? storageProvider.getUrl(photo) : null,
+          phone: (stylist as { phone?: string }).phone ?? null,
         }
       : null,
     customer:
