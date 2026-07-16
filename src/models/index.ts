@@ -13,3 +13,6 @@ export * from './Reservation';
 export * from './Review';
 export * from './SupportTicket';
 export * from './UserFeatureOverride';
+export * from './CreditWallet';
+export * from './CreditTransaction';
+export * from './CreditSetting';

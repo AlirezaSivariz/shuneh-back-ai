@@ -2,6 +2,7 @@ import { Reservation } from '../../models/Reservation';
 import { User } from '../../models/User';
 import { config } from '../../config/env';
 import { notificationService } from '../../utils/notification';
+import { awardCompletedReservation } from '../credit/credit.service';
 
 export interface CompleteDueResult {
   matched: number;
@@ -30,13 +31,25 @@ export async function completeDueReservations(now: Date = new Date()): Promise<C
   // Capture the rows about to complete (so we know exactly who to notify) BEFORE
   // flipping them, then mark them all completed in one bulk update.
   const due = await Reservation.find({ status: 'confirmed', endAt: { $lte: now } })
-    .select('_id customerId date startTime completionNotifiedAt')
+    .select('_id customerId stylistId date startTime completionNotifiedAt')
     .lean();
 
   const result = await Reservation.updateMany(
     { status: 'confirmed', endAt: { $lte: now } },
     { $set: { status: 'completed', completedAt: now } },
   );
+
+  // Award credit to the stylist for each newly completed reservation.
+  const newCompletions = due.filter((r) => !r.completionNotifiedAt);
+  if (newCompletions.length > 0) {
+    const stylistIds = [...new Set(newCompletions.map((r) => String(r.stylistId)))];
+    for (const sid of stylistIds) {
+      const stylistReservations = newCompletions.filter((r) => String(r.stylistId) === sid);
+      for (const r of stylistReservations) {
+        void awardCompletedReservation(sid, String(r._id));
+      }
+    }
+  }
 
   // Send the review/tip invite ONCE per reservation (completionNotifiedAt flag).
   const toNotify = due.filter((r) => !r.completionNotifiedAt);

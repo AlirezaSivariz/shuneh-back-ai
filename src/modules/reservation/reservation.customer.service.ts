@@ -42,6 +42,7 @@ import {
   FinanceComputation,
 } from '../finance/finance.service';
 import type { IFinancialAdjustment } from '../../models/Reservation';
+import { applyCancellationPenalty } from '../credit/credit.service';
 
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -712,6 +713,8 @@ export async function cancelByStylist(
   await reservation.save();
 
   notifyReservationCancelled(reservation, reason);
+
+  void applyCancellationPenalty(stylistId, reservationId);
 
   return serializeReservation(reservation, 'stylist');
 }

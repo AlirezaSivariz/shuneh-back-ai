@@ -5,6 +5,7 @@ import * as reservationController from '../reservation/reservation.customer.cont
 import * as mediaController from '../media/media.controller';
 import * as messageController from '../message/message.controller';
 import * as walletController from '../wallet/wallet.controller';
+import * as creditController from '../credit/credit.controller';
 import * as socialController from '../social/social.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
@@ -13,6 +14,7 @@ import { createUploader } from '../../middlewares/upload';
 import { setRolesSchema, personalSchema, nameEditSchema } from './onboarding.validators';
 import { reportRangeSchema } from '../reports/reports.validators';
 import { topupSchema, walletTxListSchema } from '../wallet/wallet.validators';
+import { walletQuerySchema, planPurchaseSchema } from '../credit/credit.validators';
 
 // Routes under /onboarding
 export const onboardingRouter = Router();
@@ -51,6 +53,11 @@ meRouter.get('/passport-image', asyncHandler(controller.streamOwnPassport));
 meRouter.get('/wallet', asyncHandler(walletController.getWallet));
 meRouter.get('/wallet/transactions', validate(walletTxListSchema), asyncHandler(walletController.listTransactions));
 meRouter.post('/wallet/topup', validate(topupSchema), asyncHandler(walletController.topup));
+
+// ── Credit (stylist; own credit only) ──
+meRouter.get('/credits', asyncHandler(creditController.getWallet));
+meRouter.get('/credits/history', validate(walletQuerySchema), asyncHandler(creditController.listTransactions));
+meRouter.post('/credits/purchase-plan', validate(planPurchaseSchema), asyncHandler(creditController.purchasePlan));
 
 // Stylists the user follows (شونه‌گرام «دنبال‌شده‌ها»).
 meRouter.get('/following', asyncHandler(socialController.following));

@@ -10,6 +10,7 @@ import { StylistProfile } from '../../models/StylistProfile';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 import { storageProvider } from '../../utils/storage';
+import { awardFiveStarReview } from '../credit/credit.service';
 
 /**
  * A review is publicly VISIBLE (and counted in the rating) when it is approved.
@@ -97,6 +98,10 @@ export async function createReview(
     comment: data.comment,
     status: 'pending',
   });
+
+  if (data.rating === 5) {
+    void awardFiveStarReview(String(reservation.stylistId), String(review._id));
+  }
 
   return serialize(review);
 }

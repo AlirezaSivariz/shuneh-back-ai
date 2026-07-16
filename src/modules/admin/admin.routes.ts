@@ -67,6 +67,8 @@ import {
   removeStylistServiceSchema,
   stylistServicesParamsSchema,
 } from './admin.validators';
+import { creditSettingsUpdateSchema, adminCreditAdjustSchema, adminListSchema } from '../credit/credit.validators';
+import * as creditAdminController from '../credit/credit.admin.controller';
 
 /**
  * Admin (support) area. EVERY route is guarded by `authenticate` → `requireAdmin`
@@ -186,6 +188,14 @@ adminRouter.post(
   profilePhotoUpload.single('photo'),
   asyncHandler(controller.uploadProfilePhoto),
 );
+
+// ── Credit system management (audited) ──
+adminRouter.get('/credits/settings', asyncHandler(creditAdminController.getSettings));
+adminRouter.put('/credits/settings', validate(creditSettingsUpdateSchema), asyncHandler(creditAdminController.updateSettings));
+adminRouter.get('/credits/users', validate(adminListSchema), asyncHandler(creditAdminController.listUsers));
+adminRouter.get('/credits/users/:id/history', validate(adminListSchema), asyncHandler(creditAdminController.listUserHistory));
+adminRouter.post('/credits/users/:id/adjust', validate(adminCreditAdjustSchema), asyncHandler(creditAdminController.adjustCredit));
+adminRouter.get('/credits/transactions', validate(adminListSchema), asyncHandler(creditAdminController.listAllTransactions));
 
 // ── Stylist service management (audited) ──
 adminRouter.get('/stylists/:stylistId/services', validate(stylistServicesParamsSchema), asyncHandler(controller.listStylistServices));
