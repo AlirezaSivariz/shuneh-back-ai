@@ -153,16 +153,13 @@ export async function applyCreditChange(
   }
 
   const debitAmount = Math.abs(amount);
+  // No balance guard here — penalty deductions must work even at 0 balance.
+  // plan purchases have their own balance check in purchasePlanByCredit.
   const wallet = await CreditWallet.findOneAndUpdate(
-    { userId: oid, balance: { $gte: debitAmount } },
+    { userId: oid },
     { $inc: { balance: -debitAmount, totalSpent: debitAmount, version: 1 } },
-    { new: true },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
   );
-  if (!wallet) {
-    const existing = await CreditWallet.findOne({ userId: oid });
-    if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
-    throw AppError.badRequest('موجودی اعتبار کافی نیست', 'INSUFFICIENT_CREDIT');
-  }
   await CreditTransaction.create({
     userId: oid,
     amount,
@@ -256,7 +253,10 @@ export async function awardFiveStarReview(stylistId: string, reviewId: string) {
 
 export async function applyCancellationPenalty(stylistId: string, reservationId: string) {
   const settings = await getCreditSettings();
-  if (!settings.isEnabled || settings.consecutiveCancelPenalty <= 0) return null;
+  if (!settings.isEnabled || settings.consecutiveCancelPenalty <= 0) {
+    console.log('[credit] penalty skipped — system disabled or penalty=0');
+    return null;
+  }
 
   const stylistOid = new Types.ObjectId(stylistId);
 
@@ -265,7 +265,6 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
     stylistId: stylistOid,
     _id: { $ne: new Types.ObjectId(reservationId) },
     status: { $in: ['completed', 'cancelled'] },
-    startAt: { $lte: new Date() },
   })
     .select('status cancelledBy startAt')
     .sort({ startAt: -1 })
@@ -283,10 +282,18 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
     }
   }
 
-  if (consecutiveCount < settings.consecutiveCancelThreshold) return null;
+  console.log(
+    `[credit] applyCancellationPenalty stylist=${stylistId} reservation=${reservationId} ` +
+    `found=${previousReservations.length} consecutiveCount=${consecutiveCount} threshold=${settings.consecutiveCancelThreshold} penalty=${settings.consecutiveCancelPenalty}`,
+  );
+
+  if (consecutiveCount < settings.consecutiveCancelThreshold) {
+    console.log('[credit] penalty skipped — below threshold');
+    return null;
+  }
 
   try {
-    return await applyCreditChange(stylistId, {
+    const result = await applyCreditChange(stylistId, {
       amount: -settings.consecutiveCancelPenalty,
       reason: 'consecutive_cancellation_penalty',
       referenceType: 'reservation',
@@ -294,7 +301,13 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
       description: `${consecutiveCount + 1}امین لغو متوالی -${settings.consecutiveCancelPenalty} اعتبار`,
       metadata: { consecutiveCount: consecutiveCount + 1, threshold: settings.consecutiveCancelThreshold },
     });
-  } catch {
+    console.log(
+      `[credit] penalty applied stylist=${stylistId} amount=-${settings.consecutiveCancelPenalty} ` +
+      `newBalance=${result.balance} totalSpent=${result.totalSpent}`,
+    );
+    return result;
+  } catch (err) {
+    console.log(`[credit] penalty failed stylist=${stylistId} error=${err}`);
     return null;
   }
 }

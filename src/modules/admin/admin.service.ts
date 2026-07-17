@@ -39,7 +39,6 @@ import { Reservation, IReservation, ReservationStatus, RESERVATION_STATUSES } fr
 import { DiscountCode } from '../../models/DiscountCode';
 import { WalletTransaction } from '../../models/WalletTransaction';
 import { AuditLog } from '../../models/AuditLog';
-import { config } from '../../config/env';
 import { SmsLog } from '../../models/SmsLog';
 import { Review } from '../../models/Review';
 import { recomputeStylistRating, VISIBLE_REVIEW_FILTER } from '../review/review.service';
@@ -681,29 +680,6 @@ export async function cancelReservation(adminId: string, id: string, reason?: st
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'admin';
   reservation.cancelReason = reason ?? 'cancelled_by_admin';
-
-  // Update customer debt.
-  const customerUser = await User.findById(reservation.customerId).select('debtBalance isDebtLocked phone').lean();
-  const existingDebt = customerUser?.debtBalance ?? 0;
-  if (finance.debt > 0 || existingDebt > 0) {
-    const newDebtBalance = existingDebt + finance.debt;
-    await User.updateOne(
-      { _id: reservation.customerId },
-      { $set: { debtBalance: newDebtBalance } },
-    );
-    if (newDebtBalance > config.maxDebtThreshold && !customerUser?.isDebtLocked) {
-      await User.updateOne(
-        { _id: reservation.customerId },
-        { $set: { isDebtLocked: true, debtLockedAt: new Date() } },
-      );
-      if (customerUser?.phone) {
-        void notificationService.debtLocked(customerUser.phone, {
-          amount: newDebtBalance,
-          threshold: config.maxDebtThreshold,
-        });
-      }
-    }
-  }
 
   await reservation.save();
 

@@ -617,34 +617,6 @@ async function applyCancellationFinance(
   reservation.financialAdjustments.push(...newAdjustments);
   reservation.status = 'cancelled';
 
-  // Update customer debt.
-  const customerIdStr = String(reservation.customerId);
-  const customerUser = await User.findById(customerIdStr).select('debtBalance isDebtLocked phone').lean();
-  const existingDebt = customerUser?.debtBalance ?? 0;
-
-  if (finance.debt > 0 || existingDebt > 0) {
-    const newDebtBalance = existingDebt + finance.debt;
-    await User.updateOne(
-      { _id: reservation.customerId },
-      { $set: { debtBalance: newDebtBalance } },
-    );
-
-    // Check if debt exceeds threshold → lock the customer.
-    if (newDebtBalance > config.maxDebtThreshold && !customerUser?.isDebtLocked) {
-      await User.updateOne(
-        { _id: reservation.customerId },
-        { $set: { isDebtLocked: true, debtLockedAt: new Date() } },
-      );
-      // Notify customer about the lock.
-      if (customerUser?.phone) {
-        void notificationService.debtLocked(customerUser.phone, {
-          amount: newDebtBalance,
-          threshold: config.maxDebtThreshold,
-        });
-      }
-    }
-  }
-
   return { debtCreated: finance.debt };
 }
 

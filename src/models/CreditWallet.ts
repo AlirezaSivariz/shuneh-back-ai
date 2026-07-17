@@ -14,7 +14,7 @@ export interface ICreditWallet extends Document {
 const creditWalletSchema = new Schema<ICreditWallet>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-    balance: { type: Number, required: true, default: 0, min: 0 },
+    balance: { type: Number, required: true, default: 0 },
     totalEarned: { type: Number, required: true, default: 0, min: 0 },
     totalSpent: { type: Number, required: true, default: 0, min: 0 },
     version: { type: Number, default: 0 },
