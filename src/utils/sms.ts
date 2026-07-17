@@ -126,7 +126,7 @@ export class LimoSmsProvider implements SmsProvider {
     body: Record<string, unknown>,
   ): Promise<{ status: number; raw: string; parsed: LimoResponse }> {
     const lastErr: Error[] = [];
-    for (let attempt = 1; attempt <= 6; attempt++) {
+    for (let attempt = 1; attempt <= 12; attempt++) {
       try {
         const res = await fetch(`${this.base}${path}`, {
           method: 'POST',
@@ -146,7 +146,7 @@ export class LimoSmsProvider implements SmsProvider {
         return { status: res.status, raw, parsed: { success, message, messageId } };
       } catch (err) {
         lastErr.push(err as Error);
-        if (attempt < 6) await new Promise((r) => setTimeout(r, attempt * 500));
+        if (attempt < 12) await new Promise((r) => setTimeout(r, attempt * 500));
       }
     }
     throw lastErr[lastErr.length - 1];
