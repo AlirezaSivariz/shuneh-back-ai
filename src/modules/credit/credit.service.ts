@@ -1,4 +1,4 @@
-import mongoose, { Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { CreditWallet } from '../../models/CreditWallet';
 import { CreditTransaction, CreditTxReason } from '../../models/CreditTransaction';
 import { CreditSetting } from '../../models/CreditSetting';
@@ -132,65 +132,48 @@ export async function applyCreditChange(
   }
 
   const oid = new Types.ObjectId(userId);
-  const session = await mongoose.startSession();
 
-  try {
-    let result: { balance: number; totalEarned: number; totalSpent: number } | null = null;
-
-    await session.withTransaction(async () => {
-      if (amount > 0) {
-        const wallet = await CreditWallet.findOneAndUpdate(
-          { userId: oid },
-          { $inc: { balance: amount, totalEarned: amount, version: 1 } },
-          { upsert: true, new: true, setDefaultsOnInsert: true, session },
-        );
-        await CreditTransaction.create(
-          [{
-            userId: oid,
-            amount,
-            balanceAfter: wallet!.balance,
-            reason: input.reason,
-            referenceType: (input.referenceType ?? 'none') as any,
-            referenceId: input.referenceId ? new Types.ObjectId(input.referenceId) : null,
-            description: input.description,
-            metadata: input.metadata ?? null,
-          }],
-          { session },
-        );
-        result = { balance: wallet!.balance, totalEarned: wallet!.totalEarned, totalSpent: wallet!.totalSpent };
-      } else {
-        const debitAmount = Math.abs(amount);
-        const wallet = await CreditWallet.findOneAndUpdate(
-          { userId: oid, balance: { $gte: debitAmount } },
-          { $inc: { balance: -debitAmount, totalSpent: debitAmount, version: 1 } },
-          { new: true, session },
-        );
-        if (!wallet) {
-          const existing = await CreditWallet.findOne({ userId: oid }).session(session);
-          if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
-          throw AppError.badRequest('موجودی اعتبار کافی نیست', 'INSUFFICIENT_CREDIT');
-        }
-        await CreditTransaction.create(
-          [{
-            userId: oid,
-            amount,
-            balanceAfter: wallet.balance,
-            reason: input.reason,
-            referenceType: (input.referenceType ?? 'none') as any,
-            referenceId: input.referenceId ? new Types.ObjectId(input.referenceId) : null,
-            description: input.description,
-            metadata: input.metadata ?? null,
-          }],
-          { session },
-        );
-        result = { balance: wallet.balance, totalEarned: wallet.totalEarned, totalSpent: wallet.totalSpent };
-      }
+  if (amount > 0) {
+    const wallet = await CreditWallet.findOneAndUpdate(
+      { userId: oid },
+      { $inc: { balance: amount, totalEarned: amount, version: 1 } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    await CreditTransaction.create({
+      userId: oid,
+      amount,
+      balanceAfter: wallet.balance,
+      reason: input.reason,
+      referenceType: (input.referenceType ?? 'none') as any,
+      referenceId: input.referenceId ? new Types.ObjectId(input.referenceId) : null,
+      description: input.description,
+      metadata: input.metadata ?? null,
     });
-
-    return result!;
-  } finally {
-    await session.endSession();
+    return { balance: wallet.balance, totalEarned: wallet.totalEarned, totalSpent: wallet.totalSpent };
   }
+
+  const debitAmount = Math.abs(amount);
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId: oid, balance: { $gte: debitAmount } },
+    { $inc: { balance: -debitAmount, totalSpent: debitAmount, version: 1 } },
+    { new: true },
+  );
+  if (!wallet) {
+    const existing = await CreditWallet.findOne({ userId: oid });
+    if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
+    throw AppError.badRequest('موجودی اعتبار کافی نیست', 'INSUFFICIENT_CREDIT');
+  }
+  await CreditTransaction.create({
+    userId: oid,
+    amount,
+    balanceAfter: wallet.balance,
+    reason: input.reason,
+    referenceType: (input.referenceType ?? 'none') as any,
+    referenceId: input.referenceId ? new Types.ObjectId(input.referenceId) : null,
+    description: input.description,
+    metadata: input.metadata ?? null,
+  });
+  return { balance: wallet.balance, totalEarned: wallet.totalEarned, totalSpent: wallet.totalSpent };
 }
 
 export async function purchasePlanByCredit(userId: string, tier: 'silver' | 'gold') {
@@ -201,54 +184,40 @@ export async function purchasePlanByCredit(userId: string, tier: 'silver' | 'gol
   const creditPrice = tier === 'silver' ? settings.silverCreditPrice : settings.goldCreditPrice;
 
   const oid = new Types.ObjectId(userId);
-  const session = await mongoose.startSession();
 
-  try {
-    let result: { balance: number } | null = null;
-
-    await session.withTransaction(async () => {
-      const wallet = await CreditWallet.findOneAndUpdate(
-        { userId: oid, balance: { $gte: creditPrice } },
-        { $inc: { balance: -creditPrice, totalSpent: creditPrice, version: 1 } },
-        { new: true, session },
-      );
-      if (!wallet) {
-        const existing = await CreditWallet.findOne({ userId: oid }).session(session);
-        if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
-        throw AppError.badRequest(
-          `اعتبار کافی نیست. نیاز: ${creditPrice} اعتبار`,
-          'INSUFFICIENT_CREDIT',
-        );
-      }
-
-      const { StylistProfile } = await import('../../models/StylistProfile');
-      await StylistProfile.updateOne(
-        { userId: oid },
-        { $set: { planTier: tier } },
-      ).session(session);
-
-      const tierLabel = tier === 'silver' ? 'نقره‌ای' : 'طلایی';
-      await CreditTransaction.create(
-        [{
-          userId: oid,
-          amount: -creditPrice,
-          balanceAfter: wallet.balance,
-          reason: 'plan_purchase' as CreditTxReason,
-          referenceType: 'plan',
-          referenceId: null,
-          description: `خرید پلن ${tierLabel}`,
-          metadata: { tier, creditPrice },
-        }],
-        { session },
-      );
-
-      result = { balance: wallet.balance };
-    });
-
-    return result!;
-  } finally {
-    await session.endSession();
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId: oid, balance: { $gte: creditPrice } },
+    { $inc: { balance: -creditPrice, totalSpent: creditPrice, version: 1 } },
+    { new: true },
+  );
+  if (!wallet) {
+    const existing = await CreditWallet.findOne({ userId: oid });
+    if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
+    throw AppError.badRequest(
+      `اعتبار کافی نیست. نیاز: ${creditPrice} اعتبار`,
+      'INSUFFICIENT_CREDIT',
+    );
   }
+
+  const { StylistProfile } = await import('../../models/StylistProfile');
+  await StylistProfile.updateOne(
+    { userId: oid },
+    { $set: { planTier: tier } },
+  );
+
+  const tierLabel = tier === 'silver' ? 'نقره‌ای' : 'طلایی';
+  await CreditTransaction.create({
+    userId: oid,
+    amount: -creditPrice,
+    balanceAfter: wallet.balance,
+    reason: 'plan_purchase' as CreditTxReason,
+    referenceType: 'plan',
+    referenceId: null,
+    description: `خرید پلن ${tierLabel}`,
+    metadata: { tier, creditPrice },
+  });
+
+  return { balance: wallet.balance };
 }
 
 export async function awardCompletedReservation(stylistId: string, reservationId: string) {
