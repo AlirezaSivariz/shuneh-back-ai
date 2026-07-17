@@ -11,7 +11,7 @@ import { AppError } from '../../utils/AppError';
 import { storageProvider } from '../../utils/storage';
 import { sanitizeRichHtml, deriveExcerpt } from '../../utils/sanitizeHtml';
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 100;
 
 /** URL-friendly slug; keeps Persian + latin letters and digits, spaces → «-». */
 export function slugify(input: string): string {
