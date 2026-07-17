@@ -125,23 +125,31 @@ export class LimoSmsProvider implements SmsProvider {
     path: string,
     body: Record<string, unknown>,
   ): Promise<{ status: number; raw: string; parsed: LimoResponse }> {
-    const res = await fetch(`${this.base}${path}`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
-    const raw = await res.text().catch(() => '');
-    let json: Record<string, unknown> = {};
-    try {
-      json = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    } catch {
-      /* non-JSON body — keep raw for the log */
+    const lastErr: Error[] = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(`${this.base}${path}`, {
+          method: 'POST',
+          headers: this.headers(),
+          body: JSON.stringify(body),
+        });
+        const raw = await res.text().catch(() => '');
+        let json: Record<string, unknown> = {};
+        try {
+          json = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        } catch {
+          /* non-JSON body — keep raw for the log */
+        }
+        const success = (json.Success ?? json.success ?? json.IsSuccess) as boolean | undefined;
+        const message = (json.Message ?? json.message ?? json.Error) as string | undefined;
+        const messageId = json.MessageId ?? json.messageId ?? json.MessageID;
+        return { status: res.status, raw, parsed: { success, message, messageId } };
+      } catch (err) {
+        lastErr.push(err as Error);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 500));
+      }
     }
-    // LimoSMS documents PascalCase {Success, Message, MessageId}; accept other casings.
-    const success = (json.Success ?? json.success ?? json.IsSuccess) as boolean | undefined;
-    const message = (json.Message ?? json.message ?? json.Error) as string | undefined;
-    const messageId = json.MessageId ?? json.messageId ?? json.MessageID;
-    return { status: res.status, raw, parsed: { success, message, messageId } };
+    throw lastErr[lastErr.length - 1];
   }
 
   async sendOtp(phone: string): Promise<{ devCode?: string }> {
