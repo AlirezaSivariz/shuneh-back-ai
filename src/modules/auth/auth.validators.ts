@@ -30,5 +30,38 @@ export const logoutSchema = {
   }),
 };
 
+export const passwordLoginSchema = {
+  body: z.object({
+    phone: phoneSchema,
+    password: z.string().min(1, 'رمز عبور را وارد کنید'),
+  }),
+};
+
+export const setPasswordSchema = {
+  body: z
+    .object({
+      password: z.string().min(8, 'رمز عبور باید حداقل ۸ کاراکتر باشد'),
+      confirmPassword: z.string(),
+    })
+    .refine((d) => d.password === d.confirmPassword, {
+      message: 'رمز عبور و تکرار آن مطابقت ندارند',
+      path: ['confirmPassword'],
+    }),
+};
+
+export const resetPasswordSchema = {
+  body: z
+    .object({
+      phone: phoneSchema,
+      code: z.string().trim().regex(/^\d{4,6}$/, 'OTP code must be 4-6 digits'),
+      password: z.string().min(8, 'رمز عبور باید حداقل ۸ کاراکتر باشد'),
+      confirmPassword: z.string(),
+    })
+    .refine((d) => d.password === d.confirmPassword, {
+      message: 'رمز عبور و تکرار آن مطابقت ندارند',
+      path: ['confirmPassword'],
+    }),
+};
+
 export type RequestOtpInput = z.infer<typeof requestOtpSchema.body>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema.body>;

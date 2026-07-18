@@ -26,7 +26,12 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
 export async function verifyOtp(req: Request, res: Response): Promise<void> {
   const { phone, code } = req.body;
   const { user, tokens, isNewUser } = await authService.verifyOtp(phone, code);
-  sendSuccess(res, { user: publicUser(user), tokens, isNewUser });
+  sendSuccess(res, {
+    user: publicUser(user),
+    tokens,
+    isNewUser,
+    needsPassword: !user.password,
+  });
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {
@@ -37,4 +42,23 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 export async function logout(req: Request, res: Response): Promise<void> {
   await authService.logout(req.body.refreshToken);
   sendSuccess(res, { message: 'Logged out' });
+}
+
+// ──────────────── Password-based auth ────────────────
+
+export async function loginWithPassword(req: Request, res: Response): Promise<void> {
+  const { phone, password } = req.body;
+  const { user, tokens } = await authService.loginWithPassword(phone, password);
+  sendSuccess(res, { user: publicUser(user), tokens });
+}
+
+export async function setPassword(req: Request, res: Response): Promise<void> {
+  await authService.setPassword(req.user!.id, req.body.password);
+  sendSuccess(res, { message: 'رمز عبور با موفقیت تنظیم شد' });
+}
+
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  const { phone, code, password } = req.body;
+  await authService.resetPassword(phone, code, password);
+  sendSuccess(res, { message: 'رمز عبور با موفقیت تغییر کرد' });
 }

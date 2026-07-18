@@ -86,6 +86,8 @@ export interface IUser extends Document {
   cardNumber?: string | null;
   /** Bank SHEBA/IBAN number (IR + ۲۴ digits). Stored by the user in their bank-info panel. */
   shebaNumber?: string | null;
+  /** bcrypt-hashed password. Null for OTP-only users who haven't set one yet. */
+  password?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -129,6 +131,8 @@ const userSchema = new Schema<IUser>(
     // Bank info (user-managed, accessible by any role).
     cardNumber: { type: String, trim: true, default: null },
     shebaNumber: { type: String, trim: true, default: null },
+    // bcrypt-hashed password; null until the user sets one via set-password.
+    password: { type: String, default: null },
   },
   { timestamps: true },
 );

@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import bcryptjs from 'bcryptjs';
 import { User, IUser } from '../../models/User';
 import { RefreshToken } from '../../models/RefreshToken';
 import { smsProvider } from '../../utils/sms';
@@ -28,9 +29,6 @@ export async function requestOtp(phone: string): Promise<RequestOtpResult> {
   try {
     result = await smsProvider.sendOtp(phone);
   } catch (err) {
-    // Never crash the request — surface a clear, retryable error to the user, but
-    // always log the gateway's REAL reason, and (outside production) echo it back
-    // in `details` so it's visible without digging through logs.
     const reason = (err as Error).message;
     // eslint-disable-next-line no-console
     console.error('[otp] send failed:', reason);
@@ -40,7 +38,6 @@ export async function requestOtp(phone: string): Promise<RequestOtpResult> {
       config.isDev ? { reason } : undefined,
     );
   }
-  // Nominal expiry for the client countdown (the gateway enforces real expiry).
   return {
     phone,
     expiresAt: new Date(Date.now() + config.otpTtl * 1000),
@@ -50,7 +47,7 @@ export async function requestOtp(phone: string): Promise<RequestOtpResult> {
 
 /**
  * Verify a code via the gateway. On success, create the user if needed and issue
- * a fresh token pair. The gateway enforces expiry / attempts / single-use.
+ * a fresh token pair.
  */
 export async function verifyOtp(
   phone: string,
@@ -133,4 +130,76 @@ export async function logout(refreshToken: string): Promise<void> {
   } catch {
     // A malformed/expired token is already effectively logged out.
   }
+}
+
+// ──────────────── Password-based auth ────────────────
+
+/**
+ * Login with phone + password. Issues a token pair on success.
+ */
+export async function loginWithPassword(
+  phone: string,
+  password: string,
+): Promise<{ user: IUser; tokens: TokenPair }> {
+  const user = await User.findOne({ phone });
+  if (!user) {
+    throw AppError.badRequest('کاربری با این شماره یافت نشد', 'USER_NOT_FOUND');
+  }
+  if (!user.password) {
+    throw AppError.badRequest(
+      'این کاربر هنوز رمز عبور تنظیم نکرده است. لطفاً با کد تأیید وارد شوید.',
+      'NO_PASSWORD',
+    );
+  }
+
+  const valid = await bcryptjs.compare(password, user.password);
+  if (!valid) {
+    throw AppError.badRequest('رمز عبور واردشده نادرست است', 'INVALID_PASSWORD');
+  }
+
+  const tokens = await issueTokens(user);
+  return { user, tokens };
+}
+
+/**
+ * Set initial password for a user who has none yet (first-time setup).
+ * Requires authentication (the access token from OTP verify).
+ */
+export async function setPassword(userId: string, password: string): Promise<void> {
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  if (user.password) {
+    throw AppError.badRequest('شما قبلاً رمز عبور تنظیم کرده‌اید', 'PASSWORD_ALREADY_SET');
+  }
+
+  user.password = await bcryptjs.hash(password, 12);
+  await user.save();
+}
+
+/**
+ * Reset password via OTP verification (forgot-password flow).
+ * Verifies the OTP, then sets the new password hash.
+ */
+export async function resetPassword(
+  phone: string,
+  code: string,
+  password: string,
+): Promise<void> {
+  let valid: boolean;
+  try {
+    valid = await smsProvider.verifyOtp(phone, code);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[otp] verify failed:', (err as Error).message);
+    throw AppError.badRequest('بررسی کد ناموفق بود. لطفاً دوباره تلاش کن.', 'OTP_VERIFY_FAILED');
+  }
+  if (!valid) {
+    throw AppError.badRequest('کد واردشده نادرست یا منقضی شده است.', 'OTP_INCORRECT');
+  }
+
+  const user = await User.findOne({ phone });
+  if (!user) throw AppError.notFound('کاربری با این شماره یافت نشد', 'USER_NOT_FOUND');
+
+  user.password = await bcryptjs.hash(password, 12);
+  await user.save();
 }
