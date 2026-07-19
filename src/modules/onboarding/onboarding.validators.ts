@@ -49,8 +49,8 @@ export const personalSchema = {
           });
         }
       } else {
-        // Iranian: nationalCode required + valid, foreignId must be absent.
-        if (!b.nationalCode || !isValidNationalCode(b.nationalCode)) {
+        // Iranian: nationalCode is optional. If provided, must be valid.
+        if (b.nationalCode && !isValidNationalCode(b.nationalCode)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ['nationalCode'],

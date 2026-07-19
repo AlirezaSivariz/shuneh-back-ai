@@ -163,7 +163,7 @@ export async function getUserState(userId: string) {
   const user = await User.findById(userId);
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
-  const hasPersonalInfo = !!user.firstName && (!!user.nationalCode || !!user.foreignId);
+  const hasPersonalInfo = !!user.firstName;
   const isStylist = user.roles.includes('stylist');
   const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
     isStylist
@@ -286,18 +286,28 @@ export async function updatePersonal(
       user.foreignRejectionReason = null;
     }
   } else {
-    const nationalCode = (data.nationalCode ?? '').trim();
-    const dup = await User.findOne({ nationalCode, _id: { $ne: user._id } })
-      .select('_id')
-      .lean();
-    if (dup) {
-      throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
-    }
     user.isForeignNational = false;
-    user.nationalCode = nationalCode;
     user.foreignId = null;
     user.foreignApprovalStatus = 'not_required';
     user.foreignRejectionReason = null;
+
+    // nationalCode is optional — only process if explicitly provided
+    if (data.nationalCode !== undefined) {
+      const code = data.nationalCode.trim();
+      if (code) {
+        const dup = await User.findOne({ nationalCode: code, _id: { $ne: user._id } })
+          .select('_id')
+          .lean();
+        if (dup) {
+          throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+        }
+        user.nationalCode = code;
+      } else {
+        // Empty string explicitly clears the national code
+        user.nationalCode = undefined;
+      }
+    }
+    // If nationalCode was not sent, keep the existing value on the user
   }
 
   try {
