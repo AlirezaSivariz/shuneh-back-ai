@@ -35,11 +35,12 @@ router.get(
   asyncHandler(controller.byOwnerPhone),
 );
 
-// Stylist creates a salon they own.
+// Creates a salon. Stylists create one they own during stylist onboarding; owners
+// create their first salon during owner onboarding (they may not have 'stylist').
 router.post(
   '/',
   authenticate,
-  authorize('stylist'),
+  authorize('stylist', 'owner'),
   validate(createSalonSchema),
   asyncHandler(controller.createSalon),
 );
