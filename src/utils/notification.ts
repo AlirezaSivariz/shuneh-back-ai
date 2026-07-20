@@ -94,7 +94,8 @@ class SmsNotificationService implements NotificationService {
   async serviceCompleted(phone: string, info: { link: string }) {
     await safeSend(
       phone,
-      `خدمت شما انجام شد 🌟 برای ثبت نظر و انعام وارد شوید: ${info.link}`,
+      // `خدمت شما انجام شد 🌟 برای ثبت نظر و انعام وارد شوید: ${info.link}`,
+      `خدمت شما انجام شد , شونه`,
       'service_completed',
     );
   }
