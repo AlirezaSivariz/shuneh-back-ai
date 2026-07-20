@@ -19,3 +19,9 @@ export async function customerReport(req: Request, res: Response): Promise<void>
   const report = await service.getCustomerReport(req.user!.id, from, to);
   sendSuccess(res, report);
 }
+
+export async function ownerReport(req: Request, res: Response): Promise<void> {
+  const { from, to } = req.query as unknown as { from: string; to: string };
+  const report = await service.getOwnerReport(req.user!.id, from, to);
+  sendSuccess(res, report);
+}

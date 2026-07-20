@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as controller from './salon.controller';
+import * as reportsController from '../reports/reports.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { requireSalonOwner } from '../../middlewares/salonOwner';
@@ -11,6 +12,7 @@ import {
   inviteStylistSchema,
   ownerStylistSearchSchema,
 } from './salon.validators';
+import { reportRangeSchema } from '../reports/reports.validators';
 
 // Routes under /owner — salon management from the owner's perspective.
 // Every route requires the 'owner' role; salon-scoped routes additionally
@@ -65,4 +67,12 @@ ownerRouter.post(
   validate(stylistApprovalParamsSchema),
   requireSalonOwner,
   asyncHandler(controller.rejectStylist),
+);
+
+// Owner earnings report — aggregates revenue from all stylists across the
+// owner's salons within the given date range.
+ownerRouter.get(
+  '/reports',
+  validate(reportRangeSchema),
+  asyncHandler(reportsController.ownerReport),
 );

@@ -1,5 +1,5 @@
 /**
- * Reporting for stylists and customers.
+ * Reporting for stylists, customers, and owners.
  *
  * All figures come from the reservation snapshots taken at booking time:
  *   - `price`  → total snapshot price of a reservation
@@ -14,6 +14,8 @@ import { Types } from 'mongoose';
 import { Reservation, RESERVATION_STATUSES, ReservationStatus } from '../../models/Reservation';
 import { Service } from '../../models/Service';
 import { Salon } from '../../models/Salon';
+import { StylistSalon } from '../../models/StylistSalon';
+import { User } from '../../models/User';
 
 function dayRange(from: string, to: string) {
   return {
@@ -270,5 +272,127 @@ export async function getCustomerReport(customerId: string, from: string, to: st
     },
     byStatus,
     byService,
+  };
+}
+
+// ───────────────────────────── Owner report ─────────────────────────────
+
+export async function getOwnerReport(ownerId: string, from: string, to: string) {
+  // 1. Find all salons owned by this owner.
+  const ownedSalons = await Salon.find({ ownerId }).select('_id name').lean();
+  const salonIds = ownedSalons.map((s) => s._id);
+  const salonNameById = new Map(ownedSalons.map((s) => [String(s._id), s.name]));
+
+  if (salonIds.length === 0) {
+    return {
+      range: { from, to },
+      totals: { reservations: 0, grossIncome: 0, completedCount: 0 },
+      bySalon: [],
+      byStylist: [],
+    };
+  }
+
+  // 2. Find active stylist members of those salons.
+  const memberships = await StylistSalon.find({
+    salonId: { $in: salonIds },
+    status: 'active',
+  })
+    .select('stylistId salonId')
+    .lean();
+
+  if (memberships.length === 0) {
+    return {
+      range: { from, to },
+      totals: { reservations: 0, grossIncome: 0, completedCount: 0 },
+      bySalon: [],
+      byStylist: [],
+    };
+  }
+
+  const stylistIds = [...new Set(memberships.map((m) => String(m.stylistId)))];
+  const stylistSalonMap = new Map<string, Set<string>>();
+  for (const m of memberships) {
+    const sid = String(m.stylistId);
+    if (!stylistSalonMap.has(sid)) stylistSalonMap.set(sid, new Set());
+    stylistSalonMap.get(sid)!.add(String(m.salonId));
+  }
+
+  // 3. Aggregate completed reservations for those stylists in the date range.
+  const [agg] = await Reservation.aggregate([
+    {
+      $match: {
+        stylistId: { $in: stylistIds.map((id) => new Types.ObjectId(id)) },
+        date: dayRange(from, to),
+      },
+    },
+    {
+      $facet: {
+        bySalon: [
+          { $match: { status: 'completed' } },
+          {
+            $group: {
+              _id: '$salonId',
+              count: { $sum: 1 },
+              revenue: { $sum: { $ifNull: ['$price', 0] } },
+            },
+          },
+        ],
+        byStylist: [
+          { $match: { status: 'completed' } },
+          {
+            $group: {
+              _id: '$stylistId',
+              count: { $sum: 1 },
+              revenue: { $sum: { $ifNull: ['$price', 0] } },
+            },
+          },
+        ],
+        totalCompleted: [{ $match: { status: 'completed' } }, { $count: 'n' }],
+        totalRevenue: [
+          { $match: { status: 'completed' } },
+          { $group: { _id: null, total: { $sum: { $ifNull: ['$price', 0] } } } },
+        ],
+      },
+    },
+  ]);
+
+  const totalCompleted = agg?.totalCompleted?.[0]?.n ?? 0;
+  const grossIncome = agg?.totalRevenue?.[0]?.total ?? 0;
+
+  // 4. Build per-salon breakdown.
+  const salonRows: { _id: Types.ObjectId | null; count: number; revenue: number }[] = agg?.bySalon ?? [];
+  const bySalon = salonRows.map((r) => ({
+    salonId: r._id ? String(r._id) : null,
+    name: r._id ? salonNameById.get(String(r._id)) ?? '—' : '—',
+    count: r.count,
+    revenue: r.revenue,
+  }));
+
+  // 5. Build per-stylist breakdown with names.
+  const stylistRows: { _id: Types.ObjectId; count: number; revenue: number }[] = agg?.byStylist ?? [];
+  const stylistNames =
+    stylistRows.length > 0
+      ? await User.find({ _id: { $in: stylistRows.map((r) => r._id) } })
+          .select('firstName lastName')
+          .lean()
+      : [];
+  const nameById = new Map(stylistNames.map((u) => [String(u._id), `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || '—']));
+
+  const byStylist = stylistRows.map((r) => ({
+    stylistId: String(r._id),
+    name: nameById.get(String(r._id)) ?? '—',
+    count: r.count,
+    revenue: r.revenue,
+  }));
+
+  return {
+    range: { from, to },
+    totals: {
+      reservations: totalCompleted,
+      grossIncome,
+      completedCount: totalCompleted,
+    },
+    bySalon,
+    byStylist,
   };
 }
