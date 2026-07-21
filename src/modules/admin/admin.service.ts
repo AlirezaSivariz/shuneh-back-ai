@@ -44,6 +44,7 @@ import { Review } from '../../models/Review';
 import { recomputeStylistRating, VISIBLE_REVIEW_FILTER } from '../review/review.service';
 import { createMessage } from '../message/message.service';
 import { AppError } from '../../utils/AppError';
+import { toGeoPoint } from '../../utils/geo';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
 import { accountStatus } from '../../utils/foreignApproval';
@@ -259,6 +260,13 @@ export async function getUser(id: string) {
           promotions,
           cancellationPolicy: profile.cancellationPolicy ?? null,
           servicePolicyCount: profile.servicePolicies?.length ?? 0,
+          workplaceType: profile.workplaceType ?? null,
+          freelance: profile.freelance
+            ? {
+                address: profile.freelance.address ?? null,
+                location: profile.freelance.location ?? null,
+              }
+            : null,
           // Sensitive payout: present-flags + masked tails only (admin view).
           payout: {
             hasSheba: !!profile.payout?.shebaNumber,
@@ -2178,6 +2186,41 @@ export async function setStylistPlan(adminId: string, stylistId: string, tier: P
   await profile.save();
   await audit(adminId, 'stylist.setPlan', 'stylist', stylistId, { tier });
   return { stylistId, planTier: tier, smsCampaignEnabled: profile.smsCampaignEnabled };
+}
+
+/**
+ * Admin updates a freelancer stylist's location (address + map marker).
+ * Only works for stylists with workplaceType === 'freelance'.
+ */
+export async function setStylistFreelanceLocation(
+  adminId: string,
+  stylistId: string,
+  data: { address: string; lng: number; lat: number },
+) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  if (profile.workplaceType !== 'freelance') {
+    throw AppError.badRequest('این متخصص مستقل نیست', 'NOT_FREELANCE');
+  }
+
+  profile.freelance = {
+    address: data.address,
+    location: toGeoPoint(data.lng, data.lat),
+  };
+  await profile.save();
+  await audit(adminId, 'stylist.setFreelanceLocation', 'stylist', stylistId, {
+    address: data.address,
+    coordinates: [data.lng, data.lat],
+  });
+
+  return {
+    stylistId,
+    freelance: {
+      address: profile.freelance.address,
+      location: profile.freelance.location,
+    },
+  };
 }
 
 // ─────────────────── Stylist service management (admin) ──────────────────

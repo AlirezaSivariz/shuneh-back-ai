@@ -375,6 +375,17 @@ export const setStylistCancellationPolicySchema = {
   body: z.object({ policy: adminCancellationPolicy.nullable() }),
 };
 
+export const setStylistFreelanceLocationSchema = {
+  params: z.object({ id: objectId }),
+  body: z
+    .object({
+      address: z.string().trim().min(1, 'آدرس الزامی است'),
+      lng: z.number().min(-180).max(180),
+      lat: z.number().min(-90).max(90),
+    })
+    .refine((b) => Object.keys(b).length > 0, 'حداقل یک فیلد برای ویرایش انتخاب کنید'),
+};
+
 // ── Wallet manual adjust (signed Toman: + credit / − debit) ──
 export const adminWalletAdjustSchema = {
   params: z.object({ id: objectId }),

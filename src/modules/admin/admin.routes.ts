@@ -49,6 +49,7 @@ import {
   setStylistSmsCampaignSchema,
   setStylistPlanSchema,
   setStylistCancellationPolicySchema,
+  setStylistFreelanceLocationSchema,
   addPromotionSchema,
   removePromotionSchema,
   reservationAnalyticsSchema,
@@ -169,6 +170,12 @@ adminRouter.put(
   '/stylists/:id/cancellation-policy',
   validate(setStylistCancellationPolicySchema),
   asyncHandler(controller.setStylistCancellationPolicy),
+);
+// Update a freelancer stylist's map marker location (audited).
+adminRouter.put(
+  '/stylists/:id/location',
+  validate(setStylistFreelanceLocationSchema),
+  asyncHandler(controller.setStylistFreelanceLocation),
 );
 
 // ── Blog management (audited) ──

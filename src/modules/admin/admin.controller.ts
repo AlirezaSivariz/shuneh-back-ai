@@ -353,6 +353,10 @@ export async function setStylistCancellationPolicy(req: Request, res: Response):
   sendSuccess(res, result);
 }
 
+export async function setStylistFreelanceLocation(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.setStylistFreelanceLocation(req.user!.id, req.params.id, req.body));
+}
+
 // ── Promotions (general + category-targeted) ──
 export async function listPromotions(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, { promotions: await service.listActivePromotions() });
