@@ -12,6 +12,7 @@ import { Salon } from '../../models/Salon';
 import { ProfileEditRequest } from '../../models/ProfileEditRequest';
 import { containsBannedWord } from '../../config/bannedWords';
 import { AppError } from '../../utils/AppError';
+import { generateUsername } from '../../utils/username';
 import { hasPendingInvitesForPhone } from '../invite/invite.service';
 import { getBookability } from '../stylist/bookability';
 import { accountStatus } from '../../utils/foreignApproval';
@@ -27,6 +28,11 @@ export async function ensureStylistProfile(userId: string): Promise<IStylistProf
   let profile = await StylistProfile.findOne({ userId });
   if (!profile) {
     profile = await StylistProfile.create({ userId, onboardingStep: 'role', status: 'draft' });
+  }
+  if (!profile.username) {
+    const user = await User.findById(userId).select('firstName lastName').lean();
+    profile.username = generateUsername(user?.firstName, user?.lastName, userId);
+    await profile.save();
   }
   return profile;
 }
@@ -121,6 +127,7 @@ export async function getOnboardingState(userId: string) {
     },
     onboardingStep: profile?.onboardingStep ?? 'role',
     status: profile?.status ?? 'draft',
+    username: profile?.username ?? null,
     isAcceptingReservations: profile?.isAcceptingReservations ?? true,
     // Subscription plan tier (for the panel's plan badge + feature gating).
     planTier: profile?.planTier ?? 'free',
@@ -326,6 +333,11 @@ export async function updatePersonal(
 
   if (user.roles.includes('stylist')) {
     const profile = await ensureStylistProfile(userId);
+    const newUsername = generateUsername(data.firstName, data.lastName, userId);
+    if (profile.username !== newUsername) {
+      profile.username = newUsername;
+      await profile.save();
+    }
     await advanceStep(profile, 'personal');
   }
 }

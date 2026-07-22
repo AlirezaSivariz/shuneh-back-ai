@@ -5,7 +5,9 @@ import { StylistProfile } from '../models/StylistProfile';
 import { BlogPost } from '../models/BlogPost';
 import { Promotion } from '../models/Promotion';
 import { Post } from '../models/Post';
+import { User } from '../models/User';
 import { seedCategories } from './data';
+import { generateUsername } from '../utils/username';
 
 /**
  * Idempotent upsert of the default service catalogue.
@@ -169,4 +171,50 @@ export async function migrateSocialPostType(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[migrate] renamed ${n} social post(s) type photo→normal`);
   }
+}
+
+/**
+ * Backfill `username` on StylistProfile documents that don't have one yet.
+ * Each username is generated from the user's firstName/lastName + last 4 hex of
+ * userId. On collision, the suffix is incremented until an available name is found.
+ * Idempotent — only touches profiles where `username` is missing.
+ */
+export async function autoMigrateUsernames(): Promise<void> {
+  const profiles = await StylistProfile.find({ username: { $exists: false } })
+    .select('userId')
+    .lean();
+
+  if (profiles.length === 0) return;
+
+  // Batch-fetch all relevant users in one query.
+  const userIds = profiles.map((p) => p.userId);
+  const users = await User.find({ _id: { $in: userIds } })
+    .select('_id firstName lastName')
+    .lean();
+  const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+  let updated = 0;
+  for (const profile of profiles) {
+    const user = userMap.get(String(profile.userId));
+    if (!user) continue;
+
+    const base = generateUsername(user.firstName ?? null, user.lastName ?? null, String(profile.userId));
+    let candidate = base;
+    let suffix = 0;
+
+    // Resolve collision: append -2, -3, … until unique.
+    while (await StylistProfile.exists({ username: candidate, userId: { $ne: profile.userId } })) {
+      suffix += 1;
+      candidate = `${base}-${suffix + 1}`;
+    }
+
+    await StylistProfile.updateOne(
+      { _id: profile._id },
+      { $set: { username: candidate } },
+    );
+    updated += 1;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`[migrate] backfilled username on ${updated} stylist profile(s)`);
 }

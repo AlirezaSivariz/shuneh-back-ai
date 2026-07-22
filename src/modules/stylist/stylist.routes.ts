@@ -43,12 +43,16 @@ import {
   servicePolicySchema,
   servicePolicyIdParamsSchema,
   payoutSchema,
+  usernameSchema,
 } from './stylist.validators';
 
 const router = Router();
 
 // Every stylist onboarding route requires an authenticated stylist.
 router.use(authenticate, authorize('stylist'));
+
+// Username — the stylist may set/change it freely (unique).
+router.put('/username', validate(usernameSchema), asyncHandler(controller.setUsername));
 
 // Step 2 — services (onboarding: full set, advances onboarding step).
 router.post('/services', validate(setServicesSchema), asyncHandler(controller.setServices));

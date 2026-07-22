@@ -46,6 +46,7 @@ import {
   adminWalletAdjustSchema,
   setStylistAcceptingSchema,
   setStylistStatusSchema,
+  setStylistUsernameSchema,
   setStylistSmsCampaignSchema,
   setStylistPlanSchema,
   setStylistCancellationPolicySchema,
@@ -161,6 +162,8 @@ adminRouter.post('/users/:id/debt/clear', validate(clearDebtSchema), asyncHandle
 adminRouter.patch('/stylists/:id/accepting', validate(setStylistAcceptingSchema), asyncHandler(controller.setStylistAccepting));
 // Set a stylist's status (draft / active) — for onboarding lifecycle (audited).
 adminRouter.patch('/stylists/:id/status', validate(setStylistStatusSchema), asyncHandler(controller.setStylistStatus));
+// Set/change a stylist's username (audited).
+adminRouter.patch('/stylists/:id/username', validate(setStylistUsernameSchema), asyncHandler(controller.setStylistUsername));
 // Enable/disable the paid SMS discount-campaign plan for a stylist (audited).
 adminRouter.post('/stylists/:id/sms-campaign', validate(setStylistSmsCampaignSchema), asyncHandler(controller.setStylistSmsCampaign));
 // Set a stylist's subscription plan tier (free/silver/gold); syncs SMS gate (audited).

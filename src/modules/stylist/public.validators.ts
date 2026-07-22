@@ -25,7 +25,7 @@ export const homeStylistsSchema = {
 };
 
 export const stylistIdParamsSchema = {
-  params: z.object({ id: objectId }),
+  params: z.object({ id: z.string().min(1) }),
 };
 
 // Booking-time cancellation policy: optional services (repeatable) + salon.
@@ -61,4 +61,8 @@ export const availableDaysSchema = {
     to: dateStr,
     serviceIds: serviceIdsCsv,
   }),
+};
+
+export const checkUsernameSchema = {
+  params: z.object({ username: z.string().trim().min(1) }),
 };

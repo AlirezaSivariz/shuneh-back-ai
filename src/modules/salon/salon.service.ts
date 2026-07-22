@@ -247,6 +247,7 @@ async function getSalonBookableStylists(salonId: string) {
 
     result.push({
       id: uid,
+      username: profile.username ?? null,
       fullName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "متخصص",
       profilePhoto: user.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
       rating: profile.ratingAverage ?? 0,

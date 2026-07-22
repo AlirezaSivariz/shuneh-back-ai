@@ -11,6 +11,7 @@ import {
   availabilitySchema,
   availableDaysSchema,
   cancellationPolicySchema,
+  checkUsernameSchema,
 } from './public.validators';
 import { stylistReviewsSchema } from '../review/review.validators';
 
@@ -23,6 +24,8 @@ router.get('/featured', asyncHandler(controller.featured));
 // Landing "متخصصین" section: promoted first, then a quality fallback so it's
 // never empty while any bookable stylist exists.
 router.get('/home', validate(homeStylistsSchema), asyncHandler(controller.home));
+// Username availability check (used during onboarding + edit).
+router.get('/check-username/:username', validate(checkUsernameSchema), asyncHandler(controller.checkUsername));
 router.get(
   '/:id/availability',
   validate(availabilitySchema),

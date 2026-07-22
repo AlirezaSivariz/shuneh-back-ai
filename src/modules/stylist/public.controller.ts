@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as service from './public.service';
 import { sendSuccess } from '../../utils/response';
+import { validateUsernameFormat } from '../../utils/username';
 
 export async function search(req: Request, res: Response): Promise<void> {
   const { serviceId, categoryId, name, province, city, lng, lat, radius, gender, date } =
@@ -77,4 +78,15 @@ export async function availableDays(req: Request, res: Response): Promise<void> 
   };
   const result = await service.getAvailableDays(req.params.id, from, to, serviceIds);
   sendSuccess(res, result);
+}
+
+export async function checkUsername(req: Request, res: Response): Promise<void> {
+  const raw = req.params.username.toLowerCase().trim();
+  const formatError = validateUsernameFormat(raw);
+  if (formatError) {
+    sendSuccess(res, { available: false, reason: formatError });
+    return;
+  }
+  const available = await service.isUsernameAvailable(raw);
+  sendSuccess(res, { available });
 }

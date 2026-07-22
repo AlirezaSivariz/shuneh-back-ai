@@ -48,6 +48,8 @@ import { toGeoPoint } from '../../utils/geo';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
 import { accountStatus } from '../../utils/foreignApproval';
+import { validateUsernameFormat } from '../../utils/username';
+import { isUsernameAvailable } from '../stylist/public.service';
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -248,6 +250,7 @@ export async function getUser(id: string) {
     reservations,
     stylistProfile: profile
       ? {
+          username: profile.username ?? null,
           status: profile.status,
           onboardingStep: profile.onboardingStep,
           isAcceptingReservations: profile.isAcceptingReservations !== false,
@@ -2134,6 +2137,21 @@ export async function adminSetStylistStatus(adminId: string, stylistId: string, 
   await profile.save();
   await audit(adminId, 'stylist.setStatus', 'stylist', stylistId, { status });
   return { stylistId, status };
+}
+
+/** Admin sets/changes a stylist's username. */
+export async function adminSetStylistUsername(adminId: string, stylistId: string, username: string) {
+  if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const profile = await StylistProfile.findOne({ userId: stylistId });
+  if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
+  const fmtErr = validateUsernameFormat(username);
+  if (fmtErr) throw AppError.badRequest(fmtErr, 'INVALID_USERNAME');
+  const available = await isUsernameAvailable(username, stylistId);
+  if (!available) throw AppError.conflict('این نام کاربری قبلاً انتخاب شده است', 'USERNAME_TAKEN');
+  profile.username = username;
+  await profile.save();
+  await audit(adminId, 'stylist.setUsername', 'stylist', stylistId, { username });
+  return { stylistId, username };
 }
 
 /**

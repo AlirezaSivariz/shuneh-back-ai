@@ -4,6 +4,9 @@ import * as inviteService from '../invite/invite.service';
 import * as salonService from '../salon/salon.service';
 import { sendSuccess } from '../../utils/response';
 import { StylistSalonStatus } from '../../models/StylistSalon';
+import { validateUsernameFormat } from '../../utils/username';
+import { AppError } from '../../utils/AppError';
+import { isUsernameAvailable } from './public.service';
 
 // ── Collaboration requests an owner sent to this stylist (requestedBy='owner') ──
 export async function listSalonRequests(req: Request, res: Response): Promise<void> {
@@ -41,6 +44,16 @@ export async function cancelInvite(req: Request, res: Response): Promise<void> {
 /** Finalize the workplace step (advances onboarding only once, on user request). */
 export async function completeWorkplace(req: Request, res: Response): Promise<void> {
   const result = await service.completeWorkplaceStep(req.user!.id);
+  sendSuccess(res, result);
+}
+
+export async function setUsername(req: Request, res: Response): Promise<void> {
+  const raw = (req.body.username ?? '').toLowerCase().trim();
+  const formatError = validateUsernameFormat(raw);
+  if (formatError) throw AppError.badRequest(formatError, 'INVALID_USERNAME');
+  const available = await isUsernameAvailable(raw, req.user!.id);
+  if (!available) throw AppError.conflict('این نام کاربری قبلاً انتخاب شده', 'USERNAME_TAKEN');
+  const result = await service.setUsername(req.user!.id, raw);
   sendSuccess(res, result);
 }
 

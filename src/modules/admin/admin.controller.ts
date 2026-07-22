@@ -331,6 +331,10 @@ export async function setStylistStatus(req: Request, res: Response): Promise<voi
   sendSuccess(res, await service.adminSetStylistStatus(req.user!.id, req.params.id, req.body.status));
 }
 
+export async function setStylistUsername(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.adminSetStylistUsername(req.user!.id, req.params.id, req.body.username));
+}
+
 export async function setStylistSmsCampaign(req: Request, res: Response): Promise<void> {
   sendSuccess(res, {
     stylist: await service.setStylistSmsCampaign(req.user!.id, req.params.id, req.body.enabled),

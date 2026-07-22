@@ -1034,7 +1034,7 @@ export async function getQuickRebookSuggestions(customerId: string) {
 
   // Only ACTIVE stylists; only services STILL offered by that stylist.
   const [profiles, users, services, links] = await Promise.all([
-    StylistProfile.find({ userId: { $in: stylistIds }, status: 'active' }).select('userId').lean(),
+    StylistProfile.find({ userId: { $in: stylistIds }, status: 'active' }).select('userId username').lean(),
     User.find({ _id: { $in: stylistIds } })
       .select('firstName lastName isForeignNational foreignApprovalStatus')
       .lean(),
@@ -1046,6 +1046,7 @@ export async function getQuickRebookSuggestions(customerId: string) {
   ]);
 
   const activeStylist = new Set(profiles.map((p) => String(p.userId)));
+  const usernameBy = new Map(profiles.filter((p) => p.username).map((p) => [String(p.userId), p.username!]));
   const userById = new Map(users.map((u) => [String(u._id), u]));
   const svcById = new Map(services.map((s) => [String(s._id), s as unknown as IService]));
   const linkByKey = new Map(
@@ -1066,6 +1067,7 @@ export async function getQuickRebookSuggestions(customerId: string) {
       const user = userById.get(stylistId);
       return {
         stylistId,
+        stylistUsername: usernameBy.get(stylistId) ?? null,
         stylistName:
           `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'متخصص',
         serviceId,

@@ -438,3 +438,10 @@ export const removeStylistServiceSchema = {
 export const stylistServicesParamsSchema = {
   params: z.object({ stylistId: objectId }),
 };
+
+export const setStylistUsernameSchema = {
+  params: z.object({ id: objectId }),
+  body: z.object({
+    username: z.string().trim().min(1, 'نام کاربری الزامی است').max(30),
+  }),
+};

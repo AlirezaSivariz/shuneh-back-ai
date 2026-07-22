@@ -8,6 +8,7 @@ import {
   migrateBlogCoverKeys,
   migratePromotions,
   migrateSocialPostType,
+  autoMigrateUsernames,
 } from './seed/seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 import { ensureStorageReady } from './utils/storage';
@@ -27,6 +28,8 @@ async function bootstrap() {
   await migratePromotions();
   // Social post type photo→normal (phase-2 rename).
   await migrateSocialPostType();
+  // Backfill stylist usernames for human-readable profile URLs.
+  await autoMigrateUsernames();
 
   // Pre-create object-storage buckets (S3/MinIO) so uploads don't 500 on a
   // fresh endpoint. Best-effort: the provider also self-heals lazily per upload.

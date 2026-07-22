@@ -31,6 +31,11 @@ export const servicePolicyIdParamsSchema = {
 };
 
 // ── Payout details (SHEBA + card) — both optional, validated in the service. ──
+export const usernameSchema = {
+  body: z.object({
+    username: z.string().trim().min(1, 'نام کاربری لازم است'),
+  }),
+};
 export const payoutSchema = {
   body: z
     .object({

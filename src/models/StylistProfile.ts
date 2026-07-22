@@ -73,6 +73,7 @@ export interface IPayoutInfo {
 
 export interface IStylistProfile extends Document {
   userId: Types.ObjectId;
+  username?: string;
   workplaceType?: WorkplaceType;
   freelance?: IFreelanceInfo;
   portfolio: string[]; // storage keys
@@ -155,6 +156,7 @@ const geoPointSchema = new Schema<GeoPoint>(
 const stylistProfileSchema = new Schema<IStylistProfile>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    username: { type: String, unique: true, sparse: true, trim: true },
     workplaceType: { type: String, enum: ['freelance', 'salon'] },
     freelance: {
       type: new Schema<IFreelanceInfo>(

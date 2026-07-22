@@ -90,6 +90,14 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
   return StylistService.find({ stylistId }).populate('serviceId');
 }
 
+/** Set or change the stylist's username (called by the stylist themselves). */
+export async function setUsername(stylistId: string, username: string) {
+  const profile = await ensureStylistProfile(stylistId);
+  profile.username = username;
+  await profile.save();
+  return { username: profile.username };
+}
+
 /** Step 3 — choose workplace type (freelance | salon). */
 export async function setWorkplaceType(stylistId: string, type: WorkplaceType) {
   const profile = await ensureStylistProfile(stylistId);

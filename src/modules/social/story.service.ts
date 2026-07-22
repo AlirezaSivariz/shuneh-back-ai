@@ -17,6 +17,7 @@ const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface AuthorView {
   id: string;
+  username?: string | null;
   fullName: string;
   profilePhoto: string | null;
   isVerified: boolean;
@@ -26,14 +27,16 @@ async function authorMap(authorIds: string[]): Promise<Map<string, AuthorView & 
   const ids = [...new Set(authorIds)];
   const [users, profiles] = await Promise.all([
     User.find({ _id: { $in: ids } }).select('firstName lastName profilePhoto phone').lean(),
-    StylistProfile.find({ userId: { $in: ids } }).select('userId isVerified').lean(),
+    StylistProfile.find({ userId: { $in: ids } }).select('userId isVerified username').lean(),
   ]);
   const verified = new Map(profiles.map((p) => [String(p.userId), p.isVerified === true]));
+  const usernameMap = new Map(profiles.filter((p) => p.username).map((p) => [String(p.userId), p.username!]));
   return new Map(
     users.map((u) => [
       String(u._id),
       {
         id: String(u._id),
+        username: usernameMap.get(String(u._id)) ?? null,
         fullName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || 'متخصص',
         profilePhoto: u.profilePhoto ? storageProvider.getUrl(u.profilePhoto) : null,
         isVerified: verified.get(String(u._id)) ?? false,

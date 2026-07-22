@@ -102,6 +102,29 @@ export async function getStylistBookingPolicyBreakdown(
   };
 }
 
+/**
+ * Resolve a username or legacy ObjectId to the stylist's userId.
+ * 1. Look up StylistProfile by `username` → return its `userId`.
+ * 2. Fallback: if valid ObjectId, treat as raw userId.
+ * 3. Otherwise throw.
+ */
+export async function resolveStylistId(raw: string): Promise<string> {
+  const byUsername = await StylistProfile.findOne({ username: raw }).select('userId').lean();
+  if (byUsername) return String(byUsername.userId);
+  if (!Types.ObjectId.isValid(raw)) {
+    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  }
+  return raw;
+}
+
+/** Check whether a username is available (not taken by another stylist). */
+export async function isUsernameAvailable(username: string, excludeUserId?: string): Promise<boolean> {
+  const q: Record<string, unknown> = { username };
+  if (excludeUserId) q.userId = { $ne: excludeUserId };
+  const exists = await StylistProfile.exists(q);
+  return !exists;
+}
+
 /** Distance in meters between two [lng, lat] points (haversine). */
 function distanceMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000;
@@ -347,6 +370,8 @@ export async function searchStylists(params: SearchParams) {
 
     results.push({
       id: uid,
+      username: profile.username ?? null,
+      slug: profile.username ?? null,
       firstName: user.firstName ?? null,
       lastName: user.lastName ?? null,
       fullName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'متخصص',
@@ -456,10 +481,8 @@ export async function getHomeStylists(limit?: number) {
   });
 }
 
-export async function getStylistProfile(stylistId: string, viewerId?: string) {
-  if (!Types.ObjectId.isValid(stylistId)) {
-    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
-  }
+export async function getStylistProfile(rawInput: string, viewerId?: string) {
+  const stylistId = await resolveStylistId(rawInput);
   const profile = await StylistProfile.findOne({ userId: stylistId }).lean();
   if (!profile || profile.status !== 'active') {
     throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
@@ -524,6 +547,8 @@ export async function getStylistProfile(stylistId: string, viewerId?: string) {
 
   return {
     id: stylistId,
+    username: profile.username ?? null,
+    slug: profile.username ?? null,
     isFollowing: !!viewerFollows,
     followersCount,
     firstName: user.firstName ?? null,
@@ -580,10 +605,8 @@ async function resolveTotalDuration(stylistId: string, serviceIds: string[]): Pr
   return totalDuration;
 }
 
-async function ensureActiveStylist(stylistId: string) {
-  if (!Types.ObjectId.isValid(stylistId)) {
-    throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
-  }
+async function ensureActiveStylist(rawInput: string) {
+  const stylistId = await resolveStylistId(rawInput);
   const profile = await StylistProfile.findOne({ userId: stylistId }).lean();
   if (!profile || profile.status !== 'active') {
     throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');

@@ -47,6 +47,7 @@ function imageUrls(keys: string[]): string[] {
 // ───────────────────────────── serialization ─────────────────────────────
 interface AuthorView {
   id: string;
+  username?: string | null;
   fullName: string;
   profilePhoto: string | null;
   isVerified: boolean;
@@ -55,9 +56,11 @@ interface AuthorView {
 function authorView(
   user: { _id: unknown; firstName?: string | null; lastName?: string | null; profilePhoto?: string | null } | null,
   verified: boolean,
+  username?: string | null,
 ): AuthorView {
   return {
     id: user ? String(user._id) : '',
+    username: username ?? null,
     fullName: user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'متخصص' : 'حذف‌شده',
     profilePhoto: user?.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
     isVerified: verified,
@@ -108,7 +111,7 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
   const [users, profiles, likes, saves, following, followerCounts] = await Promise.all([
     User.find({ _id: { $in: authorIds } }).select('firstName lastName profilePhoto').lean(),
     StylistProfile.find({ userId: { $in: authorIds } })
-      .select('userId isVerified workplaceType freelance isAcceptingReservations')
+      .select('userId isVerified workplaceType freelance isAcceptingReservations username')
       .lean(),
     viewerId
       ? PostLike.find({ postId: { $in: postIds }, userId: viewerId }).select('postId').lean()
@@ -127,6 +130,7 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
   ]);
   const userById = new Map(users.map((u) => [String(u._id), u]));
   const verifiedBy = new Map(profiles.map((pr) => [String(pr.userId), pr.isVerified === true]));
+  const usernameBy = new Map(profiles.filter((pr) => pr.username).map((pr) => [String(pr.userId), pr.username!]));
   const likedSet = new Set(likes.map((l) => String(l.postId)));
   const savedSet = new Set(saves.map((s) => String(s.postId)));
   const followingSet = new Set((following as { stylistId: unknown }[]).map((f) => String(f.stylistId)));
@@ -135,7 +139,7 @@ async function hydratePosts(posts: IPost[], viewerId?: string) {
   const bookMap = await getBookabilityMap(profiles as unknown as { userId: unknown }[]);
   return posts.map((p) => {
     const uid = String(p.authorId);
-    return postView(p, authorView(userById.get(uid) ?? null, verifiedBy.get(uid) ?? false), {
+    return postView(p, authorView(userById.get(uid) ?? null, verifiedBy.get(uid) ?? false, usernameBy.get(uid)), {
       likedByMe: likedSet.has(String(p._id)),
       savedByMe: savedSet.has(String(p._id)),
       bookable: bookMap.get(uid)?.bookable ?? false,
@@ -444,8 +448,8 @@ export async function addComment(postId: string, userId: string, text: string) {
   await post.save();
 
   const user = await User.findById(userId).select('firstName lastName profilePhoto').lean();
-  const profile = await StylistProfile.findOne({ userId }).select('isVerified').lean();
-  return serializeComment(comment, authorView(user, profile?.isVerified === true));
+  const profile = await StylistProfile.findOne({ userId }).select('isVerified username').lean();
+  return serializeComment(comment, authorView(user, profile?.isVerified === true, profile?.username));
 }
 
 function serializeComment(c: { _id: unknown; text: string; createdAt: Date; authorId: unknown }, author: AuthorView) {
@@ -470,14 +474,15 @@ export async function getComments(postId: string, page: number) {
   const authorIds = [...new Set(comments.map((c) => String(c.authorId)))];
   const [users, profiles] = await Promise.all([
     User.find({ _id: { $in: authorIds } }).select('firstName lastName profilePhoto').lean(),
-    StylistProfile.find({ userId: { $in: authorIds } }).select('userId isVerified').lean(),
+    StylistProfile.find({ userId: { $in: authorIds } }).select('userId isVerified username').lean(),
   ]);
   const userById = new Map(users.map((u) => [String(u._id), u]));
   const verifiedBy = new Map(profiles.map((pr) => [String(pr.userId), pr.isVerified === true]));
+  const usernameBy = new Map(profiles.filter((pr) => pr.username).map((pr) => [String(pr.userId), pr.username!]));
   return {
     items: comments.map((c) => {
       const uid = String(c.authorId);
-      return serializeComment(c, authorView(userById.get(uid) ?? null, verifiedBy.get(uid) ?? false));
+      return serializeComment(c, authorView(userById.get(uid) ?? null, verifiedBy.get(uid) ?? false, usernameBy.get(uid)));
     }),
     page: p,
     limit: PAGE_SIZE,
