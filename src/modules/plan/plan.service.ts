@@ -49,7 +49,7 @@ const PLANS: PlanDefinition[] = [
     price: 200_000,
     priceLabel: '۲۰۰,۰۰۰ تومان',
     durationLabel: 'ماهانه',
-    smsCount: getPlanSmsLimits('silver').dailyMax,
+    smsCount: getPlanSmsLimits('silver').periodMax,
     features: [
       { text: 'دریافت رزرو و مدیریت نوبت‌ها', icon: '📅', included: true },
       { text: 'تنظیم ساعات کاری و محل کار', icon: '⏰', included: true },
@@ -69,7 +69,7 @@ const PLANS: PlanDefinition[] = [
     price: 349_000,
     priceLabel: '۳۴۹,۰۰۰ تومان',
     durationLabel: 'ماهانه',
-    smsCount: getPlanSmsLimits('gold').dailyMax,
+    smsCount: getPlanSmsLimits('gold').periodMax,
     features: [
       { text: 'دریافت رزرو و مدیریت نوبت‌ها', icon: '📅', included: true },
       { text: 'تنظیم ساعات کاری و محل کار', icon: '⏰', included: true },

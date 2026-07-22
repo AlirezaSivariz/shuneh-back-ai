@@ -42,15 +42,15 @@ export function planAllowsSmsCampaign(tier: PlanTier): boolean {
   return tier === 'silver' || tier === 'gold';
 }
 
-/** Per-plan SMS campaign daily limits (per-send = daily for each paid tier). */
-export function getPlanSmsLimits(tier: PlanTier): { perSendMax: number; dailyMax: number } {
+/** Per-plan SMS campaign monthly limits. */
+export function getPlanSmsLimits(tier: PlanTier): { perSendMax: number; periodMax: number } {
   switch (tier) {
     case 'silver':
-      return { perSendMax: 49, dailyMax: 49 };
+      return { perSendMax: 49, periodMax: 49 };
     case 'gold':
-      return { perSendMax: 100, dailyMax: 100 };
+      return { perSendMax: 100, periodMax: 100 };
     default:
-      return { perSendMax: 0, dailyMax: 0 };
+      return { perSendMax: 0, periodMax: 0 };
   }
 }
 

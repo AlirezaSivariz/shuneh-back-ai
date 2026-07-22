@@ -22,6 +22,12 @@ const DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Single-part Persian (UCS-2) SMS budget — keep the campaign text within one part. */
 const SMS_SINGLE_PART = 70;
 
+/** Start of the current calendar month (Iran/UTC midnight of the 1st). */
+function monthStart(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+}
+
 const toFa = (n: number | string) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
 const faToman = (n: number) => toFa(Math.trunc(n).toLocaleString('en-US').replace(/,/g, '،'));
 
@@ -92,18 +98,18 @@ export async function getStatus(stylistId: string) {
   const profile = await StylistProfile.findOne({ userId: stylistId })
     .select('smsCampaignEnabled planTier')
     .lean();
-  const { dailyMax, perSendMax } = getPlanSmsLimits(profile?.planTier ?? 'free');
-  const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
-  const sentToday = await SmsCampaignLog.countDocuments({
+  const { periodMax, perSendMax } = getPlanSmsLimits(profile?.planTier ?? 'free');
+  const since = monthStart();
+  const sentPeriod = await SmsCampaignLog.countDocuments({
     stylistId,
     createdAt: { $gte: since },
   });
   return {
     enabled: profile?.smsCampaignEnabled ?? false,
     perSendMax,
-    dailyMax,
-    sentToday,
-    remainingToday: Math.max(0, dailyMax - sentToday),
+    periodMax,
+    sentPeriod,
+    remainingPeriod: Math.max(0, periodMax - sentPeriod),
   };
 }
 
@@ -203,7 +209,7 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
   if (!profile?.smsCampaignEnabled) {
     throw AppError.forbidden('این قابلیت برای حساب شما فعال نیست', 'SMS_CAMPAIGN_DISABLED');
   }
-  const { dailyMax, perSendMax } = getPlanSmsLimits(profile.planTier ?? 'free');
+  const { periodMax, perSendMax } = getPlanSmsLimits(profile.planTier ?? 'free');
 
   // 2) The code must belong to THIS stylist.
   if (!Types.ObjectId.isValid(input.discountCodeId)) {
@@ -263,13 +269,13 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
     );
   }
 
-  // 5) Per-day cap (rolling 24h).
-  const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
-  const sentRecent = await SmsCampaignLog.countDocuments({ stylistId: oid, createdAt: { $gte: since } });
-  if (sentRecent + normalized.length > dailyMax) {
+  // 5) Monthly cap (current calendar month).
+  const monthSince = monthStart();
+  const sentPeriod = await SmsCampaignLog.countDocuments({ stylistId: oid, createdAt: { $gte: monthSince } });
+  if (sentPeriod + normalized.length > periodMax) {
     throw AppError.badRequest(
-      `سقف ارسال روزانه (${dailyMax} پیامک) اجازه نمی‌دهد. امروز ${sentRecent} پیامک ارسال شده است.`,
-      'DAILY_LIMIT_REACHED',
+      `سقف ارسال ماهانه (${periodMax} پیامک) اجازه نمی‌دهد. این ماه ${sentPeriod} پیامک ارسال شده است.`,
+      'MONTHLY_LIMIT_REACHED',
     );
   }
 
@@ -296,6 +302,7 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
 
   let queued = 0;
   let skipped = 0;
+  const dedupeSince = new Date(Date.now() - DEDUPE_WINDOW_MS);
   const results: { phone: string; status: 'queued' | 'skipped_duplicate' }[] = [];
   for (const r of normalized) {
     const hash = phoneHashOf(r.phone);
@@ -304,7 +311,7 @@ export async function sendCampaign(stylistId: string, input: SendInput) {
       stylistId: oid,
       discountCodeId: code._id,
       phoneHash: hash,
-      createdAt: { $gte: since },
+      createdAt: { $gte: dedupeSince },
     });
     if (dup) {
       skipped += 1;
