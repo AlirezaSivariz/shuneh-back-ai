@@ -774,20 +774,23 @@ export async function rescheduleReservation(
   );
   if (clash) throw AppError.conflict('این زمان دیگر خالی نیست', 'SLOT_TAKEN');
 
-  // Check reschedule limit: free plan = max 2, silver/gold = configurable.
-  const currentReschedules = reservation.rescheduleCount ?? 0;
+  // Check reschedule limit: only customer-initiated reschedules count.
+  const customerRescheduleCount = (reservation.rescheduleHistory ?? []).filter(
+    (h) => h.by === 'customer',
+  ).length;
   const maxAllowed = reservation.maxReschedules ?? 2;
-  if (maxAllowed >= 0 && currentReschedules >= maxAllowed) {
+  if (maxAllowed >= 0 && customerRescheduleCount >= maxAllowed) {
     throw AppError.badRequest(
       `حداکثر ${maxAllowed} بار جابه‌جایی برای این رزرو مجاز است. برای تغییر زمان، ابتدا نوبت را لغو کنید.`,
       'RESCHEDULE_LIMIT_REACHED',
     );
   }
 
-  // Compute the reschedule penalty per the policy.
-  const usedReschedules = reservation.rescheduleHistory?.length ?? 0;
+  // Compute the reschedule penalty per the policy (customer-initiated only).
   const resolvedR = await resolvePolicyFor(reservation);
-  const rOut = computeRescheduleOutcome(resolvedR, usedReschedules, paidAmountOf(reservation));
+  const rOut = by === 'customer'
+    ? computeRescheduleOutcome(resolvedR, customerRescheduleCount, paidAmountOf(reservation))
+    : { free: true, freeRescheduleCount: resolvedR.policy.freeRescheduleCount, usedReschedules: customerRescheduleCount, remainingFree: Math.max(0, resolvedR.policy.freeRescheduleCount - customerRescheduleCount), penaltyPercent: 0, penaltyAmount: null, source: resolvedR.source } as ReturnType<typeof computeRescheduleOutcome>;
 
   // Create penalty adjustment if the reschedule is not free.
   if (!rOut.free && rOut.penaltyAmount !== null && rOut.penaltyAmount > 0) {
@@ -809,7 +812,7 @@ export async function rescheduleReservation(
   reservation.startTime = startTime;
   reservation.endTime = endTime;
   reservation.salonId = newSalonId ? new Types.ObjectId(newSalonId) : null;
-  reservation.rescheduleCount = currentReschedules + 1;
+  reservation.rescheduleCount = by === 'customer' ? customerRescheduleCount + 1 : (reservation.rescheduleCount ?? 0);
   reservation.rescheduleHistory = [
     ...(reservation.rescheduleHistory ?? []),
     {
@@ -860,7 +863,9 @@ export async function previewReservationPolicy(userId: string, reservationId: st
 
   const resolved = await resolvePolicyFor(reservation);
   const paid = paidAmountOf(reservation);
-  const usedReschedules = reservation.rescheduleHistory?.length ?? 0;
+  const usedReschedules = (reservation.rescheduleHistory ?? []).filter(
+    (h) => h.by === 'customer',
+  ).length;
 
   // Per-service breakdown (so the dialog can show differing policies clearly).
   const serviceIds = (reservation.serviceIds?.length ? reservation.serviceIds : [reservation.serviceId]).map(
