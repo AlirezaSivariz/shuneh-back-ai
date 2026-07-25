@@ -343,7 +343,10 @@ export async function setStylistSmsCampaign(req: Request, res: Response): Promis
 
 export async function setStylistPlan(req: Request, res: Response): Promise<void> {
   sendSuccess(res, {
-    stylist: await service.setStylistPlan(req.user!.id, req.params.id, req.body.tier),
+    stylist: await service.setStylistPlan(req.user!.id, req.params.id, req.body.tier, {
+      startsAt: req.body.startsAt,
+      expiresAt: req.body.expiresAt,
+    }),
   });
 }
 

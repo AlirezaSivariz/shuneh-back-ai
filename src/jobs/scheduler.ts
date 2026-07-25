@@ -2,6 +2,7 @@ import { config } from '../config/env';
 import { completeDueReservations } from '../modules/reservation/reservation.service';
 import { releaseExpiredHolds } from '../modules/reservation/reservation.customer.service';
 import { purgeExpiredStories } from '../modules/social/story.service';
+import { downgradeExpiredPlans, sendPlanExpiryReminders } from '../modules/plan/plan.expiry';
 
 /** How often expired 24h stories are purged (record + image). Read-time filtering
  * already hides them; this only reclaims storage. */
@@ -59,6 +60,24 @@ async function runStoryPurge(): Promise<void> {
   }
 }
 
+async function runPlanExpiry(): Promise<void> {
+  try {
+    const downgraded = await downgradeExpiredPlans();
+    if (downgraded > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[cron] downgraded ${downgraded} expired plan(s) to free`);
+    }
+    const reminded = await sendPlanExpiryReminders();
+    if (reminded > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[cron] sent ${reminded} plan expiry reminder(s)`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[cron] plan expiry job failed:', err);
+  }
+}
+
 export function startScheduledJobs(): void {
   if (config.disableCron) {
     // eslint-disable-next-line no-console
@@ -88,9 +107,16 @@ export function startScheduledJobs(): void {
   storyTimer.unref?.();
   timers.push(storyTimer);
 
+  // Plan expiry: downgrade expired + send 5-day reminders (once per hour).
+  const PLAN_EXPIRY_INTERVAL_MS = 60 * 60 * 1000;
+  void runPlanExpiry();
+  const planTimer = setInterval(runPlanExpiry, PLAN_EXPIRY_INTERVAL_MS);
+  planTimer.unref?.();
+  timers.push(planTimer);
+
   // eslint-disable-next-line no-console
   console.log(
-    `[cron] reservation auto-complete every ${config.autoCompleteIntervalMinutes}m; story purge every ${STORY_PURGE_INTERVAL_MIN}m`,
+    `[cron] reservation auto-complete every ${config.autoCompleteIntervalMinutes}m; story purge every ${STORY_PURGE_INTERVAL_MIN}m; plan expiry every 60m`,
   );
 }
 

@@ -50,6 +50,7 @@ import { storageProvider } from '../../utils/storage';
 import { accountStatus } from '../../utils/foreignApproval';
 import { validateUsernameFormat } from '../../utils/username';
 import { isUsernameAvailable } from '../stylist/public.service';
+import { planExpiryDate } from '../../models/StylistProfile';
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -260,6 +261,8 @@ export async function getUser(id: string) {
           promotedUntil: profile.promotedUntil,
           smsCampaignEnabled: profile.smsCampaignEnabled ?? false,
           planTier: profile.planTier ?? 'free',
+          planStartsAt: profile.planStartsAt ?? null,
+          planExpiresAt: profile.planExpiresAt ?? null,
           promotions,
           cancellationPolicy: profile.cancellationPolicy ?? null,
           servicePolicyCount: profile.servicePolicies?.length ?? 0,
@@ -2195,15 +2198,50 @@ export async function setStylistCancellationPolicy(
  * features). `smsCampaignEnabled` is kept in sync (silver+ → true) so every
  * existing gate keeps working. No billing exists, so this is admin-only.
  */
-export async function setStylistPlan(adminId: string, stylistId: string, tier: PlanTier) {
+export async function setStylistPlan(
+  adminId: string,
+  stylistId: string,
+  tier: PlanTier,
+  opts?: { startsAt?: string; expiresAt?: string },
+) {
   if (!Types.ObjectId.isValid(stylistId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
   const profile = await StylistProfile.findOne({ userId: stylistId });
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
   profile.planTier = tier;
   profile.smsCampaignEnabled = planAllowsSmsCampaign(tier);
+  if (tier === 'free') {
+    profile.planExpiresAt = null;
+    profile.planStartsAt = null;
+  } else {
+    // Resolve start: explicit or now
+    const start = opts?.startsAt ? new Date(opts.startsAt) : new Date();
+    start.setHours(0, 0, 0, 0);
+    profile.planStartsAt = start;
+    // Resolve end: explicit or 1 month from start
+    if (opts?.expiresAt) {
+      const end = new Date(opts.expiresAt);
+      end.setHours(23, 59, 59, 999);
+      profile.planExpiresAt = end;
+    } else {
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + 1);
+      end.setHours(23, 59, 59, 999);
+      profile.planExpiresAt = end;
+    }
+  }
   await profile.save();
-  await audit(adminId, 'stylist.setPlan', 'stylist', stylistId, { tier });
-  return { stylistId, planTier: tier, smsCampaignEnabled: profile.smsCampaignEnabled };
+  await audit(adminId, 'stylist.setPlan', 'stylist', stylistId, {
+    tier,
+    planStartsAt: profile.planStartsAt,
+    planExpiresAt: profile.planExpiresAt,
+  });
+  return {
+    stylistId,
+    planTier: tier,
+    smsCampaignEnabled: profile.smsCampaignEnabled,
+    planStartsAt: profile.planStartsAt,
+    planExpiresAt: profile.planExpiresAt,
+  };
 }
 
 /**

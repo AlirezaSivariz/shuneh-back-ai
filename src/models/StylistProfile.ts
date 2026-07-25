@@ -54,6 +54,13 @@ export function getPlanSmsLimits(tier: PlanTier): { perSendMax: number; periodMa
   }
 }
 
+/** Calculate plan expiry date: 1 month from now. */
+export function planExpiryDate(): Date {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
 export interface IFreelanceInfo {
   address?: string;
   location?: GeoPoint;
@@ -97,6 +104,10 @@ export interface IStylistProfile extends Document {
    * is kept in sync with this (silver+ → true) so existing gates keep working.
    */
   planTier: PlanTier;
+  /** When the current paid plan expires. null = free plan (no expiry). */
+  planExpiresAt: Date | null;
+  /** When the current paid plan starts. null = immediate (free plan or default). */
+  planStartsAt: Date | null;
   /**
    * Raised when a working-hours / salon opening-hours change left one or more
    * FUTURE reservations falling outside the stylist's current effective hours.
@@ -178,6 +189,8 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     // Subscription plan tier; source of truth for paid features. Admin-managed
     // only (no billing yet). Defaults keep existing docs valid.
     planTier: { type: String, enum: PLAN_TIERS, default: 'free', index: true },
+    planExpiresAt: { type: Date, default: null },
+    planStartsAt: { type: Date, default: null },
     // Raised when an hours change orphaned future reservations (default keeps
     // existing docs valid).
     needsHoursUpdate: { type: Boolean, default: false },

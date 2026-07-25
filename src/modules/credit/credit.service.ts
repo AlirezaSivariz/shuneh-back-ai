@@ -197,9 +197,10 @@ export async function purchasePlanByCredit(userId: string, tier: 'silver' | 'gol
   }
 
   const { StylistProfile } = await import('../../models/StylistProfile');
+  const { planExpiryDate } = await import('../../models/StylistProfile');
   await StylistProfile.updateOne(
     { userId: oid },
-    { $set: { planTier: tier } },
+    { $set: { planTier: tier, planStartsAt: new Date(), planExpiresAt: planExpiryDate() } },
   );
 
   const tierLabel = tier === 'silver' ? 'نقره‌ای' : 'طلایی';

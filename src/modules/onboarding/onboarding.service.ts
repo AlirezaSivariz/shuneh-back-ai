@@ -131,6 +131,8 @@ export async function getOnboardingState(userId: string) {
     isAcceptingReservations: profile?.isAcceptingReservations ?? true,
     // Subscription plan tier (for the panel's plan badge + feature gating).
     planTier: profile?.planTier ?? 'free',
+    planExpiresAt: profile?.planExpiresAt ?? null,
+    planStartsAt: profile?.planStartsAt ?? null,
     smsCampaignEnabled: profile?.smsCampaignEnabled ?? false,
     verification: {
       status: profile?.verificationStatus ?? 'incomplete',
@@ -175,7 +177,7 @@ export async function getUserState(userId: string) {
   const [stylistProfile, salonsCount, hasPendingOwnerInvites] = await Promise.all([
     isStylist
       ? StylistProfile.findOne({ userId })
-          .select('onboardingStep status workplaceType freelance isAcceptingReservations needsHoursUpdate smsCampaignEnabled planTier')
+          .select('onboardingStep status workplaceType freelance isAcceptingReservations needsHoursUpdate smsCampaignEnabled planTier planExpiresAt planStartsAt')
           .lean()
       : Promise.resolve(null),
     user.roles.includes('owner') ? Salon.countDocuments({ ownerId: userId }) : Promise.resolve(0),
@@ -193,6 +195,8 @@ export async function getUserState(userId: string) {
         needsHoursUpdate: boolean;
         smsCampaignEnabled: boolean;
         planTier: 'free' | 'silver' | 'gold';
+        planExpiresAt: Date | null;
+        planStartsAt: Date | null;
       }
     | null = null;
   if (stylistProfile) {
@@ -211,6 +215,8 @@ export async function getUserState(userId: string) {
       smsCampaignEnabled: stylistProfile.smsCampaignEnabled ?? false,
       // Subscription plan tier (free/silver/gold) for the profile badge + gating.
       planTier: stylistProfile.planTier ?? 'free',
+      planExpiresAt: stylistProfile.planExpiresAt ?? null,
+      planStartsAt: stylistProfile.planStartsAt ?? null,
     };
   }
 

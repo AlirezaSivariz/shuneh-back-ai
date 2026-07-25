@@ -20,7 +20,7 @@ import { nanoid } from 'nanoid';
 import { config } from '../../config/env';
 import { AppError } from '../../utils/AppError';
 import { User } from '../../models/User';
-import { StylistProfile, planAllowsSmsCampaign } from '../../models/StylistProfile';
+import { StylistProfile, planAllowsSmsCampaign, planExpiryDate } from '../../models/StylistProfile';
 import {
   PaymentTransaction,
   IPaymentTransaction,
@@ -203,6 +203,8 @@ async function activatePlan(userId: string, tier: PurchasablePlan): Promise<void
   if (!profile) throw new Error(`stylist profile not found for user ${userId}`);
   profile.planTier = tier;
   profile.smsCampaignEnabled = planAllowsSmsCampaign(tier);
+  profile.planStartsAt = new Date();
+  profile.planExpiresAt = planExpiryDate();
   await profile.save();
 }
 

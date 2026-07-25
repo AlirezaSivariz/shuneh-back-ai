@@ -367,7 +367,13 @@ export const setStylistSmsCampaignSchema = {
 
 export const setStylistPlanSchema = {
   params: z.object({ id: objectId }),
-  body: z.object({ tier: z.enum(['free', 'silver', 'gold']) }),
+  body: z.object({
+    tier: z.enum(['free', 'silver', 'gold']),
+    /** Optional custom start date (YYYY-MM-DD). Defaults to now for paid plans. */
+    startsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'تاریخ شروع باید YYYY-MM-DD باشد').optional(),
+    /** Optional custom expiry date (YYYY-MM-DD). Defaults to 1 month from start for paid plans. */
+    expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'تاریخ انقضا باید YYYY-MM-DD باشد').optional(),
+  }),
 };
 
 export const setStylistCancellationPolicySchema = {
