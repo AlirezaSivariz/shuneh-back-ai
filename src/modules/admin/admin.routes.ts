@@ -85,6 +85,7 @@ adminRouter.get('/pending-counts', asyncHandler(controller.pendingCounts));
 adminRouter.get('/analytics/reservations', validate(reservationAnalyticsSchema), asyncHandler(controller.reservationAnalytics));
 adminRouter.get('/users', validate(listUsersSchema), asyncHandler(controller.listUsers));
 adminRouter.get('/users/:id', validate(idParamsSchema), asyncHandler(controller.getUser));
+adminRouter.post('/users/:id/impersonate', validate(idParamsSchema), asyncHandler(controller.impersonateUser));
 adminRouter.get('/reservations', validate(listReservationsSchema), asyncHandler(controller.listReservations));
 adminRouter.get('/reservations/:id', validate(idParamsSchema), asyncHandler(controller.getReservation));
 adminRouter.get('/salons', validate(listSalonsSchema), asyncHandler(controller.listSalons));

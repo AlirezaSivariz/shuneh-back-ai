@@ -37,6 +37,11 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
   sendSuccess(res, result);
 }
 
+export async function impersonateUser(req: Request, res: Response): Promise<void> {
+  const result = await service.impersonateUser(req.user!.id, req.params.id);
+  sendSuccess(res, result);
+}
+
 // ── Review moderation ──
 export async function listReviews(req: Request, res: Response): Promise<void> {
   const q = req.query as Record<string, string>;

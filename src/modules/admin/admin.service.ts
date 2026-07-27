@@ -48,6 +48,7 @@ import { toGeoPoint } from '../../utils/geo';
 import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
 import { accountStatus } from '../../utils/foreignApproval';
+import { issueTokens } from '../auth/auth.service';
 import { validateUsernameFormat } from '../../utils/username';
 import { isUsernameAvailable } from '../stylist/public.service';
 import { planExpiryDate } from '../../models/StylistProfile';
@@ -336,6 +337,17 @@ export async function setUserStatus(
   await user.save();
   await audit(adminId, 'user.setStatus', 'user', id, { isActive, reason: reason ?? null });
   return { id, isActive, suspendedReason: user.suspendedReason };
+}
+
+/** Issue a full session token pair for the target user so the admin can browse as them. */
+export async function impersonateUser(adminId: string, id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  if (id === adminId) throw AppError.badRequest('برای بازگشت از پنل کاربر از دکمهٔ «بازگشت» استفاده کنید', 'CANNOT_IMPERSONATE_SELF');
+  const user = await User.findById(id);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  const tokens = await issueTokens(user);
+  await audit(adminId, 'user.impersonate', 'user', id, { roles: user.roles });
+  return { tokens, roles: user.roles };
 }
 
 /** Admin updates a user's profile fields (firstName, lastName, nationalCode, birthDate, foreignId). */
