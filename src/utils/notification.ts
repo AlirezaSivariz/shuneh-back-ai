@@ -116,7 +116,7 @@ class SmsNotificationService implements NotificationService {
     const reason = info.reason ? ` علت: ${info.reason}.` : "";
     await safeSend(
       phone,
-      `نوبت شما ساعت ${info.startTime} ${toJalaliLabel(info.date)} لغو شد.${reason}`,
+      `نوبت شما در سامانه شونه ساعت ${info.startTime} ${toJalaliLabel(info.date)} لغو شد.${reason}`,
       "reservation_cancelled",
     );
   }
