@@ -3,7 +3,7 @@ import * as controller from './social.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate, optionalAuthenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { createUploader } from '../../middlewares/upload';
+import { createSocialUploader } from '../../middlewares/upload';
 import {
   createPostSchema,
   feedSchema,
@@ -19,7 +19,7 @@ import {
 
 // Internal social network. Mounted at /social. Feed is public; writes need auth.
 const router = Router();
-const uploadPostImages = createUploader('social');
+const uploadPostImages = createSocialUploader('social');
 
 // Whether the signed-in user can post (gold-plan stylist, not banned).
 router.get('/access', optionalAuthenticate, asyncHandler(controller.access));
@@ -32,7 +32,7 @@ router.get('/hashtags/:tag', optionalAuthenticate, validate(hashtagSchema), asyn
 router.get('/saved', authenticate, validate(feedSchema), asyncHandler(controller.savedPosts));
 
 // Create a post (gold gating enforced in the service). `normal` → up to 8
-// `images`; `before_after` → one `before` + one `after`.
+// `images`; `before_after` → one `before` + one `after`; `video` → one `video` + optional `cover`.
 router.post(
   '/posts',
   authenticate,
@@ -40,6 +40,8 @@ router.post(
     { name: 'images', maxCount: 8 },
     { name: 'before', maxCount: 1 },
     { name: 'after', maxCount: 1 },
+    { name: 'video', maxCount: 1 },
+    { name: 'cover', maxCount: 1 },
   ]),
   validate(createPostSchema),
   asyncHandler(controller.createPost),

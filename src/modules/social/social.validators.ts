@@ -11,7 +11,7 @@ export const createPostSchema = {
   body: z.object({
     caption: z.string().max(2200).optional().default(''),
     acceptedRules: boolish,
-    type: z.enum(['normal', 'before_after']).optional(),
+    type: z.enum(['normal', 'before_after', 'video']).optional(),
     // Multipart string; "" → no related service. Validated against the stylist's
     // own services in the service layer.
     relatedServiceId: z.string().optional(),

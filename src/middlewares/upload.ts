@@ -6,7 +6,15 @@ import { config } from '../config/env';
 import { AppError } from '../utils/AppError';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const SOCIAL_MIME = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4'];
+
+export interface UploaderOpts {
+  private?: boolean;
+  allowedMime?: string[];
+  maxFileSize?: number;
+}
 
 /**
  * Build a multer instance that stores images on disk under UPLOAD_DIR/<subdir>.
@@ -14,8 +22,12 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
  *
  * Pass `{ private: true }` to store under PRIVATE_UPLOAD_DIR (never served by
  * the public /uploads mount) — for sensitive files such as ID documents.
+ *
+ * Pass `{ allowedMime, maxFileSize }` to override defaults (e.g. for video uploads).
  */
-export function createUploader(subdir: string, opts: { private?: boolean } = {}) {
+export function createUploader(subdir: string, opts: UploaderOpts = {}) {
+  const mimes = opts.allowedMime ?? ALLOWED_MIME;
+  const maxSize = opts.maxFileSize ?? MAX_FILE_SIZE;
   // Remote/object drivers need raw bytes in memory to validate and re-encode.
   let storage: multer.StorageEngine;
   if (config.storageDriver === 'mongo' || config.storageDriver === 's3') {
@@ -36,13 +48,21 @@ export function createUploader(subdir: string, opts: { private?: boolean } = {})
 
   return multer({
     storage,
-    limits: { fileSize: MAX_FILE_SIZE },
+    limits: { fileSize: maxSize },
     fileFilter: (_req: Request, file, cb) => {
-      if (!ALLOWED_MIME.includes(file.mimetype)) {
-        cb(AppError.badRequest('فقط تصاویر JPEG، PNG و WebP مجاز است', 'INVALID_FILE_TYPE'));
+      if (!mimes.includes(file.mimetype)) {
+        cb(AppError.badRequest('فقط تصاویر JPEG، PNG، WebP و ویدئو MP4 مجاز است', 'INVALID_FILE_TYPE'));
         return;
       }
       cb(null, true);
     },
+  });
+}
+
+/** Social post uploader — accepts images + video (MP4, 50 MB). */
+export function createSocialUploader(subdir: string) {
+  return createUploader(subdir, {
+    allowedMime: SOCIAL_MIME,
+    maxFileSize: MAX_VIDEO_SIZE,
   });
 }

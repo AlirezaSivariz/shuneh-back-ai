@@ -6,7 +6,7 @@ export type PostStatus = 'active' | 'removed';
  * before/after pair (`beforeImage`/`afterImage`). Kept open for future kinds
  * (video, story, …) WITHOUT a schema migration.
  */
-export type PostType = 'normal' | 'before_after';
+export type PostType = 'normal' | 'before_after' | 'video';
 
 export interface IPost extends Document {
   authorId: Types.ObjectId; // ref User (must be a gold-plan stylist at create time)
@@ -15,6 +15,8 @@ export interface IPost extends Document {
   images: string[]; // storage keys — for `normal` posts
   beforeImage: string | null; // storage key — for `before_after`
   afterImage: string | null; // storage key — for `before_after`
+  videoUrl: string | null; // storage key — for `video` posts
+  videoThumb: string | null; // storage key — cover/thumbnail for video posts
   /** Optional service this post showcases → pre-selected in the booking flow. */
   relatedServiceId: Types.ObjectId | null;
   hashtags: string[]; // normalized (lowercase, no '#') — extracted from the caption
@@ -29,11 +31,13 @@ export interface IPost extends Document {
 const postSchema = new Schema<IPost>(
   {
     authorId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    type: { type: String, enum: ['normal', 'before_after'], default: 'normal' },
+    type: { type: String, enum: ['normal', 'before_after', 'video'], default: 'normal' },
     caption: { type: String, default: '', maxlength: 2200 },
     images: { type: [String], default: [] },
     beforeImage: { type: String, default: null },
     afterImage: { type: String, default: null },
+    videoUrl: { type: String, default: null },
+    videoThumb: { type: String, default: null },
     relatedServiceId: { type: Schema.Types.ObjectId, ref: 'Service', default: null },
     hashtags: { type: [String], default: [] },
     likeCount: { type: Number, default: 0, min: 0 },
