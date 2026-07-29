@@ -10,8 +10,6 @@
 import { Types } from 'mongoose';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
-import sharp from 'sharp';
 import { Post, IPost, PostType } from '../../models/Post';
 import { PostComment } from '../../models/PostComment';
 import { PostLike } from '../../models/PostLike';
@@ -24,7 +22,6 @@ import { StylistProfile } from '../../models/StylistProfile';
 import { StylistService } from '../../models/StylistService';
 import { AppError } from '../../utils/AppError';
 import { storageProvider } from '../../utils/storage';
-import { extractThumbnail, processVideo } from '../../utils/video';
 import { containsBannedWord } from '../../config/bannedWords';
 import { getBookabilityMap } from '../stylist/bookability';
 import { config } from '../../config/env';
@@ -240,86 +237,36 @@ export async function createPost(
     const v = files.video?.[0];
     if (!v) throw AppError.badRequest('فایل ویدئو لازم است', 'NO_VIDEO');
 
-    // — Ensure we have a file on disk for ffmpeg —
-    let videoDiskPath: string;
-    const cleanup: string[] = [];
-    try {
-      if (v.path) {
-        videoDiskPath = v.path;
-      } else if (v.buffer) {
-        // Memory storage (mongo/s3): write to a temp file
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vid-'));
-        videoDiskPath = path.join(tmpDir, `upload-${Date.now()}.mp4`);
-        fs.writeFileSync(videoDiskPath, v.buffer);
-        cleanup.push(tmpDir);
-      } else {
-        throw AppError.badRequest('فایل ویدئو بارگذاری نشد', 'NO_VIDEO_BUFFER');
-      }
+    // Write video to disk directly — no ffmpeg processing (avoids timeout)
+    const destDir = path.resolve(config.uploadDir, 'social');
+    const destName = `video-${Date.now()}.mp4`;
+    const destPath = path.join(destDir, destName);
+    fs.mkdirSync(destDir, { recursive: true });
 
-      // Resize to 720p max, H.264+AAC
-      const ext = path.extname(videoDiskPath);
-      const processedPath = videoDiskPath.replace(ext, `-processed${ext}`);
-      await processVideo(videoDiskPath, processedPath).catch(() => undefined);
-      const finalPath = fs.existsSync(processedPath) ? processedPath : videoDiskPath;
-
-      // Videos are always stored on disk (served via /uploads static mount),
-      // regardless of storageDriver — sharp can't process video buffers.
-      const destDir = path.resolve(config.uploadDir, 'social');
-      const destName = `video-${Date.now()}.mp4`;
-      const destPath = path.join(destDir, destName);
-      fs.mkdirSync(destDir, { recursive: true });
-      fs.cpSync(finalPath, destPath);
-
-      const relative = path
-        .relative(path.resolve(config.uploadDir), destPath)
-        .split(path.sep)
-        .join('/');
-      videoUrl = relative;
-
-      // — Thumbnail —
-      const coverFile = files.cover?.[0];
-      if (coverFile) {
-        const thumbStored = await save(coverFile);
-        videoThumb = thumbStored.path;
-      } else {
-        try {
-          const thumbBuf = await extractThumbnail(finalPath);
-          const thumbDir = path.resolve(config.uploadDir, 'social');
-          fs.mkdirSync(thumbDir, { recursive: true });
-          const thumbPath = path.join(thumbDir, `thumb-${Date.now()}.jpg`);
-          await sharp(thumbBuf).resize(360, 360, { fit: 'cover' }).jpeg({ quality: 80 }).toFile(thumbPath);
-          const thumbFile: Express.Multer.File = {
-            fieldname: 'cover',
-            originalname: 'thumb.jpg',
-            encoding: '7bit',
-            mimetype: 'image/jpeg',
-            destination: thumbDir,
-            filename: path.basename(thumbPath),
-            path: thumbPath,
-            size: fs.statSync(thumbPath).size,
-            stream: fs.createReadStream(thumbPath) as any,
-            buffer: fs.readFileSync(thumbPath),
-          };
-          const t = await storageProvider.save(thumbFile);
-          videoThumb = t.path;
-          fs.promises.unlink(thumbPath).catch(() => undefined);
-        } catch {
-          // proceed without thumbnail
-        }
-      }
-
-      // Clean up original uploaded file and processed temp
-      if (v.path && v.path !== destPath) {
-        fs.promises.unlink(v.path).catch(() => undefined);
-      }
-      if (processedPath !== videoDiskPath && processedPath !== destPath) {
-        fs.promises.unlink(processedPath).catch(() => undefined);
-      }
-    } finally {
-      for (const dir of cleanup) {
-        fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-      }
+    if (v.path) {
+      // Disk storage: file already on disk, just copy to final location
+      fs.cpSync(v.path, destPath);
+      fs.promises.unlink(v.path).catch(() => undefined);
+    } else if (v.buffer) {
+      // Memory storage (mongo/s3): write buffer directly
+      fs.writeFileSync(destPath, v.buffer);
+    } else {
+      throw AppError.badRequest('فایل ویدئو بارگذاری نشد', 'NO_VIDEO_BUFFER');
     }
+
+    const relative = path
+      .relative(path.resolve(config.uploadDir), destPath)
+      .split(path.sep)
+      .join('/');
+    videoUrl = relative;
+
+    // Thumbnail (cover image only — skip ffmpeg extraction to avoid timeout)
+    const coverFile = files.cover?.[0];
+    if (coverFile) {
+      const thumbStored = await save(coverFile);
+      videoThumb = thumbStored.path;
+    }
+    // No cover → no thumbnail (too slow to extract via ffmpeg on production)
   } else {
     const imgs = files.images ?? [];
     if (imgs.length === 0) throw AppError.badRequest('حداقل یک عکس لازم است', 'NO_IMAGES');
