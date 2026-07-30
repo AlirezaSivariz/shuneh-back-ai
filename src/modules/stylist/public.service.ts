@@ -545,6 +545,40 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
     viewerId ? Follow.exists({ followerId: viewerId, stylistId }) : Promise.resolve(null),
   ]);
 
+  // ── Performance stats (عملکرد متplusplus) ──
+  // Aggregate reservation counts by status and cancelledBy to compute the
+  // stylist's completion rate. Only surfaced when totalReservations >= 5 so
+  // the percentages are meaningful.
+  const MIN_STATS_RESERVATIONS = 5;
+  const [statsRow] = await Reservation.aggregate([
+    { $match: { stylistId: new Types.ObjectId(stylistId) } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+        stylistCancelled: {
+          $sum: {
+            $cond: [
+              { $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'stylist'] }] },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  const performanceStats =
+    statsRow && statsRow.total >= MIN_STATS_RESERVATIONS
+      ? {
+          completedCount: statsRow.completed,
+          stylistCancelledCount: statsRow.stylistCancelled,
+          totalReservations: statsRow.total,
+        }
+      : null;
+
   return {
     id: stylistId,
     username: profile.username ?? null,
@@ -567,6 +601,7 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
     isPromoted: isAnyPromoted(promoEntry),
     isAcceptingReservations: profile.isAcceptingReservations !== false,
     isVerified: profile.isVerified === true,
+    performanceStats,
   };
 }
 
