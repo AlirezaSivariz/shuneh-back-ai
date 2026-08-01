@@ -107,7 +107,8 @@ export function startScheduledJobs(): void {
   storyTimer.unref?.();
   timers.push(storyTimer);
 
-  // Plan expiry: downgrade expired + send 5-day reminders (once per hour).
+  // Plan expiry: downgrade expired + send 5/3/1-day reminders (each milestone
+  // is sent once per plan period; hourly cadence just picks up new periods).
   const PLAN_EXPIRY_INTERVAL_MS = 60 * 60 * 1000;
   void runPlanExpiry();
   const planTimer = setInterval(runPlanExpiry, PLAN_EXPIRY_INTERVAL_MS);

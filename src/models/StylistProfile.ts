@@ -109,6 +109,13 @@ export interface IStylistProfile extends Document {
   /** When the current paid plan starts. null = immediate (free plan or default). */
   planStartsAt: Date | null;
   /**
+   * Plan-expiry SMS reminders already sent for the CURRENT plan period. Values
+   * are milestones: 'd5' (5 days before), 'd3' (3 days before), 'd1' (1 day
+   * before). Reset whenever a new plan period starts so each period gets exactly
+   * ONE reminder per milestone (never repeated on the hourly scheduler).
+   */
+  expiryRemindersSent: string[];
+  /**
    * Raised when a working-hours / salon opening-hours change left one or more
    * FUTURE reservations falling outside the stylist's current effective hours.
    * Existing reservations are never auto-cancelled (the commitment stands); this
@@ -191,6 +198,7 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     planTier: { type: String, enum: PLAN_TIERS, default: 'free', index: true },
     planExpiresAt: { type: Date, default: null },
     planStartsAt: { type: Date, default: null },
+    expiryRemindersSent: { type: [String], default: [] },
     // Raised when an hours change orphaned future reservations (default keeps
     // existing docs valid).
     needsHoursUpdate: { type: Boolean, default: false },

@@ -205,6 +205,7 @@ async function activatePlan(userId: string, tier: PurchasablePlan): Promise<void
   profile.smsCampaignEnabled = planAllowsSmsCampaign(tier);
   profile.planStartsAt = new Date();
   profile.planExpiresAt = planExpiryDate();
+  profile.expiryRemindersSent = [];
   await profile.save();
 }
 

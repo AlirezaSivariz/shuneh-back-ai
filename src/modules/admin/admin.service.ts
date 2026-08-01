@@ -2221,6 +2221,8 @@ export async function setStylistPlan(
   if (!profile) throw AppError.notFound('متخصص یافت نشد', 'STYLIST_NOT_FOUND');
   profile.planTier = tier;
   profile.smsCampaignEnabled = planAllowsSmsCampaign(tier);
+  // A new/changed plan period must get its own set of expiry reminders.
+  profile.expiryRemindersSent = [];
   if (tier === 'free') {
     profile.planExpiresAt = null;
     profile.planStartsAt = null;
