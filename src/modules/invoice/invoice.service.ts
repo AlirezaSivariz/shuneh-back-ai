@@ -5,7 +5,7 @@ import { StylistSettlement } from '../../models/StylistSettlement';
 import { PaymentTransaction } from '../../models/PaymentTransaction';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
-import { resolveCancellationPolicy, serializePolicy } from '../policy/policy.service';
+import { resolveCancellationPolicy, serializePolicy, DEFAULT_MAX_RESCHEDULES } from '../policy/policy.service';
 import { computeFinance, labelForType } from '../finance/finance.service';
 import type { AdjustmentType } from '../../models/Reservation';
 
@@ -196,7 +196,7 @@ export async function getReservationInvoice(
       policyViolation,
       rescheduleHistory,
       rescheduleCount: reservation.rescheduleCount ?? 0,
-      maxReschedules: reservation.maxReschedules ?? 2,
+      maxReschedules: reservation.maxReschedules ?? DEFAULT_MAX_RESCHEDULES,
       relatedTransactions: relatedTransactions.sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       ),

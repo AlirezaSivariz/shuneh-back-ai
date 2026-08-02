@@ -75,11 +75,11 @@ describe("reservation lifecycle", () => {
       expect(res.body.data.reservation.status).toBe("cancelled");
     });
 
-    it("rejects cancelling < 2h before start with CANCEL_TOO_LATE", async () => {
+    it("cancels even inside the former 2-hour window (no time cut-off)", async () => {
       const customer = await createCustomer();
       const stylist = await createStylist();
 
-      // Insert a confirmed reservation starting ~1h from now (inside the 2h window).
+      // Insert a confirmed reservation starting ~1h from now (previously blocked).
       const startAt = new Date(Date.now() + 60 * 60 * 1000);
       const f = fieldsForStartAt(startAt, 30);
       const doc = await Reservation.create({
@@ -101,8 +101,38 @@ describe("reservation lifecycle", () => {
       const res = await api()
         .post(`/reservations/${doc._id}/cancel`)
         .set(...auth(customer.token));
+      expect(res.status).toBe(200);
+      expect(res.body.data.reservation.status).toBe("cancelled");
+    });
+
+    it("rejects cancelling a reservation that already started (RESERVATION_IN_PAST)", async () => {
+      const customer = await createCustomer();
+      const stylist = await createStylist();
+
+      // A confirmed reservation that began ~30min ago (auto-complete hasn't run).
+      const startAt = new Date(Date.now() - 30 * 60 * 1000);
+      const f = fieldsForStartAt(startAt, 30);
+      const doc = await Reservation.create({
+        customerId: new Types.ObjectId(customer.id),
+        stylistId: new Types.ObjectId(stylist.id),
+        salonId: new Types.ObjectId(stylist.salonId),
+        serviceId: new Types.ObjectId(stylist.serviceIds[0]),
+        serviceIds: [new Types.ObjectId(stylist.serviceIds[0])],
+        items: [
+          { serviceId: new Types.ObjectId(stylist.serviceIds[0]), price: 100000, durationMin: 30 },
+        ],
+        date: f.date,
+        startTime: f.startTime,
+        endTime: f.endTime,
+        price: 100000,
+        status: "confirmed",
+      });
+
+      const res = await api()
+        .post(`/reservations/${doc._id}/cancel`)
+        .set(...auth(customer.token));
       expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe("CANCEL_TOO_LATE");
+      expect(res.body.error.code).toBe("RESERVATION_IN_PAST");
     });
 
     it("forbids cancelling another customer's reservation (403)", async () => {
@@ -290,6 +320,108 @@ describe("reservation lifecycle", () => {
         .send({ date: newDate, startTime: newStart });
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe("FORBIDDEN");
+    });
+  });
+
+  describe("reschedule policy (customer vs stylist)", () => {
+    /** Reschedule a reservation to the first free slot of a fresh future day. */
+    async function rescheduleTo(
+      token: string,
+      stylistId: string,
+      serviceId: string,
+      reservationId: string,
+      dayOffset: number,
+      as: "customer" | "stylist" = "customer",
+    ) {
+      const newDate = futureDay(dayOffset);
+      const avail = await api()
+        .get(`/stylists/${stylistId}/availability`)
+        .query({ date: newDate, serviceIds: serviceId })
+        .set(...auth(token));
+      expect(avail.status).toBe(200);
+      const start = avail.body.data.slots[0].startTime as string;
+      const path =
+        as === "stylist"
+          ? `/stylist/reservations/${reservationId}/reschedule`
+          : `/reservations/${reservationId}/reschedule`;
+      const res = await api().patch(path).set(...auth(token)).send({ date: newDate, startTime: start });
+      expect(res.status).toBe(200);
+      return res.body.data.reservation as {
+        id: string;
+        rescheduleCount: number;
+        rescheduleHistory: Array<{ by: string; free: boolean; penaltyPercent?: number; penaltyAmount: number | null }>;
+        financialAdjustments: Array<{ type: string; amount: number }>;
+      };
+    }
+
+    it("customer gets 2 free reschedules, then a 5% penalty on the 3rd", async () => {
+      const customer = await createCustomer();
+      const stylist = await createStylist();
+      const r = await book(customer.token, stylist.id, stylist.serviceIds[0], futureDay(3));
+
+      const one = await rescheduleTo(customer.token, stylist.id, stylist.serviceIds[0], r.id, 4);
+      expect(one.rescheduleCount).toBe(1);
+      expect(one.rescheduleHistory[0]).toMatchObject({
+        by: "customer",
+        free: true,
+        penaltyAmount: 0,
+      });
+
+      const two = await rescheduleTo(customer.token, stylist.id, stylist.serviceIds[0], r.id, 5);
+      expect(two.rescheduleCount).toBe(2);
+      expect(two.rescheduleHistory[1]).toMatchObject({
+        by: "customer",
+        free: true,
+        penaltyAmount: 0,
+      });
+
+      const three = await rescheduleTo(customer.token, stylist.id, stylist.serviceIds[0], r.id, 6);
+      expect(three.rescheduleCount).toBe(3);
+      expect(three.rescheduleHistory[2]).toMatchObject({
+        by: "customer",
+        free: false,
+      });
+      expect(three.rescheduleHistory[2].penaltyAmount).toBeGreaterThan(0);
+      const penalties = three.financialAdjustments.filter((a) => a.type === "penalty_reschedule");
+      expect(penalties).toHaveLength(1);
+      expect(penalties[0].amount).toBeGreaterThan(0);
+    });
+
+    it("specialist reschedules never consume the customer's free allowance or incur penalty", async () => {
+      const customer = await createCustomer();
+      const stylist = await createStylist();
+      const r = await book(customer.token, stylist.id, stylist.serviceIds[0], futureDay(3));
+
+      // Two specialist-initiated reschedules.
+      await rescheduleTo(stylist.token, stylist.id, stylist.serviceIds[0], r.id, 4, "stylist");
+      const afterStylist = await rescheduleTo(
+        stylist.token,
+        stylist.id,
+        stylist.serviceIds[0],
+        r.id,
+        5,
+        "stylist",
+      );
+
+      // They are tracked separately: rescheduleCount stays 0 and no penalty.
+      expect(afterStylist.rescheduleCount).toBe(0);
+      expect(afterStylist.rescheduleHistory).toHaveLength(2);
+      expect(afterStylist.rescheduleHistory.every((h) => h.by === "stylist")).toBe(true);
+      expect(
+        afterStylist.financialAdjustments.filter((a) => a.type === "penalty_reschedule"),
+      ).toHaveLength(0);
+
+      // The customer's first reschedule is STILL free (2 free remaining).
+      const first = await rescheduleTo(customer.token, stylist.id, stylist.serviceIds[0], r.id, 6);
+      expect(first.rescheduleCount).toBe(1);
+      expect(first.rescheduleHistory[2]).toMatchObject({
+        by: "customer",
+        free: true,
+        penaltyAmount: 0,
+      });
+      expect(
+        first.financialAdjustments.filter((a) => a.type === "penalty_reschedule"),
+      ).toHaveLength(0);
     });
   });
 

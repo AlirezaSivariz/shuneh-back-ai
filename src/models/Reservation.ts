@@ -175,9 +175,9 @@ export interface IReservation extends Document {
    * every money event (deposit, fee, penalties, refunds, debt).
    */
   financialAdjustments: IFinancialAdjustment[];
-  /** Current reschedule count (derived from rescheduleHistory.length). */
+  /** Count of CUSTOMER-initiated reschedules (specialist reschedules never count). */
   rescheduleCount: number;
-  /** Maximum reschedules allowed per the policy at booking/reschedule time. */
+  /** Maximum CUSTOMER reschedules allowed per the policy at booking/reschedule time. */
   maxReschedules: number;
   createdAt: Date;
   updatedAt: Date;
@@ -304,7 +304,7 @@ const reservationSchema = new Schema<IReservation>(
       default: [],
     },
     rescheduleCount: { type: Number, default: 0, min: 0 },
-    maxReschedules: { type: Number, default: 2, min: -1, max: 50 },
+    maxReschedules: { type: Number, default: 3, min: -1, max: 50 },
   },
   { timestamps: true },
 );

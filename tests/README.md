@@ -33,7 +33,7 @@ The first run downloads a small MongoDB binary (cached afterwards).
     approve/reject, `requireSalonOwner`.
   - `reservation.test.ts` — availability, multi-service booking, snapshot,
     self-booking, **double-booking (sequential + concurrent)**.
-  - `reservationLifecycle.test.ts` — cancel (customer 2h rule / stylist / admin),
+  - `reservationLifecycle.test.ts` — cancel (customer anytime before start / stylist / admin),
     reschedule (+ `excludeReservationId`), auto-complete, leave-salon effects.
   - `features.test.ts` — reviews, quick-rebook, discount codes, tips,
     accept-reservations toggle, verification/blue-tick, promotion & search order.

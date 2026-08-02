@@ -1,8 +1,8 @@
 /**
  * Customer & stylist reservation operations (Phase 2).
  *
- * Bookings auto-confirm on creation. A reservation may be cancelled by the
- * customer only up to 2 hours before its start.
+ * Bookings auto-confirm on creation. A customer may cancel a pending/confirmed
+ * reservation at any time up to its start — there is no cancellation cut-off.
  */
 import { Types } from 'mongoose';
 import { Reservation, IReservation } from '../../models/Reservation';
@@ -32,6 +32,7 @@ import {
   resolvePerServicePolicies,
   serializePolicy,
   ResolvedPolicy,
+  DEFAULT_MAX_RESCHEDULES,
 } from '../policy/policy.service';
 import {
   calculateDeposit,
@@ -43,8 +44,6 @@ import {
 } from '../finance/finance.service';
 import type { IFinancialAdjustment } from '../../models/Reservation';
 import { applyCancellationPenalty } from '../credit/credit.service';
-
-const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /** The deposit amount the customer actually paid online (for refund/penalty math). */
 function paidAmountOf(r: IReservation): number | null {
@@ -632,11 +631,11 @@ export async function cancelReservation(customerId: string, reservationId: strin
   if (['cancelled', 'completed', 'no_show'].includes(reservation.status)) {
     throw AppError.badRequest('این رزرو قابل لغو نیست', 'NOT_CANCELLABLE');
   }
-  if (reservation.startAt.getTime() - Date.now() < CANCEL_WINDOW_MS) {
-    throw AppError.badRequest(
-      'لغو رزرو فقط تا ۲ ساعت قبل از زمان نوبت ممکن است',
-      'CANCEL_TOO_LATE',
-    );
+  // Customers may cancel any pending/confirmed reservation regardless of the
+  // remaining time — only reservations that have already started are excluded
+  // (they are the stylist's / auto-complete's responsibility).
+  if (reservation.startAt.getTime() <= Date.now()) {
+    throw AppError.badRequest('نوبت گذشته قابل لغو نیست', 'RESERVATION_IN_PAST');
   }
 
   const depositAmount = reservation.deposit?.amount ?? 0;
@@ -778,7 +777,7 @@ export async function rescheduleReservation(
   const customerRescheduleCount = (reservation.rescheduleHistory ?? []).filter(
     (h) => h.by === 'customer',
   ).length;
-  const maxAllowed = reservation.maxReschedules ?? 2;
+  const maxAllowed = reservation.maxReschedules ?? DEFAULT_MAX_RESCHEDULES;
   if (maxAllowed >= 0 && customerRescheduleCount >= maxAllowed) {
     throw AppError.badRequest(
       `حداکثر ${maxAllowed} بار جابه‌جایی برای این رزرو مجاز است. برای تغییر زمان، ابتدا نوبت را لغو کنید.`,
@@ -1175,7 +1174,7 @@ async function serializeReservation(
       createdAt: a.createdAt,
     })),
     rescheduleCount: r.rescheduleCount ?? 0,
-    maxReschedules: r.maxReschedules ?? 2,
+    maxReschedules: r.maxReschedules ?? DEFAULT_MAX_RESCHEDULES,
     tip: tip ? { amount: tip.amount, status: tip.status } : null,
     /**
      * For the stylist view: this future reservation no longer falls inside the
@@ -1184,8 +1183,7 @@ async function serializeReservation(
      */
     outOfHours: extra.outOfHours ?? false,
     canCancel:
-      ['pending', 'confirmed'].includes(r.status) &&
-      r.startAt.getTime() - Date.now() >= CANCEL_WINDOW_MS,
+      ['pending', 'confirmed'].includes(r.status) && r.startAt.getTime() > Date.now(),
     /** A stylist may cancel a future confirmed reservation. */
     canCancelAsStylist: r.status === 'confirmed' && r.startAt.getTime() > Date.now(),
     /** Customer or stylist may reschedule a confirmed, future reservation. */

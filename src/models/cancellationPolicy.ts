@@ -17,14 +17,14 @@ export interface ICancellationRule {
 export interface ICancellationPolicy {
   /** Refund bands, evaluated highest-threshold-met-wins. Below the smallest → 0%. */
   rules: ICancellationRule[];
-  /** How many reschedules are free before a penalty applies. */
+  /** How many CUSTOMER reschedules are free before a penalty applies (specialist reschedules never count). */
   freeRescheduleCount: number;
-  /** Penalty percent applied to a reschedule once the free count is exhausted. */
+  /** Penalty percent applied to a CUSTOMER reschedule once the free count is exhausted. */
   reschedulePenaltyPercent: number;
   /**
-   * Maximum total reschedules allowed for this reservation.
-   * -1 = unlimited (silver/gold default), 2 = free plan limit.
-   * Once reached, only cancellation is allowed.
+   * Maximum total CUSTOMER reschedules allowed for this reservation.
+   * -1 = unlimited, 3 = system default. Once reached, only cancellation is
+   * allowed. Specialist-initiated reschedules do not count against this limit.
    */
   maxRescheduleCount: number;
 }
@@ -40,8 +40,8 @@ export const cancellationRuleSchema = new Schema<ICancellationRule>(
 export const cancellationPolicySchema = new Schema<ICancellationPolicy>(
   {
     rules: { type: [cancellationRuleSchema], default: [] },
-    freeRescheduleCount: { type: Number, default: 1, min: 0, max: 10 },
-    reschedulePenaltyPercent: { type: Number, default: 0, min: 0, max: 100 },
+    freeRescheduleCount: { type: Number, default: 2, min: 0, max: 10 },
+    reschedulePenaltyPercent: { type: Number, default: 5, min: 0, max: 100 },
     maxRescheduleCount: { type: Number, default: 10, min: -1, max: 50 },
   },
   { _id: false },

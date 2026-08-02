@@ -52,8 +52,8 @@ export const cancellationPolicyBody = z.object({
     )
     .min(1)
     .max(6),
-  freeRescheduleCount: z.number().int().min(0).max(10).default(1),
-  reschedulePenaltyPercent: z.number().int().min(0).max(100).default(0),
+  freeRescheduleCount: z.number().int().min(0).max(10).default(2),
+  reschedulePenaltyPercent: z.number().int().min(0).max(100).default(5),
 });
 
 export const searchSalonsSchema = {

@@ -30,17 +30,20 @@ export type PolicySource = 'stylist_service' | 'stylist' | 'salon' | 'system';
  *  - ≥6h               → 50% refund,
  *  - ≥2h               → 0% refund,
  *  - <2h               → 0% (no rule matched).
- * One free reschedule, then a 20% penalty.
+ * Two free CUSTOMER reschedules, then a 5% penalty per reschedule. Only
+ * customer-initiated reschedules consume the free allowance or incur the
+ * penalty — specialist reschedules are tracked separately and never count.
  */
+export const DEFAULT_MAX_RESCHEDULES = 3;
 export const SYSTEM_DEFAULT_POLICY: ICancellationPolicy = {
   rules: [
     { hoursBeforeStart: 24, refundPercent: 100 },
     { hoursBeforeStart: 6, refundPercent: 50 },
     { hoursBeforeStart: 2, refundPercent: 0 },
   ],
-  freeRescheduleCount: 1,
-  reschedulePenaltyPercent: 20,
-  maxRescheduleCount: 2,
+  freeRescheduleCount: 2,
+  reschedulePenaltyPercent: 5,
+  maxRescheduleCount: DEFAULT_MAX_RESCHEDULES,
 };
 
 /** Silver stylists may only use these standard thresholds (hours before start). */
