@@ -10,6 +10,7 @@ import {
   migrateSocialPostType,
   autoMigrateUsernames,
 } from './seed/seed';
+import { seedCommunity } from './seed/community.seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 import { ensureStorageReady } from './utils/storage';
 
@@ -30,6 +31,15 @@ async function bootstrap() {
   await migrateSocialPostType();
   // Backfill stylist usernames for human-readable profile URLs.
   await autoMigrateUsernames();
+  // Seed the community Q&A forum demo content (idempotent — never duplicates).
+  // Opt-in via SEED_COMMUNITY=1 so it never runs against a prod database by default.
+  if (config.seedCommunity) {
+    const seeded = await seedCommunity();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[seed] community ensured: ${seeded.users} users, ${seeded.questions} questions, ${seeded.answers} answers, ${seeded.likes} likes`,
+    );
+  }
 
   // Pre-create object-storage buckets (S3/MinIO) so uploads don't 500 on a
   // fresh endpoint. Best-effort: the provider also self-heals lazily per upload.

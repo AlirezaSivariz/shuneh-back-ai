@@ -26,6 +26,7 @@ import { adminRouter } from "./modules/admin/admin.routes";
 import planRoutes from "./modules/plan/plan.routes";
 import blogRoutes from "./modules/blog/blog.routes";
 import socialRoutes from "./modules/social/social.routes";
+import communityRoutes from "./modules/community/community.routes";
 import paymentRoutes from "./modules/payment/payment.routes";
 import {
   internalRouter,
@@ -83,6 +84,8 @@ export function createApp(): Application {
   app.use("/blog", blogRoutes);
   // Internal social network (feed public; writes gated by plan/auth).
   app.use("/social", socialRoutes);
+  // Community Q&A forum (reads public; writes authenticated).
+  app.use("/community", communityRoutes);
   app.use("/owner", ownerRouter);
   app.use("/invite", inviteRoutes);
   // Zibal payment gateway: start top-up + public browser callback.

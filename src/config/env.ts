@@ -64,6 +64,8 @@ export interface AppConfig {
   };
   /** When true, no scheduled jobs are registered (tests / one-off scripts). */
   disableCron: boolean;
+  /** When true, the community Q&A demo content is seeded at server boot (idempotent). */
+  seedCommunity: boolean;
   /** How often the reservation auto-complete job runs, in minutes. */
   autoCompleteIntervalMinutes: number;
   /** Min times a (stylist, service) must have been completed to be suggested. */
@@ -124,6 +126,7 @@ export const config: AppConfig = {
     forcePathStyle: asBool('S3_FORCE_PATH_STYLE', true),
   },
   disableCron: asBool('DISABLE_CRON', false),
+  seedCommunity: asBool('SEED_COMMUNITY', false),
   maxDebtThreshold: asNumber('MAX_DEBT_THRESHOLD', 100_000),
   autoCompleteIntervalMinutes: asNumber('AUTOCOMPLETE_INTERVAL_MINUTES', 5),
   quickRebookThreshold: asNumber('QUICK_REBOOK_THRESHOLD', 2),

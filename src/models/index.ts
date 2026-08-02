@@ -16,3 +16,8 @@ export * from './UserFeatureOverride';
 export * from './CreditWallet';
 export * from './CreditTransaction';
 export * from './CreditSetting';
+export * from './CommunityQuestion';
+export * from './CommunityAnswer';
+export * from './CommunityQuestionLike';
+export * from './CommunityAnswerLike';
+export * from './CommunityQuestionSave';
