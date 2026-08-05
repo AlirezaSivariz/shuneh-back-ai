@@ -3,10 +3,36 @@
  * once per milestone (5 / 3 / 1 days before expiry). Runs as an hourly
  * scheduler job; milestone tracking on the profile guarantees each reminder is
  * sent at most once per plan period.
+ *
+ * Quiet hours: reminders are only sent between 08:00 and 20:00 Asia/Tehran.
+ * Runs landing outside that window return without claiming any milestone, so
+ * the reminder goes out on the next run that falls inside the window.
  */
 import { StylistProfile } from '../../models/StylistProfile';
 import { User } from '../../models/User';
 import { smsProvider } from '../../utils/sms';
+
+/** SMS quiet hours for plan-expiry reminders (Asia/Tehran). */
+const SMS_WINDOW_START_HOUR = 8;
+const SMS_WINDOW_END_HOUR = 20;
+const TEHRAN_TIME_ZONE = 'Asia/Tehran';
+
+/** The current hour of `now` in Asia/Tehran (0–23), independent of the server clock. */
+function tehranHour(now: Date): number {
+  return Number(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: TEHRAN_TIME_ZONE,
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(now),
+  );
+}
+
+/** True when `now` falls inside the 08:00–20:00 Asia/Tehran SMS window. */
+export function isWithinSmsWindow(now: Date = new Date()): boolean {
+  const hour = tehranHour(now);
+  return hour >= SMS_WINDOW_START_HOUR && hour < SMS_WINDOW_END_HOUR;
+}
 
 /** Downgrade expired plans to free. Returns the number of downgraded profiles. */
 export async function downgradeExpiredPlans(): Promise<number> {
@@ -33,9 +59,15 @@ function expiryMilestoneFor(daysUntil: number): ExpiryReminderMilestone | null {
  * Each milestone ('d5' / 'd3' / 'd1') is claimed atomically on the profile, so
  * a reminder is sent at most ONCE per plan period — never repeatedly even
  * though the scheduler runs every hour.
+ *
+ * Quiet hours: `now` defaults to the current time, but callers (and tests) can
+ * pass an explicit instant. Outside 08:00–20:00 Asia/Tehran we return early
+ * WITHOUT claiming milestones — at-most-once is tied to an actual send, so the
+ * reminder is delivered on the next run that falls inside the window.
  */
-export async function sendPlanExpiryReminders(): Promise<number> {
-  const now = new Date();
+export async function sendPlanExpiryReminders(now: Date = new Date()): Promise<number> {
+  if (!isWithinSmsWindow(now)) return 0;
+
   const fiveDaysFromNow = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
 
   const expiringProfiles = await StylistProfile.find({

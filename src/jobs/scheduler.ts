@@ -109,6 +109,7 @@ export function startScheduledJobs(): void {
 
   // Plan expiry: downgrade expired + send 5/3/1-day reminders (each milestone
   // is sent once per plan period; hourly cadence just picks up new periods).
+  // Reminders are quiet outside 08:00–20:00 Asia/Tehran (see plan.expiry.ts).
   const PLAN_EXPIRY_INTERVAL_MS = 60 * 60 * 1000;
   void runPlanExpiry();
   const planTimer = setInterval(runPlanExpiry, PLAN_EXPIRY_INTERVAL_MS);
