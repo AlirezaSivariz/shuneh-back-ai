@@ -47,6 +47,13 @@ export interface IUser extends Document {
   lastName?: string;
   nationalCode?: string;
   birthDate?: Date;
+  /**
+   * Province/State + City of the user's activity area — the SINGLE source of
+   * truth for location across onboarding, dashboards and /stylists discovery
+   * (validated against the shared Iran geo dataset). Null until set.
+   */
+  province?: string | null;
+  city?: string | null;
   profilePhoto?: string; // storage key
   /** True when the user has no Iranian national code (uses foreignId instead). */
   isForeignNational: boolean;
@@ -108,6 +115,8 @@ const userSchema = new Schema<IUser>(
     lastName: { type: String, trim: true },
     nationalCode: { type: String, trim: true },
     birthDate: { type: Date },
+    province: { type: String, trim: true, default: null },
+    city: { type: String, trim: true, default: null },
     profilePhoto: { type: String },
     isForeignNational: { type: Boolean, default: false },
     foreignId: { type: String, trim: true, default: null },

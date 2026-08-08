@@ -10,6 +10,7 @@ export type WorkplaceType = 'freelance' | 'salon';
 export type OnboardingStep =
   | 'role'
   | 'personal'
+  | 'location'
   | 'services'
   | 'workplace'
   | 'workingHours'
@@ -19,6 +20,7 @@ export type OnboardingStep =
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   'role',
   'personal',
+  'location',
   'services',
   'workplace',
   'workingHours',

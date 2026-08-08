@@ -11,7 +11,7 @@ import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { createUploader } from '../../middlewares/upload';
-import { setRolesSchema, personalSchema, nameEditSchema } from './onboarding.validators';
+import { setRolesSchema, personalSchema, nameEditSchema, locationSchema } from './onboarding.validators';
 import { reportRangeSchema } from '../reports/reports.validators';
 import { topupSchema, walletTxListSchema } from '../wallet/wallet.validators';
 import { walletQuerySchema, planPurchaseSchema } from '../credit/credit.validators';
@@ -30,6 +30,8 @@ meRouter.get('/state', asyncHandler(controller.getUserState));
 // Pending owner-invites by phone (discoverable without opening the magic link).
 meRouter.get('/pending-invites', asyncHandler(controller.getPendingInvites));
 meRouter.patch('/personal', validate(personalSchema), asyncHandler(controller.updatePersonal));
+// Edit the profile's activity area (province/state + city) from any dashboard.
+meRouter.patch('/location', validate(locationSchema), asyncHandler(controller.updateLocation));
 // Reviewed display-name edit: request (pending until an admin approves) + read own pending.
 meRouter.get('/profile/name', asyncHandler(controller.getMyNameEdit));
 meRouter.post('/profile/name', validate(nameEditSchema), asyncHandler(controller.requestNameEdit));

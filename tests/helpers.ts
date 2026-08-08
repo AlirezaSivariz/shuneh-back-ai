@@ -57,7 +57,20 @@ async function setPersonal(token: string, nc = validNationalCode()) {
   await api()
     .patch("/me/personal")
     .set(...auth(token))
-    .send({ firstName: "تست", lastName: "کاربر", nationalCode: nc, birthDate: "1990-01-01" });
+    .send({
+      firstName: "تست",
+      lastName: "کاربر",
+      nationalCode: nc,
+      birthDate: "1990-01-01",
+    });
+}
+
+/** Set the user's activity area (province/state + city) via /me/location. */
+export async function setLocation(token: string, province: string, city: string) {
+  return api()
+    .patch("/me/location")
+    .set(...auth(token))
+    .send({ province, city });
 }
 
 /** A customer with the role + completed personal info. */
@@ -71,6 +84,9 @@ export async function createCustomer() {
 
 interface StylistOpts {
   serviceCount?: number;
+  /** Province/State + City of the user's activity area (defaults to تهران/تهران). */
+  province?: string;
+  city?: string;
 }
 
 /**
@@ -83,6 +99,8 @@ export async function createStylist(opts: StylistOpts = {}) {
   const s = await login();
   await setPersonal(s.token, validNationalCode(20000000 + phoneCounter));
   await api().post("/onboarding/role").set(...auth(s.token)).send({ roles: ["stylist"] });
+  // The dedicated "work location" step (province/state + city).
+  await setLocation(s.token, opts.province ?? "تهران", opts.city ?? "تهران");
 
   const cats = (await api().get("/services").set(...auth(s.token))).body.data.categories;
   const serviceIds: string[] = [];

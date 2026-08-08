@@ -15,6 +15,9 @@ export const searchStylistsSchema = {
     gender: z.enum(['women', 'men']).optional(),
     // Optional Iran calendar day "YYYY-MM-DD" → only stylists free that day.
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD').optional(),
+    // Server-side pagination (defaults: page 1, limit 12 — see public.service).
+    page: z.coerce.number().int().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
   }),
 };
 

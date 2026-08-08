@@ -34,6 +34,12 @@ export async function updatePersonal(req: Request, res: Response): Promise<void>
   sendSuccess(res, state);
 }
 
+/** Edit ONLY the profile's province/state + city (single source of truth). */
+export async function updateLocation(req: Request, res: Response): Promise<void> {
+  const result = await service.updateLocation(req.user!.id, req.body.province, req.body.city);
+  sendSuccess(res, result);
+}
+
 export async function requestNameEdit(req: Request, res: Response): Promise<void> {
   const edit = await service.requestNameEdit(req.user!.id, req.body.firstName, req.body.lastName);
   sendSuccess(res, { edit }, 201);

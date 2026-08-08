@@ -286,7 +286,7 @@ export async function searchStylists(params: SearchParams) {
   // 2) Load the related users, their services and salon memberships in bulk.
   const [users, stylistServices, allServices] = await Promise.all([
     User.find({ _id: { $in: stylistIds } })
-      .select('firstName lastName profilePhoto')
+      .select('firstName lastName profilePhoto province city')
       .lean(),
     StylistService.find({ stylistId: { $in: stylistIds } }).lean(),
     Service.find().lean(),
@@ -337,10 +337,11 @@ export async function searchStylists(params: SearchParams) {
 
     const loc = await resolveStylistLocation(uid, profile);
 
-    // province/city filter: matches the stylist's salon location. Freelancers
-    // (no salon) carry no province/city and are excluded when either is set.
-    if (params.province && loc.salon?.province !== params.province) continue;
-    if (params.city && loc.salon?.city !== params.city) continue;
+    // province/city filter: matches the USER profile's activity area (the single
+    // source of truth — set during onboarding and editable from both dashboards).
+    // Freelancers and salon-based stylists alike carry user-level location.
+    if (params.province && user.province !== params.province) continue;
+    if (params.city && user.city !== params.city) continue;
 
     // geo filter.
     if (params.lng !== undefined && params.lat !== undefined) {
@@ -377,6 +378,10 @@ export async function searchStylists(params: SearchParams) {
       fullName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'متخصص',
       profilePhoto: photoUrl(user.profilePhoto),
       workplaceType: profile.workplaceType ?? null,
+      // User-profile activity area (single source of truth) — drives the
+      // province/city discovery filters.
+      province: user.province ?? null,
+      city: user.city ?? null,
       location: loc.location,
       address: loc.address,
       salon: loc.salon
@@ -438,6 +443,31 @@ export async function searchStylists(params: SearchParams) {
   return final;
 }
 
+/** Default and maximum items returned by the paginated /stylists/search. */
+export const SEARCH_DEFAULT_LIMIT = 12;
+export const SEARCH_MAX_LIMIT = 50;
+
+/**
+ * Paginated variant of `searchStylists`: same filters + ranking, but returns
+ * one page plus the metadata needed for a «load more» UI. The response shape
+ * keeps the `stylists` key (back-compat) alongside the pagination fields.
+ * Filtering (including province/city) happens BEFORE slicing, so every page of
+ * a filtered result set is consistent.
+ */
+export async function searchStylistsPage(
+  params: SearchParams,
+  page = 1,
+  limit = SEARCH_DEFAULT_LIMIT,
+) {
+  const all = await searchStylists(params);
+  const total = all.length;
+  const safeLimit = Math.min(Math.max(1, Math.floor(limit)), SEARCH_MAX_LIMIT);
+  const totalPages = Math.max(1, Math.ceil(total / safeLimit));
+  const safePage = Math.min(Math.max(1, Math.floor(page)), totalPages);
+  const items = all.slice((safePage - 1) * safeLimit, safePage * safeLimit);
+  return { stylists: items, page: safePage, limit: safeLimit, total, totalPages };
+}
+
 /** Active, currently-promoted stylists for the landing "featured" section. */
 export async function getFeaturedStylists() {
   const all = await searchStylists({});
@@ -489,7 +519,7 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
   }
 
   const [user, stylistServices, categories, allServices, salonLinks] = await Promise.all([
-    User.findById(stylistId).select('firstName lastName profilePhoto').lean(),
+    User.findById(stylistId).select('firstName lastName profilePhoto province city').lean(),
     StylistService.find({ stylistId }).lean(),
     ServiceCategory.find().sort({ order: 1 }).lean(),
     Service.find().lean(),
@@ -590,6 +620,8 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
     fullName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || 'متخصص',
     profilePhoto: photoUrl(user.profilePhoto),
     workplaceType: profile.workplaceType ?? null,
+    province: user.province ?? null,
+    city: user.city ?? null,
     freelance: profile.freelance
       ? { address: profile.freelance.address ?? null, location: profile.freelance.location ?? null }
       : null,

@@ -4,8 +4,8 @@ let ncSeed = 30000000;
 
 /**
  * Drive a fresh stylist through the onboarding prefix steps:
- * login → role → personal. After this the onboardingStep is "services".
- * Returns the access token + the stylist's user id.
+ * login → role → personal → work location. After this the onboardingStep is
+ * "services". Returns the access token + the stylist's user id.
  */
 async function freshStylist() {
   await ensureCatalogue();
@@ -16,7 +16,17 @@ async function freshStylist() {
   await api()
     .patch("/me/personal")
     .set(...auth(s.token))
-    .send({ firstName: "تست", lastName: "کاربر", nationalCode: validNationalCode(ncSeed++), birthDate: "1990-01-01" });
+    .send({
+      firstName: "تست",
+      lastName: "کاربر",
+      nationalCode: validNationalCode(ncSeed++),
+      birthDate: "1990-01-01",
+    });
+  // The "work location" step: province/state + city (also advances to services).
+  await api()
+    .patch("/me/location")
+    .set(...auth(s.token))
+    .send({ province: "تهران", city: "تهران" });
   const id = (await api().get("/me/state").set(...auth(s.token))).body.data.user.id as string;
   return { token: s.token, id };
 }

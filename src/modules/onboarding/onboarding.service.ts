@@ -118,6 +118,8 @@ export async function getOnboardingState(userId: string) {
       lastName: user.lastName,
       nationalCode: user.nationalCode,
       birthDate: user.birthDate,
+      province: user.province ?? null,
+      city: user.city ?? null,
       profilePhoto: photoUrl(user.profilePhoto),
       isForeignNational: user.isForeignNational ?? false,
       foreignId: user.foreignId ?? null,
@@ -233,6 +235,8 @@ export async function getUserState(userId: string) {
       lastName: user.lastName ?? null,
       nationalCode: user.nationalCode ?? null,
       birthDate: user.birthDate ?? null,
+      province: user.province ?? null,
+      city: user.city ?? null,
       profilePhoto: photoUrl(user.profilePhoto),
       isForeignNational: user.isForeignNational ?? false,
       foreignId: user.foreignId ?? null,
@@ -346,6 +350,26 @@ export async function updatePersonal(
     }
     await advanceStep(profile, 'personal');
   }
+}
+
+/**
+ * Update ONLY the profile's activity area (province/state + city) — used by the
+ * stylist/owner dashboards to edit their location, and by the onboarding
+ * "work location" step. Validation happens in the zod layer (geo dataset). For
+ * a stylist mid-onboarding this is the dedicated `location` step, so the
+ * profile advances past it (a no-op once already beyond it — never regresses).
+ */
+export async function updateLocation(userId: string, province: string, city: string) {
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  user.province = province.trim();
+  user.city = city.trim();
+  await user.save();
+  if (user.roles.includes('stylist')) {
+    const profile = await ensureStylistProfile(userId);
+    await advanceStep(profile, 'location');
+  }
+  return { province: user.province, city: user.city };
 }
 
 // ───────────────────────── profile name edit (reviewed) ─────────────────────

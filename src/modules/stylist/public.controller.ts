@@ -4,7 +4,7 @@ import { sendSuccess } from '../../utils/response';
 import { validateUsernameFormat } from '../../utils/username';
 
 export async function search(req: Request, res: Response): Promise<void> {
-  const { serviceId, categoryId, name, province, city, lng, lat, radius, gender, date } =
+  const { serviceId, categoryId, name, province, city, lng, lat, radius, gender, date, page, limit } =
     req.query as unknown as {
       serviceId?: string;
       categoryId?: string;
@@ -16,20 +16,26 @@ export async function search(req: Request, res: Response): Promise<void> {
       radius?: number;
       gender?: 'women' | 'men';
       date?: string;
+      page?: number;
+      limit?: number;
     };
-  const stylists = await service.searchStylists({
-    serviceId,
-    categoryId,
-    name,
-    province,
-    city,
-    lng,
-    lat,
-    radius,
-    gender,
-    date,
-  });
-  sendSuccess(res, { stylists });
+  const result = await service.searchStylistsPage(
+    {
+      serviceId,
+      categoryId,
+      name,
+      province,
+      city,
+      lng,
+      lat,
+      radius,
+      gender,
+      date,
+    },
+    page,
+    limit,
+  );
+  sendSuccess(res, result);
 }
 
 export async function profile(req: Request, res: Response): Promise<void> {

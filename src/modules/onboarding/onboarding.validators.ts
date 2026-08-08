@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SELF_ASSIGNABLE_ROLES } from '../../models/User';
 import { isValidNationalCode } from '../../utils/nationalCode';
+import { findProvince, isValidProvinceCity } from '../../data/iranGeo';
 
 export const setRolesSchema = {
   body: z.object({
@@ -65,6 +66,28 @@ export const personalSchema = {
           });
         }
       }
+    })
+};
+
+/**
+ * Standalone location update (PATCH /me/location) — used by the stylist/owner
+ * dashboards to edit the profile's activity area WITHOUT resubmitting the whole
+ * personal form, and by the onboarding "work location" step. Both fields are
+ * required and validated against the geo dataset.
+ */
+export const locationSchema = {
+  body: z
+    .object({
+      province: z.string().trim().min(1, 'province is required'),
+      city: z.string().trim().min(1, 'city is required'),
+    })
+    .refine((b) => findProvince(b.province) !== undefined, {
+      message: 'استان معتبر نیست',
+      path: ['province'],
+    })
+    .refine((b) => isValidProvinceCity(b.province, b.city), {
+      message: 'شهر متعلق به استان انتخاب‌شده نیست',
+      path: ['city'],
     }),
 };
 
