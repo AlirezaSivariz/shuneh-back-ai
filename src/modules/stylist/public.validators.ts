@@ -63,6 +63,9 @@ export const availableDaysSchema = {
     from: dateStr,
     to: dateStr,
     serviceIds: serviceIdsCsv,
+    // "all" = days bookable for all services together (default); "any" = days
+    // where at least one service fits (no pre-selection on the profile page).
+    mode: z.enum(['any', 'all']).default('all'),
   }),
 };
 

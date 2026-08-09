@@ -649,9 +649,13 @@ function addDaysIso(iso: string, n: number): string {
 
 /**
  * Validate the stylist offers exactly the requested services and return their
- * combined effective duration (minutes). Throws on missing services.
+ * effective durations (minutes) in the same order as `serviceIds`. Throws on
+ * missing services.
  */
-async function resolveTotalDuration(stylistId: string, serviceIds: string[]): Promise<number> {
+async function resolveServiceDurations(
+  stylistId: string,
+  serviceIds: string[],
+): Promise<number[]> {
   const stylistServices = await StylistService.find({
     stylistId,
     serviceId: { $in: serviceIds },
@@ -661,15 +665,22 @@ async function resolveTotalDuration(stylistId: string, serviceIds: string[]): Pr
   }
   const services = await Service.find({ _id: { $in: serviceIds } }).lean();
   const svcById = new Map(services.map((s) => [String(s._id), s as unknown as IService]));
-  let totalDuration = 0;
-  for (const ss of stylistServices) {
-    const svc = svcById.get(String(ss.serviceId));
-    if (svc) totalDuration += effectiveDuration(ss.durationMin, svc);
-  }
-  if (totalDuration <= 0) {
+  const ssById = new Map(stylistServices.map((ss) => [String(ss.serviceId), ss]));
+  const durations = serviceIds.map((id) => {
+    const ss = ssById.get(String(id));
+    const svc = svcById.get(String(id));
+    return ss && svc ? effectiveDuration(ss.durationMin, svc) : 0;
+  });
+  if (durations.some((d) => d <= 0)) {
     throw AppError.badRequest('مدت سرویس نامعتبر است', 'INVALID_DURATION');
   }
-  return totalDuration;
+  return durations;
+}
+
+/** Combined effective duration (minutes) of the requested services. */
+async function resolveTotalDuration(stylistId: string, serviceIds: string[]): Promise<number> {
+  const durations = await resolveServiceDurations(stylistId, serviceIds);
+  return durations.reduce((sum, d) => sum + d, 0);
 }
 
 async function ensureActiveStylist(rawInput: string) {
@@ -781,22 +792,37 @@ export async function getAvailability(
 
 /**
  * Days (Gregorian "YYYY-MM-DD") within [from, to] that have at least one free
- * slot for the chosen services — for disabling empty days in a datepicker.
+ * slot — for disabling empty days in a datepicker.
  * Respects the booking horizon and never returns past days. All-in-memory after
  * two bulk queries (working hours + reservations in range).
+ *
+ * `mode` controls how the requested services are interpreted:
+ * - "all" (default): a day counts only if a slot exists for ALL services booked
+ *   together (combined duration) — the booking-sheet semantics.
+ * - "any": a day counts if at least ONE of the services fits on its own — used
+ *   when no service is pre-selected yet (e.g. the profile sidebar) so dates the
+ *   stylist can take ANY booking are shown as available.
  */
 export async function getAvailableDays(
   stylistId: string,
   from: string,
   to: string,
   serviceIds: string[],
+  mode: 'any' | 'all' = 'all',
 ) {
   const profile = await ensureActiveStylist(stylistId);
   const book = await getBookability(stylistId, profile);
   if (!book.bookable) {
     return { from, to, days: [] as string[] };
   }
-  const totalDuration = await resolveTotalDuration(stylistId, serviceIds);
+  // For "any", a day is bookable iff the SHORTEST service fits on its own (the
+  // set of valid start times is a superset for shorter durations, so if the
+  // shortest fits at least one service is bookable, and if it doesn't no longer
+  // service does either). This keeps the query ~as cheap as "all" instead of
+  // re-running slot building once per service. For "all" use the combined
+  // duration of every selected service booked together.
+  const durations = await resolveServiceDurations(stylistId, serviceIds);
+  const needed = mode === 'any' ? Math.min(...durations) : durations.reduce((sum, d) => sum + d, 0);
 
   const today = iranNow();
   // Clamp the window: not before today, not past the booking horizon.
@@ -853,7 +879,7 @@ export async function getAvailableDays(
     if (!working || working.length === 0) continue;
     const busy = busyByDay.get(iso) ?? [];
     const minStart = today.date === iso ? today.minutes : 0;
-    const slots = buildSlots(working, totalDuration, busy, 15, minStart);
+    const slots = buildSlots(working, needed, busy, 15, minStart);
     if (slots.length > 0) days.push(iso);
   }
 

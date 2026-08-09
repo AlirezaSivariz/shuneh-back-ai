@@ -26,6 +26,39 @@ describe("Reservation — availability & booking", () => {
     expect(days.body.data.days.every((d: string) => d >= futureDate(0))).toBe(true);
   });
 
+  it("available-days mode=any lists days when the combined menu won't fit working hours", async () => {
+    // A stylist offering many services whose combined duration exceeds the daily
+    // working window: booking "all services" is impossible, so mode=all returns
+    // no days — but individual services still fit, so mode=any must surface them.
+    const stylist = await createStylist({ serviceCount: 20 });
+    const from = futureDate(0);
+    const to = futureDate(10);
+    const allIds = stylist.serviceIds.join(",");
+
+    const combined = await api().get(
+      `/stylists/${stylist.id}/available-days?from=${from}&to=${to}&serviceIds=${allIds}`,
+    );
+    expect(combined.status).toBe(200);
+    const any = await api().get(
+      `/stylists/${stylist.id}/available-days?from=${from}&to=${to}&serviceIds=${allIds}&mode=any`,
+    );
+    expect(any.status).toBe(200);
+
+    const single = await api().get(
+      `/stylists/${stylist.id}/available-days?from=${from}&to=${to}&serviceIds=${stylist.serviceIds[0]}`,
+    );
+    expect(single.status).toBe(200);
+
+    // A single (short) service yields bookable days.
+    expect(single.body.data.days.length).toBeGreaterThan(0);
+    // mode=any must agree with per-service availability and be non-empty.
+    expect(any.body.data.days.length).toBeGreaterThan(0);
+    // mode=any is a superset of the combined result.
+    for (const d of combined.body.data.days) {
+      expect(any.body.data.days).toContain(d);
+    }
+  });
+
   it("rejects booking a slot whose time is already in the past", async () => {
     const stylist = await createStylist();
     const customer = await createCustomer();

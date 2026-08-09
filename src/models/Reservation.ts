@@ -324,5 +324,8 @@ reservationSchema.pre('validate', function (next) {
 reservationSchema.index({ status: 1, endAt: 1 });
 // Helps the quick-rebook aggregation (a customer's completed history).
 reservationSchema.index({ customerId: 1, status: 1 });
+// Availability lookups filter by stylist + exact/range day + status — without
+// this, every slot lookup does a collection scan (slow under load).
+reservationSchema.index({ stylistId: 1, date: 1, status: 1 });
 
 export const Reservation = model<IReservation>('Reservation', reservationSchema);

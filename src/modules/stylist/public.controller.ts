@@ -77,12 +77,13 @@ export async function availability(req: Request, res: Response): Promise<void> {
 }
 
 export async function availableDays(req: Request, res: Response): Promise<void> {
-  const { from, to, serviceIds } = req.query as unknown as {
+  const { from, to, serviceIds, mode } = req.query as unknown as {
     from: string;
     to: string;
     serviceIds: string[];
+    mode: 'any' | 'all';
   };
-  const result = await service.getAvailableDays(req.params.id, from, to, serviceIds);
+  const result = await service.getAvailableDays(req.params.id, from, to, serviceIds, mode);
   sendSuccess(res, result);
 }
 
