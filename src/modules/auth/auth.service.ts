@@ -1,7 +1,9 @@
 import { nanoid } from 'nanoid';
 import bcryptjs from 'bcryptjs';
+import { Types } from 'mongoose';
 import { User, IUser } from '../../models/User';
 import { RefreshToken } from '../../models/RefreshToken';
+import { AuditLog } from '../../models/AuditLog';
 import { smsProvider } from '../../utils/sms';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt';
 import { AppError } from '../../utils/AppError';
@@ -18,6 +20,31 @@ export interface RequestOtpResult {
   expiresAt: Date;
   /** Echoed back only by the dev stub for convenience. */
   devCode?: string;
+}
+
+/**
+ * Append an immutable audit record for a login/logout. Mirrors the admin audit
+ * pattern — the actor is stored in `adminId` (a ref to User) so the admin logs
+ * page resolves the phone automatically. Never throws into the auth flow.
+ */
+async function audit(
+  userId: string | Types.ObjectId,
+  action: string,
+  targetType: string,
+  targetId: string,
+  summary?: Record<string, unknown>,
+) {
+  try {
+    await AuditLog.create({
+      adminId: new Types.ObjectId(userId),
+      action,
+      targetType,
+      targetId,
+      summary: summary ?? null,
+    });
+  } catch {
+    /* auditing must never break login/logout */
+  }
 }
 
 /**
@@ -73,6 +100,10 @@ export async function verifyOtp(
   }
 
   const tokens = await issueTokens(user);
+  await audit(user._id, 'auth.login', 'user', user._id.toString(), {
+    method: 'otp',
+    isNewUser,
+  });
   return { user, tokens, isNewUser };
 }
 
@@ -127,6 +158,9 @@ export async function logout(refreshToken: string): Promise<void> {
   try {
     const payload = verifyRefreshToken(refreshToken);
     await RefreshToken.updateOne({ jti: payload.jti }, { revoked: true });
+    await audit(payload.sub, 'auth.logout', 'user', payload.sub, {
+      sessionId: payload.jti,
+    });
   } catch {
     // A malformed/expired token is already effectively logged out.
   }
@@ -158,6 +192,9 @@ export async function loginWithPassword(
   }
 
   const tokens = await issueTokens(user);
+  await audit(user._id, 'auth.login', 'user', user._id.toString(), {
+    method: 'password',
+  });
   return { user, tokens };
 }
 
