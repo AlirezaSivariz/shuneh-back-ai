@@ -9,15 +9,23 @@ import { ensureStylistProfile } from '../onboarding/onboarding.service';
  */
 export async function saveStylistMedia(
   stylistId: string,
-  files: { profilePhoto?: Express.Multer.File[]; portfolio?: Express.Multer.File[] },
+  files: {
+    profilePhoto?: Express.Multer.File[];
+    portfolio?: Express.Multer.File[];
+    cover?: Express.Multer.File[];
+  },
 ) {
   const profile = await ensureStylistProfile(stylistId);
 
   const profilePhotoFile = files.profilePhoto?.[0];
+  const coverFile = files.cover?.[0];
   const portfolioFiles = files.portfolio ?? [];
 
-  if (!profilePhotoFile && portfolioFiles.length === 0) {
-    throw AppError.badRequest('یک عکس پروفایل یا تصویر نمونه‌کار انتخاب کنید', 'NO_FILES');
+  if (!profilePhotoFile && !coverFile && portfolioFiles.length === 0) {
+    throw AppError.badRequest(
+      'یک عکس پروفایل، تصویر کاور یا نمونه‌کار انتخاب کنید',
+      'NO_FILES',
+    );
   }
 
   if (profilePhotoFile) {
@@ -27,6 +35,15 @@ export async function saveStylistMedia(
       kind: 'profile',
     });
     await User.updateOne({ _id: stylistId }, { profilePhoto: stored.path });
+  }
+
+  if (coverFile) {
+    const stored = await storageProvider.save(coverFile, {
+      ownerType: 'stylist',
+      ownerId: stylistId,
+      kind: 'cover',
+    });
+    profile.cover = stored.path;
   }
 
   if (portfolioFiles.length > 0) {
@@ -54,6 +71,7 @@ export async function saveStylistMedia(
     status: profile.status,
     profilePhoto: user?.profilePhoto ? storageProvider.getUrl(user.profilePhoto) : null,
     portfolio: profile.portfolio.map((p) => storageProvider.getUrl(p)),
+    cover: profile.cover ? storageProvider.getUrl(profile.cover) : null,
   };
 }
 

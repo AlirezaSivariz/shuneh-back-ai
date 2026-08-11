@@ -7,6 +7,7 @@ export async function uploadStylistMedia(req: Request, res: Response): Promise<v
   const files = (req.files ?? {}) as {
     profilePhoto?: Express.Multer.File[];
     portfolio?: Express.Multer.File[];
+    cover?: Express.Multer.File[];
   };
   const result = await service.saveStylistMedia(req.user!.id, files);
   sendSuccess(res, result);

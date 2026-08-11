@@ -7,7 +7,7 @@ import { createUploader } from '../../middlewares/upload';
 const router = Router();
 const uploader = createUploader('stylist');
 
-// POST /stylist/media — multipart: one profilePhoto + several portfolio images.
+// POST /stylist/media — multipart: one profilePhoto + one cover + several portfolio images.
 router.post(
   '/',
   authenticate,
@@ -15,6 +15,7 @@ router.post(
   uploader.fields([
     { name: 'profilePhoto', maxCount: 1 },
     { name: 'portfolio', maxCount: 10 },
+    { name: 'cover', maxCount: 1 },
   ]),
   asyncHandler(controller.uploadStylistMedia),
 );

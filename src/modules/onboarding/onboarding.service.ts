@@ -150,6 +150,7 @@ export async function getOnboardingState(userId: string) {
     workplaceType: profile?.workplaceType ?? null,
     freelance: profile?.freelance ?? null,
     portfolio: profile?.portfolio ?? [],
+    cover: profile?.cover ?? null,
     services,
     salons: salonLinks,
     ownedSalonsCount,

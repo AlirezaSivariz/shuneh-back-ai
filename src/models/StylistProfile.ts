@@ -86,6 +86,8 @@ export interface IStylistProfile extends Document {
   workplaceType?: WorkplaceType;
   freelance?: IFreelanceInfo;
   portfolio: string[]; // storage keys
+  /** Public profile cover image (storage key). Fallback: first portfolio image. */
+  cover?: string | null;
   onboardingStep: OnboardingStep;
   status: StylistStatus;
   /**
@@ -189,6 +191,7 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
       default: undefined,
     },
     portfolio: { type: [String], default: [] },
+    cover: { type: String, default: undefined },
     onboardingStep: { type: String, enum: ONBOARDING_STEPS, default: 'role' },
     status: { type: String, enum: ['draft', 'active'], default: 'draft' },
     isAcceptingReservations: { type: Boolean, default: true },

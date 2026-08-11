@@ -626,6 +626,7 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
       ? { address: profile.freelance.address ?? null, location: profile.freelance.location ?? null }
       : null,
     portfolio: (profile.portfolio ?? []).map((p) => storageProvider.getUrl(p)),
+    cover: photoUrl(profile.cover),
     services,
     salons,
     rating: profile.ratingAverage ?? 0,
