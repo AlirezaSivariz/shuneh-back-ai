@@ -112,3 +112,20 @@ export async function deletePortfolioItem(stylistId: string, key: string) {
     portfolioUrls: profile.portfolio.map((p) => storageProvider.getUrl(p)),
   };
 }
+
+/**
+ * Remove the stylist's public cover image (post-onboarding management). The
+ * stored file is deleted best-effort; returns the cleared value so the client
+ * can reset its preview.
+ */
+export async function deleteCover(stylistId: string) {
+  const profile = await ensureStylistProfile(stylistId);
+  if (!profile.cover) throw AppError.notFound('کاور یافت نشد', 'COVER_NOT_FOUND');
+
+  const old = profile.cover;
+  profile.cover = undefined;
+  await profile.save();
+  await storageProvider.delete(old);
+
+  return { cover: null };
+}

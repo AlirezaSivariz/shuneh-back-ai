@@ -24,3 +24,8 @@ export async function deletePortfolioItem(req: Request, res: Response): Promise<
   const result = await service.deletePortfolioItem(req.user!.id, key);
   sendSuccess(res, result);
 }
+
+export async function deleteCover(req: Request, res: Response): Promise<void> {
+  const result = await service.deleteCover(req.user!.id);
+  sendSuccess(res, result);
+}

@@ -28,4 +28,12 @@ router.delete(
   asyncHandler(controller.deletePortfolioItem),
 );
 
+// DELETE /stylist/media/cover — remove the public cover image.
+router.delete(
+  '/cover',
+  authenticate,
+  authorize('stylist'),
+  asyncHandler(controller.deleteCover),
+);
+
 export default router;
