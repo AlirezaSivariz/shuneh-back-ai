@@ -151,6 +151,7 @@ export async function getOnboardingState(userId: string) {
     freelance: profile?.freelance ?? null,
     portfolio: profile?.portfolio ?? [],
     cover: profile?.cover ?? null,
+    slogan: profile?.slogan ?? null,
     services,
     salons: salonLinks,
     ownedSalonsCount,

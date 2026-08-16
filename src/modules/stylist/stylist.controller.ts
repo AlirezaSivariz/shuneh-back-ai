@@ -57,6 +57,12 @@ export async function setUsername(req: Request, res: Response): Promise<void> {
   sendSuccess(res, result);
 }
 
+/** Set or clear the one-line public tagline (شعار متخصص). */
+export async function setSlogan(req: Request, res: Response): Promise<void> {
+  const result = await service.setSlogan(req.user!.id, req.body.slogan as string);
+  sendSuccess(res, result);
+}
+
 export async function submitVerification(req: Request, res: Response): Promise<void> {
   const result = await service.submitVerification(req.user!.id);
   sendSuccess(res, result);

@@ -36,6 +36,13 @@ export const usernameSchema = {
     username: z.string().trim().min(1, 'نام کاربری لازم است'),
   }),
 };
+
+/** One-line public tagline (شعار متخصص). Empty string clears it. */
+export const sloganSchema = {
+  body: z.object({
+    slogan: z.string().trim().max(30, 'شعار نباید بیشتر از ۳۰ کاراکتر باشد'),
+  }),
+};
 export const payoutSchema = {
   body: z
     .object({

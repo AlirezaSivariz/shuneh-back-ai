@@ -14,6 +14,7 @@ export async function saveStylistMedia(
     portfolio?: Express.Multer.File[];
     cover?: Express.Multer.File[];
   },
+  slogan?: string,
 ) {
   const profile = await ensureStylistProfile(stylistId);
 
@@ -57,6 +58,12 @@ export async function saveStylistMedia(
       storedPaths.push(stored.path);
     }
     profile.portfolio = [...profile.portfolio, ...storedPaths];
+  }
+
+  // Optional slogan (final onboarding step). Only write it when the client sent
+  // a value so later cover/portfolio-only uploads never wipe an existing one.
+  if (slogan !== undefined) {
+    profile.slogan = slogan.trim() || null;
   }
 
   // Finalize onboarding.

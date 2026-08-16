@@ -88,6 +88,8 @@ export interface IStylistProfile extends Document {
   portfolio: string[]; // storage keys
   /** Public profile cover image (storage key). Fallback: first portfolio image. */
   cover?: string | null;
+  /** One-line public tagline (شعار متخصص), shown under the location on the card. */
+  slogan?: string | null;
   onboardingStep: OnboardingStep;
   status: StylistStatus;
   /**
@@ -192,6 +194,7 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
     },
     portfolio: { type: [String], default: [] },
     cover: { type: String, default: undefined },
+    slogan: { type: String, trim: true, default: null },
     onboardingStep: { type: String, enum: ONBOARDING_STEPS, default: 'role' },
     status: { type: String, enum: ['draft', 'active'], default: 'draft' },
     isAcceptingReservations: { type: Boolean, default: true },

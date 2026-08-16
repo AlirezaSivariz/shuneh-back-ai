@@ -9,7 +9,9 @@ export async function uploadStylistMedia(req: Request, res: Response): Promise<v
     portfolio?: Express.Multer.File[];
     cover?: Express.Multer.File[];
   };
-  const result = await service.saveStylistMedia(req.user!.id, files);
+  const slogan =
+    typeof req.body?.slogan === 'string' ? req.body.slogan.slice(0, 30) : undefined;
+  const result = await service.saveStylistMedia(req.user!.id, files, slogan);
   sendSuccess(res, result);
 }
 

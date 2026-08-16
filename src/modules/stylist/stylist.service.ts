@@ -98,6 +98,14 @@ export async function setUsername(stylistId: string, username: string) {
   return { username: profile.username };
 }
 
+/** Set or clear the one-line public tagline (شعار متخصص). */
+export async function setSlogan(stylistId: string, slogan: string) {
+  const profile = await ensureStylistProfile(stylistId);
+  profile.slogan = slogan.trim() ? slogan.trim() : null;
+  await profile.save();
+  return { slogan: profile.slogan };
+}
+
 /** Step 3 — choose workplace type (freelance | salon). */
 export async function setWorkplaceType(stylistId: string, type: WorkplaceType) {
   const profile = await ensureStylistProfile(stylistId);
