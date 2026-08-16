@@ -44,6 +44,9 @@ interface ServiceItem {
   durationMin?: number | null;
 }
 
+/** Maximum portfolio images a stylist can attach to a single service. */
+export const MAX_SERVICE_PORTFOLIO = 3;
+
 /**
  * Step 2 — set the services a stylist offers. Upserts each StylistService and
  * removes ones no longer selected (full replace of the stylist's service set).
@@ -74,6 +77,7 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
   // Remove de-selected services — but NEVER the stylist's custom services
   // (those are managed via the /services/custom endpoints, not this catalogue set).
   const keep = [...serviceIds, ...(await customServiceIds(stylistId))];
+  await deleteUnkeptServiceImages(stylistId, keep);
   await StylistService.deleteMany({ stylistId, serviceId: { $nin: keep } });
 
   // The step requires at least one service in TOTAL — a selected default OR a
@@ -615,6 +619,8 @@ export async function listStylistServices(stylistId: string) {
         defaultPrice: svc.defaultPrice,
         defaultDurationMin: svc.durationMin,
         isCustom: !!svc.isCustom,
+        portfolioImages: link.portfolioImages ?? [],
+        showPortfolioOnCard: link.showPortfolioOnCard !== false,
       };
     })
     .filter(Boolean);
@@ -643,6 +649,7 @@ export async function replaceStylistServices(stylistId: string, items: ServiceIt
     );
   }
   const keep = [...serviceIds, ...(await customServiceIds(stylistId))];
+  await deleteUnkeptServiceImages(stylistId, keep);
   await StylistService.deleteMany({ stylistId, serviceId: { $nin: keep } });
 
   return listStylistServices(stylistId);
@@ -669,7 +676,7 @@ export async function addStylistService(
 export async function updateStylistService(
   stylistId: string,
   serviceId: string,
-  data: { price?: number | null; durationMin?: number | null },
+  data: { price?: number | null; durationMin?: number | null; showPortfolioOnCard?: boolean },
 ) {
   const link = await StylistService.findOne({ stylistId, serviceId });
   if (!link) {
@@ -677,16 +684,19 @@ export async function updateStylistService(
   }
   if (data.price !== undefined) link.price = data.price;
   if (data.durationMin !== undefined) link.durationMin = data.durationMin;
+  if (data.showPortfolioOnCard !== undefined) link.showPortfolioOnCard = data.showPortfolioOnCard;
   await link.save();
   return listStylistServices(stylistId);
 }
 
 /** Remove a single service from the stylist's offering. */
 export async function removeStylistService(stylistId: string, serviceId: string) {
-  const result = await StylistService.deleteOne({ stylistId, serviceId });
-  if (result.deletedCount === 0) {
+  const link = await StylistService.findOne({ stylistId, serviceId });
+  if (!link) {
     throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
   }
+  await deleteStoredImages(link.portfolioImages ?? []);
+  await link.deleteOne();
   return listStylistServices(stylistId);
 }
 
@@ -766,8 +776,148 @@ export async function updateCustomService(
 
 export async function deleteCustomService(stylistId: string, serviceId: string) {
   const service = await ownedCustomService(stylistId, serviceId);
+  const link = await StylistService.findOne({ stylistId, serviceId: service._id });
+  await deleteStoredImages(link?.portfolioImages ?? []);
   await StylistService.deleteMany({ stylistId, serviceId: service._id });
   await service.deleteOne();
+  return listStylistServices(stylistId);
+}
+
+// ───────────────────── Service portfolio images (max 3 per service) ─────────────────────
+
+/** Best-effort deletion of stored images by their storage keys. */
+async function deleteStoredImages(keys: string[]) {
+  if (!keys || keys.length === 0) return;
+  await Promise.all(keys.map((k) => storageProvider.delete(k).catch(() => undefined)));
+}
+
+/**
+ * Delete the portfolio images of the stylist's services that are NOT in
+ * `keepIds` (called right before their junction docs are removed).
+ */
+async function deleteUnkeptServiceImages(stylistId: string, keepIds: string[]) {
+  const removed = await StylistService.find({ stylistId, serviceId: { $nin: keepIds } })
+    .select('portfolioImages')
+    .lean();
+  for (const link of removed) {
+    await deleteStoredImages(link.portfolioImages ?? []);
+  }
+}
+
+/** Resolve the stylist's junction for a service, validating the service exists. */
+async function ownedServiceLink(stylistId: string, serviceId: string) {
+  if (!Types.ObjectId.isValid(serviceId)) {
+    throw AppError.badRequest('شناسه‌ی خدمت نامعتبر است', 'INVALID_SERVICE');
+  }
+  const svc = await Service.exists({ _id: serviceId });
+  if (!svc) throw AppError.notFound('خدمت یافت نشد', 'SERVICE_NOT_FOUND');
+  return StylistService.findOne({ stylistId, serviceId });
+}
+
+/**
+ * The junction may not exist yet during onboarding (services are selected in
+ * the picker but saved only on «ادامه»). Uploading a portfolio image creates
+ * it on the fly so images are never lost to an unpersisted selection.
+ */
+async function ensureOwnedServiceLink(stylistId: string, serviceId: string) {
+  if (!Types.ObjectId.isValid(serviceId)) {
+    throw AppError.badRequest('شناسه‌ی خدمت نامعتبر است', 'INVALID_SERVICE');
+  }
+  const svc = await Service.exists({ _id: serviceId });
+  if (!svc) throw AppError.notFound('خدمت یافت نشد', 'SERVICE_NOT_FOUND');
+  return StylistService.findOneAndUpdate(
+    { stylistId, serviceId },
+    { $setOnInsert: { price: null, durationMin: null, portfolioImages: [], showPortfolioOnCard: true } },
+    { upsert: true, new: true },
+  );
+}
+
+async function saveServiceImages(
+  files: Express.Multer.File[],
+  stylistId: string,
+): Promise<string[]> {
+  const meta = { ownerType: 'service', ownerId: stylistId, kind: 'service' as const };
+  const stored = await Promise.all(files.map((f) => storageProvider.save(f, meta)));
+  return stored.map((s) => s.path);
+}
+
+/**
+ * Append up to 3 portfolio images to a service. During onboarding the junction
+ * is created on demand; later the images attach to the existing link.
+ */
+export async function addServicePortfolioImages(
+  stylistId: string,
+  serviceId: string,
+  files: Express.Multer.File[],
+) {
+  const link = await ensureOwnedServiceLink(stylistId, serviceId);
+  const room = MAX_SERVICE_PORTFOLIO - (link.portfolioImages ?? []).length;
+  if (room <= 0) {
+    throw AppError.badRequest('حداکثر ۳ تصویر برای هر خدمت مجاز است', 'PORTFOLIO_LIMIT');
+  }
+  const saved = await saveServiceImages(files.slice(0, room), stylistId);
+  link.portfolioImages = [...(link.portfolioImages ?? []), ...saved];
+  await link.save();
+  return listStylistServices(stylistId);
+}
+
+/** Replace the portfolio image at `index` with a newly uploaded one. */
+export async function replaceServicePortfolioImage(
+  stylistId: string,
+  serviceId: string,
+  index: number,
+  file: Express.Multer.File,
+) {
+  const link = await ownedServiceLink(stylistId, serviceId);
+  if (!link) throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
+  const images = link.portfolioImages ?? [];
+  if (!Number.isInteger(index) || index < 0 || index >= images.length) {
+    throw AppError.badRequest('شاخص تصویر نامعتبر است', 'INVALID_INDEX');
+  }
+  const oldKey = images[index];
+  const [saved] = await saveServiceImages([file], stylistId);
+  images[index] = saved;
+  link.portfolioImages = images;
+  await link.save();
+  if (oldKey) await storageProvider.delete(oldKey).catch(() => undefined);
+  return listStylistServices(stylistId);
+}
+
+/**
+ * Full replace of a service's portfolio image list (delete + reorder). Only
+ * keys already attached to the service are accepted, so no foreign keys leak in.
+ */
+export async function replaceServicePortfolio(
+  stylistId: string,
+  serviceId: string,
+  images: string[],
+) {
+  if (images.length > MAX_SERVICE_PORTFOLIO) {
+    throw AppError.badRequest('حداکثر ۳ تصویر برای هر خدمت مجاز است', 'PORTFOLIO_LIMIT');
+  }
+  const link = await ownedServiceLink(stylistId, serviceId);
+  if (!link) throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
+  const current = new Set(link.portfolioImages ?? []);
+  if (!images.every((k) => current.has(k))) {
+    throw AppError.badRequest('یک یا چند تصویر نامعتبر است', 'INVALID_IMAGE');
+  }
+  const removed = (link.portfolioImages ?? []).filter((k) => !images.includes(k));
+  link.portfolioImages = images;
+  await link.save();
+  await deleteStoredImages(removed);
+  return listStylistServices(stylistId);
+}
+
+/** Toggle whether the service's first portfolio image shows on the public card. */
+export async function setServicePortfolioVisibility(
+  stylistId: string,
+  serviceId: string,
+  show: boolean,
+) {
+  const link = await ownedServiceLink(stylistId, serviceId);
+  if (!link) throw AppError.notFound('این خدمت در فهرست خدمات شما نیست', 'STYLIST_SERVICE_NOT_FOUND');
+  link.showPortfolioOnCard = show;
+  await link.save();
   return listStylistServices(stylistId);
 }
 

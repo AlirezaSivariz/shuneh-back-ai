@@ -25,6 +25,8 @@ import {
   replaceServicesSchema,
   stylistServiceBodySchema,
   stylistServiceIdParamsSchema,
+  servicePortfolioImagesSchema,
+  servicePortfolioReplaceSchema,
   createCustomServiceSchema,
   updateCustomServiceSchema,
   workplaceTypeSchema,
@@ -97,6 +99,29 @@ router.delete(
   '/services/:serviceId',
   validate(stylistServiceIdParamsSchema),
   asyncHandler(controller.removeService),
+);
+
+// ── Service portfolio images (max 3 per service) ──
+const servicePortfolioUploader = createUploader('service-portfolio');
+// Append new images (creates the link on demand during onboarding).
+router.post(
+  '/services/:serviceId/portfolio',
+  servicePortfolioUploader.array('images', 3),
+  validate(stylistServiceIdParamsSchema),
+  asyncHandler(controller.addServicePortfolioImages),
+);
+// Replace one image in place (multipart: `image` + text field `index`).
+router.post(
+  '/services/:serviceId/portfolio/replace',
+  servicePortfolioUploader.single('image'),
+  validate(servicePortfolioReplaceSchema),
+  asyncHandler(controller.replaceServicePortfolioImage),
+);
+// Full replace of the image list (delete + reorder via JSON).
+router.put(
+  '/services/:serviceId/portfolio',
+  validate(servicePortfolioImagesSchema),
+  asyncHandler(controller.replaceServicePortfolio),
 );
 
 // Step 3 — workplace.

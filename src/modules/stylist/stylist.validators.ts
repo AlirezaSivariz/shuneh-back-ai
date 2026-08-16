@@ -100,11 +100,28 @@ export const stylistServiceBodySchema = {
   body: z.object({
     price: z.number().min(0).nullable().optional(),
     durationMin: z.number().int().min(1).nullable().optional(),
+    showPortfolioOnCard: z.boolean().optional(),
   }),
 };
 
 export const stylistServiceIdParamsSchema = {
   params: z.object({ serviceId: objectId }),
+};
+
+// Full replace of a service's portfolio image list (delete + reorder).
+export const servicePortfolioImagesSchema = {
+  params: z.object({ serviceId: objectId }),
+  body: z.object({
+    images: z.array(z.string().min(1)).max(3),
+  }),
+};
+
+// Multipart replace of a single portfolio image (index arrives as a string).
+export const servicePortfolioReplaceSchema = {
+  params: z.object({ serviceId: objectId }),
+  body: z.object({
+    index: z.coerce.number().int().min(0).max(2),
+  }),
 };
 
 // Custom (stylist-private) services.

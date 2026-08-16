@@ -544,6 +544,10 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
         price: effectivePrice(ss.price, svc),
         durationMin: effectiveDuration(ss.durationMin, svc),
         category: cat ? { id: String(cat._id), name: cat.name } : null,
+        // Per-service portfolio images (public URLs); the first one is the card
+        // thumbnail when the stylist enables it.
+        portfolioImages: (ss.portfolioImages ?? []).map((k) => storageProvider.getUrl(k)),
+        showPortfolioOnCard: ss.showPortfolioOnCard !== false,
       };
     })
     .filter(Boolean);

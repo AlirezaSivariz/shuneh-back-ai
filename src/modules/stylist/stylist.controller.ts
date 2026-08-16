@@ -118,6 +118,40 @@ export async function removeService(req: Request, res: Response): Promise<void> 
   sendSuccess(res, result);
 }
 
+// ── Service portfolio images (max 3 per service) ──
+
+export async function addServicePortfolioImages(req: Request, res: Response): Promise<void> {
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (files.length === 0) {
+    throw AppError.badRequest('حداقل یک تصویر انتخاب کنید', 'NO_IMAGES');
+  }
+  const result = await service.addServicePortfolioImages(req.user!.id, req.params.serviceId, files);
+  sendSuccess(res, result, 201);
+}
+
+export async function replaceServicePortfolioImage(req: Request, res: Response): Promise<void> {
+  const file = req.file as Express.Multer.File | undefined;
+  if (!file) {
+    throw AppError.badRequest('تصویری انتخاب نشده است', 'NO_IMAGE');
+  }
+  const result = await service.replaceServicePortfolioImage(
+    req.user!.id,
+    req.params.serviceId,
+    req.body.index as number,
+    file,
+  );
+  sendSuccess(res, result);
+}
+
+export async function replaceServicePortfolio(req: Request, res: Response): Promise<void> {
+  const result = await service.replaceServicePortfolio(
+    req.user!.id,
+    req.params.serviceId,
+    req.body.images,
+  );
+  sendSuccess(res, result);
+}
+
 // ── Custom (stylist-private) services ──
 
 export async function createCustomService(req: Request, res: Response): Promise<void> {

@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type ImageKind = 'profile' | 'portfolio' | 'cover' | 'national_card' | 'blog' | 'social' | 'passport';
+export type ImageKind = 'profile' | 'portfolio' | 'cover' | 'national_card' | 'blog' | 'social' | 'passport' | 'service';
 
 /**
  * A stored image (TEMPORARY test-phase storage in MongoDB as BinData).
@@ -29,7 +29,7 @@ const imageAssetSchema = new Schema<IImageAsset>(
   {
     ownerType: { type: String },
     ownerId: { type: Schema.Types.ObjectId },
-    kind: { type: String, enum: ['profile', 'portfolio', 'cover', 'national_card', 'blog', 'social', 'passport'] },
+    kind: { type: String, enum: ['profile', 'portfolio', 'cover', 'national_card', 'blog', 'social', 'passport', 'service'] },
     mime: { type: String, required: true, default: 'image/webp' },
     width: { type: Number },
     height: { type: Number },
