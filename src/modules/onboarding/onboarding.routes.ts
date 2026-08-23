@@ -11,7 +11,10 @@ import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { createUploader } from '../../middlewares/upload';
+import { z } from 'zod';
 import { setRolesSchema, personalSchema, nameEditSchema, locationSchema } from './onboarding.validators';
+
+const messageIdParamsSchema = { params: z.object({ id: z.string().min(1) }) };
 import { reportRangeSchema } from '../reports/reports.validators';
 import { topupSchema, walletTxListSchema } from '../wallet/wallet.validators';
 import { walletQuerySchema, planPurchaseSchema } from '../credit/credit.validators';
@@ -71,4 +74,4 @@ meRouter.get('/quick-rebook', asyncHandler(reservationController.quickRebook));
 // In-app messages from support (one-way: admin → user).
 meRouter.get('/messages', asyncHandler(messageController.listMine));
 meRouter.get('/messages/unread-count', asyncHandler(messageController.unreadCount));
-meRouter.patch('/messages/:id/read', asyncHandler(messageController.markRead));
+meRouter.patch('/messages/:id/read', validate(messageIdParamsSchema), asyncHandler(messageController.markRead));
