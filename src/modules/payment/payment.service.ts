@@ -19,6 +19,7 @@
 import { nanoid } from 'nanoid';
 import { config } from '../../config/env';
 import { AppError } from '../../utils/AppError';
+import { childLogger } from '../../utils/logger';
 import { User } from '../../models/User';
 import { StylistProfile, planAllowsSmsCampaign, planExpiryDate } from '../../models/StylistProfile';
 import {
@@ -36,6 +37,8 @@ import {
   requestMessage,
   verifyMessage,
 } from './zibal.client';
+
+const log = childLogger({ module: 'payment' });
 
 /** Rial is Zibal's unit; our canonical unit is Toman (1 Toman = 10 Rial). */
 const RIAL_PER_TOMAN = 10;
@@ -133,8 +136,7 @@ export async function startPayment(
     tx.status = 'failed';
     tx.message = (err as Error).message?.slice(0, 300) ?? 'network error';
     await tx.save();
-    // eslint-disable-next-line no-console
-    console.error(`[payment] request failed order=${orderId}:`, (err as Error).message);
+    log.error({ orderId, err }, 'Payment request failed');
     throw new AppError(502, 'ارتباط با درگاه پرداخت برقرار نشد؛ دوباره تلاش کنید', 'GATEWAY_UNREACHABLE');
   }
 
@@ -261,8 +263,7 @@ export async function handleCallback(input: {
 
   const tx = await PaymentTransaction.findOne({ trackId });
   if (!tx) {
-    // eslint-disable-next-line no-console
-    console.warn(`[payment] callback for unknown trackId=${trackId.slice(0, 6)}…`);
+    log.warn({ trackId: trackId.slice(0, 6) }, 'Callback for unknown trackId');
     return { redirectUrl: resultRedirect({ status: 'failed', reason: 'not_found' }) };
   }
 
@@ -298,8 +299,7 @@ export async function handleCallback(input: {
   } catch (err) {
     // Verify failed to reach Zibal — leave the row 'pending' so a later
     // callback / reconciliation can still settle it; tell the user to retry.
-    // eslint-disable-next-line no-console
-    console.error(`[payment] verify network error trackId=${trackId.slice(0, 6)}…:`, (err as Error).message);
+    log.error({ trackId: trackId.slice(0, 6), err }, 'Verify network error');
     return { redirectUrl: resultRedirect({ status: 'pending', reason: 'verify_unreachable', trackId }) };
   }
 
@@ -309,8 +309,7 @@ export async function handleCallback(input: {
     tx.resultCode = verify.result;
     tx.message = verifyMessage(verify.result);
     await tx.save();
-    // eslint-disable-next-line no-console
-    console.warn(`[payment] verify not-paid order=${tx.orderId} result=${verify.result}`);
+    log.warn({ orderId: tx.orderId, result: verify.result }, 'Verify not-paid');
     await releaseReservationHold(tx);
     return {
       redirectUrl: resultRedirect({ status: 'failed', reason: 'unverified', trackId, message: tx.message }),
@@ -323,10 +322,7 @@ export async function handleCallback(input: {
     tx.resultCode = verify.result;
     tx.message = `مبلغ برگشتی (${verify.amount}) با مبلغ ثبت‌شده (${tx.amountRial}) مطابقت ندارد`;
     await tx.save();
-    // eslint-disable-next-line no-console
-    console.error(
-      `[payment] amount mismatch order=${tx.orderId} expected=${tx.amountRial} got=${verify.amount}`,
-    );
+    log.error({ orderId: tx.orderId, expected: tx.amountRial, got: verify.amount }, 'Amount mismatch — possible tamper');
     await releaseReservationHold(tx);
     return {
       redirectUrl: resultRedirect({ status: 'failed', reason: 'amount_mismatch', trackId, message: tx.message }),
@@ -353,10 +349,9 @@ export async function handleCallback(input: {
   try {
     await applyPaymentOutcome(claimed, trackId);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[payment] outcome FAILED after paid order=${claimed.orderId} purpose=${claimed.purpose}:`,
-      (err as Error).message,
+    log.error(
+      { orderId: claimed.orderId, purpose: claimed.purpose, err },
+      'Payment outcome FAILED after money captured',
     );
     claimed.message = `paid_but_outcome_failed: ${(err as Error).message}`.slice(0, 300);
     await claimed.save();
@@ -425,7 +420,6 @@ async function releaseReservationHold(tx: IPaymentTransaction): Promise<void> {
     );
     await releaseUnpaidReservation(reservationId);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[payment] releasing reservation hold failed order=${tx.orderId}:`, (err as Error).message);
+    log.error({ orderId: tx.orderId, err }, 'Failed to release reservation hold');
   }
 }

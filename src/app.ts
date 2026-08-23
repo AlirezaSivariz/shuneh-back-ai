@@ -1,8 +1,9 @@
 import path from "path";
-import express, { Application, Request, Response } from "express";
+import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
-import morgan from "morgan";
-// import "./types/express"; // load Request augmentation
+import pinoHttp from "pino-http";
+import { nanoid } from "nanoid";
+import logger from "./utils/logger";
 
 import { config } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
@@ -62,7 +63,30 @@ export function createApp(): Application {
   );
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
-  if (config.isDev) app.use(morgan("dev"));
+
+  // Request ID — every request gets a short unique ID for tracing.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    (req as any).id = nanoid(12);
+    next();
+  });
+
+  // Structured request/response logging via pino-http.
+  // In dev, pretty-prints; in prod, emits JSON for log aggregators.
+  app.use(
+    pinoHttp({
+      logger,
+      genReqId: (req) => (req as any).id,
+      // Skip noisy health-check logs in production.
+      autoLogging: {
+        ignore: (req) => req.url === "/health",
+      },
+      // Redact common sensitive fields from logs.
+      redact: {
+        paths: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.code"],
+        censor: "[REDACTED]",
+      },
+    }),
+  );
 
   // Static serving of uploaded files (local driver).
   app.use("/uploads", express.static(path.resolve(config.uploadDir)));

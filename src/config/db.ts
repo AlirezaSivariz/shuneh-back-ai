@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 import { config } from './env';
+import { childLogger } from '../utils/logger';
+
+const log = childLogger({ module: 'db' });
 
 // Options tuned for hosted MongoDB (Atlas) reliability:
 // - connectTimeoutMS: 10s (the driver default) is too short for a cluster cold
@@ -28,12 +31,10 @@ export async function connectDb(): Promise<typeof mongoose> {
   // A cleared pool (e.g. a flaky network handshake) is normally recovered by the
   // driver's own reconnect logic; log it so the incident is visible in metrics.
   mongoose.connection.on('connected', () => {
-    // eslint-disable-next-line no-console
-    console.log('[db] connected');
+    log.info('MongoDB connected');
   });
   mongoose.connection.on('error', (err) => {
-    // eslint-disable-next-line no-console
-    console.error('[db] connection error:', err.message);
+    log.error({ err }, 'MongoDB connection error');
   });
 
   await mongoose.connect(config.mongoUri, mongooseOptions);

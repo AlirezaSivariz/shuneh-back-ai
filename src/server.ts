@@ -1,6 +1,7 @@
 import { createApp } from './app';
 import { connectDb } from './config/db';
 import { config } from './config/env';
+import logger from './utils/logger';
 import {
   autoSeedIfEmpty,
   migrateLegacySalonServiceGender,
@@ -13,6 +14,21 @@ import {
 import { seedCommunity } from './seed/community.seed';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler';
 import { ensureStorageReady } from './utils/storage';
+
+const log = logger.child({ module: 'server' });
+
+// ── Process-level crash guards ──
+// Unhandled rejections and uncaught exceptions are logged with full context
+// before the process exits. In production, a process manager (PM2, Docker)
+// will restart the container.
+process.on('unhandledRejection', (reason) => {
+  log.fatal({ err: reason instanceof Error ? reason : new Error(String(reason)) }, 'Unhandled rejection');
+  process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  log.fatal({ err }, 'Uncaught exception');
+  process.exit(1);
+});
 
 async function bootstrap() {
   await connectDb();
@@ -32,12 +48,11 @@ async function bootstrap() {
   // Backfill stylist usernames for human-readable profile URLs.
   await autoMigrateUsernames();
   // Seed the community Q&A forum demo content (idempotent — never duplicates).
-  // Opt-in via SEED_COMMUNITY=1 so it never runs against a prod database by default.
   if (config.seedCommunity) {
     const seeded = await seedCommunity();
-    // eslint-disable-next-line no-console
-    console.log(
-      `[seed] community ensured: ${seeded.users} users, ${seeded.questions} questions, ${seeded.answers} answers, ${seeded.likes} likes`,
+    log.info(
+      { users: seeded.users, questions: seeded.questions, answers: seeded.answers, likes: seeded.likes },
+      'Community seed ensured',
     );
   }
 
@@ -46,8 +61,7 @@ async function bootstrap() {
   try {
     await ensureStorageReady();
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[storage] bucket warm-up failed (will retry on first upload):', err);
+    log.warn({ err }, 'Storage bucket warm-up failed (will retry on first upload)');
   }
 
   const app = createApp();
@@ -56,14 +70,12 @@ async function bootstrap() {
   startScheduledJobs();
 
   const server = app.listen(config.port, () => {
-    // eslint-disable-next-line no-console
-    console.log(`[server] listening on ${config.baseUrl} (port ${config.port})`);
+    log.info({ port: config.port, baseUrl: config.baseUrl }, 'Server listening');
   });
 
   // Graceful shutdown: stop timers and the HTTP server.
   const shutdown = (signal: string) => {
-    // eslint-disable-next-line no-console
-    console.log(`[server] ${signal} received, shutting down`);
+    log.info({ signal }, 'Shutdown signal received, closing gracefully');
     stopScheduledJobs();
     server.close(() => process.exit(0));
   };
@@ -72,7 +84,6 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error('[server] failed to start:', err);
+  log.fatal({ err }, 'Server failed to start');
   process.exit(1);
 });

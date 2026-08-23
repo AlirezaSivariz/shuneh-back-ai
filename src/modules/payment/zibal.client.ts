@@ -1,15 +1,7 @@
-/**
- * Zibal IPG client — RESTful JSON, no crypto. The merchant key comes from
- * `config.zibal.merchant` (env only; never logged/returned).
- *
- *   request: POST /v1/request  { merchant, amount(Rial), callbackUrl, orderId, description, mobile? }
- *            → { result, trackId, message }
- *   start  : redirect the user to  {baseUrl}/start/{trackId}
- *   verify : POST /v1/verify   { merchant, trackId }
- *            → { result, status, amount, refNumber, paidAt, cardNumber, orderId }
- *   inquiry: POST /v1/inquiry  { merchant, trackId } (optional reconciliation)
- */
 import { config } from '../../config/env';
+import { childLogger, maskTrack } from '../../utils/logger';
+
+const log = childLogger({ module: 'zibal' });
 
 const TIMEOUT_MS = 20_000;
 
@@ -42,10 +34,6 @@ export function requestMessage(code: number): string {
 }
 export function verifyMessage(code: number): string {
   return VERIFY_MESSAGES[code] ?? `خطای تأیید پرداخت (کد ${code})`;
-}
-
-function maskTrack(t?: string | null): string {
-  return t ? `${String(t).slice(0, 6)}…` : '∅';
 }
 
 async function post<T>(pathname: string, body: Record<string, unknown>): Promise<T> {
@@ -93,8 +81,7 @@ export async function zibalRequest(input: ZibalRequestInput): Promise<ZibalReque
     ...(input.mobile ? { mobile: input.mobile } : {}),
   });
   const result = Number(raw.result ?? -1);
-  // eslint-disable-next-line no-console
-  console.log(`[zibal] request order=${input.orderId} result=${result} trackId=${maskTrack(raw.trackId?.toString())}`);
+  log.info({ orderId: input.orderId, result, trackId: maskTrack(raw.trackId?.toString()) }, 'Zibal request');
   return { result, trackId: raw.trackId ?? null, message: raw.message ?? null };
 }
 
@@ -120,8 +107,7 @@ export async function zibalVerify(trackId: string): Promise<ZibalVerifyResult> {
     trackId,
   });
   const result = Number(raw.result ?? -1);
-  // eslint-disable-next-line no-console
-  console.log(`[zibal] verify trackId=${maskTrack(trackId)} result=${result} ref=${raw.refNumber ?? '∅'}`);
+  log.info({ trackId: maskTrack(trackId), result, refNumber: raw.refNumber ?? null }, 'Zibal verify');
   return {
     result,
     status: raw.status !== undefined ? Number(raw.status) : null,

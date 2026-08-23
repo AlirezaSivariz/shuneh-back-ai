@@ -3,6 +3,9 @@ import { completeDueReservations } from '../modules/reservation/reservation.serv
 import { releaseExpiredHolds } from '../modules/reservation/reservation.customer.service';
 import { purgeExpiredStories } from '../modules/social/story.service';
 import { downgradeExpiredPlans, sendPlanExpiryReminders } from '../modules/plan/plan.expiry';
+import { childLogger } from '../utils/logger';
+
+const log = childLogger({ module: 'cron' });
 
 /** How often expired 24h stories are purged (record + image). Read-time filtering
  * already hides them; this only reclaims storage. */
@@ -24,13 +27,11 @@ async function runReservationAutoComplete(): Promise<void> {
   try {
     const result = await completeDueReservations();
     if (result.modified > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[cron] auto-completed ${result.modified} reservation(s)`);
+      log.info({ modified: result.modified }, 'Auto-completed reservations');
     }
   } catch (err) {
     // Never let a job error crash the process; log and wait for the next tick.
-    // eslint-disable-next-line no-console
-    console.error('[cron] reservation auto-complete failed:', err);
+    log.error({ err }, 'Reservation auto-complete failed');
   }
 }
 
@@ -38,12 +39,10 @@ async function runHoldCleanup(): Promise<void> {
   try {
     const { removed } = await releaseExpiredHolds();
     if (removed > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[cron] released ${removed} abandoned payment hold(s)`);
+      log.info({ removed }, 'Released abandoned payment holds');
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[cron] reservation hold cleanup failed:', err);
+    log.error({ err }, 'Reservation hold cleanup failed');
   }
 }
 
@@ -51,12 +50,10 @@ async function runStoryPurge(): Promise<void> {
   try {
     const { removed } = await purgeExpiredStories();
     if (removed > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[cron] purged ${removed} expired stor(ies)`);
+      log.info({ removed }, 'Purged expired stories');
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[cron] story purge failed:', err);
+    log.error({ err }, 'Story purge failed');
   }
 }
 
@@ -64,24 +61,20 @@ async function runPlanExpiry(): Promise<void> {
   try {
     const downgraded = await downgradeExpiredPlans();
     if (downgraded > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[cron] downgraded ${downgraded} expired plan(s) to free`);
+      log.info({ downgraded }, 'Downgraded expired plans to free');
     }
     const reminded = await sendPlanExpiryReminders();
     if (reminded > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[cron] sent ${reminded} plan expiry reminder(s)`);
+      log.info({ reminded }, 'Sent plan expiry reminders');
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[cron] plan expiry job failed:', err);
+    log.error({ err }, 'Plan expiry job failed');
   }
 }
 
 export function startScheduledJobs(): void {
   if (config.disableCron) {
-    // eslint-disable-next-line no-console
-    console.log('[cron] disabled (DISABLE_CRON) — no jobs registered');
+    log.info('Cron disabled (DISABLE_CRON) — no jobs registered');
     return;
   }
 
@@ -116,9 +109,9 @@ export function startScheduledJobs(): void {
   planTimer.unref?.();
   timers.push(planTimer);
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[cron] reservation auto-complete every ${config.autoCompleteIntervalMinutes}m; story purge every ${STORY_PURGE_INTERVAL_MIN}m; plan expiry every 60m`,
+  log.info(
+    { autoCompleteMinutes: config.autoCompleteIntervalMinutes, storyPurgeMinutes: STORY_PURGE_INTERVAL_MIN, planExpiryMinutes: 60 },
+    'Cron jobs registered',
   );
 }
 

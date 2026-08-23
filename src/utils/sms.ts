@@ -1,5 +1,10 @@
 import { config } from '../config/env';
 import { SmsLog } from '../models/SmsLog';
+import { childLogger, maskMobile } from './logger';
+
+export { maskMobile } from './logger';
+
+const log = childLogger({ module: 'sms' });
 
 /** Context for a notification SMS (used for the delivery log). */
 export interface SmsMeta {
@@ -52,8 +57,7 @@ const DEV_OTP_CODE = '123456';
 /** Dev/test driver — logs and accepts a fixed code. NEVER used in production. */
 export class ConsoleSmsProvider implements SmsProvider {
   async sendOtp(phone: string): Promise<{ devCode?: string }> {
-    // eslint-disable-next-line no-console
-    console.log(`[sms] OTP for ${phone}: ${DEV_OTP_CODE}`);
+    log.debug({ phone: maskMobile(phone) }, 'Dev OTP sent');
     return config.isDev ? { devCode: DEV_OTP_CODE } : {};
   }
 
@@ -62,8 +66,7 @@ export class ConsoleSmsProvider implements SmsProvider {
   }
 
   async send(phone: string, message: string, meta?: SmsMeta): Promise<void> {
-    // eslint-disable-next-line no-console
-    console.log(`[sms] -> ${phone}: ${message}`);
+    log.debug({ phone: maskMobile(phone), event: meta?.event }, 'Dev SMS sent');
     await recordSmsLog({
       recipientMasked: maskMobile(phone),
       event: meta?.event ?? 'notification',
@@ -71,12 +74,6 @@ export class ConsoleSmsProvider implements SmsProvider {
       success: true,
     });
   }
-}
-
-/** Mask a phone for logs (0912***6789) — never log the full subscriber number. */
-export function maskMobile(phone: string): string {
-  const d = phone.replace(/\D/g, '');
-  return d.length < 8 ? '***' : `${d.slice(0, 4)}***${d.slice(-4)}`;
 }
 
 /**
@@ -160,12 +157,12 @@ export class LimoSmsProvider implements SmsProvider {
     });
 
     const ok = status >= 200 && status < 300 && parsed.success === true;
-    // eslint-disable-next-line no-console
-    console[ok ? 'log' : 'error'](
-      `[limosms] sendcode mobile=${maskMobile(mobile)} http=${status} ` +
-        `Success=${parsed.success} Message=${JSON.stringify(parsed.message ?? null)}` +
-        (ok ? '' : ` raw=${raw.slice(0, 300)}`),
-    );
+    const masked = maskMobile(mobile);
+    if (ok) {
+      log.info({ mobile: masked, http: status }, 'LimoSMS sendcode success');
+    } else {
+      log.error({ mobile: masked, http: status, success: parsed.success, message: parsed.message, raw: raw.slice(0, 300) }, 'LimoSMS sendcode rejected');
+    }
 
     if (!ok) {
       // Surface the gateway's own Message (the real reason) up to the caller's log.
@@ -185,18 +182,12 @@ export class LimoSmsProvider implements SmsProvider {
     // A non-2xx is an operational failure (bad ApiKey, etc.) → throw so the caller
     // shows a retryable error rather than silently treating it as "wrong code".
     if (status < 200 || status >= 300) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[limosms] checkcode mobile=${maskMobile(mobile)} http=${status} raw=${raw.slice(0, 300)}`,
-      );
+      log.error({ mobile: maskMobile(mobile), http: status, raw: raw.slice(0, 300) }, 'LimoSMS checkcode rejected');
       throw new Error(
         `LimoSMS checkcode rejected (http=${status}): ${parsed.message || raw.slice(0, 200) || 'no message'}`,
       );
     }
-    // eslint-disable-next-line no-console
-    console.log(
-      `[limosms] checkcode mobile=${maskMobile(mobile)} http=${status} Success=${parsed.success}`,
-    );
+    log.info({ mobile: maskMobile(mobile), http: status, success: parsed.success }, 'LimoSMS checkcode');
     return parsed.success === true;
   }
 
@@ -211,11 +202,7 @@ export class LimoSmsProvider implements SmsProvider {
     const event = meta?.event ?? 'notification';
     const masked = maskMobile(mobile);
     if (!config.limoSmsApiKey || !config.limoSmsSenderNumber) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[limosms] sendsms skipped for ${masked} — ` +
-          'LIMOSMS_API_KEY / LIMOSMS_SENDER_NUMBER not set',
-      );
+      log.warn({ mobile: masked, event }, 'LimoSMS sendsms skipped — sender/apikey not configured');
       await recordSmsLog({
         recipientMasked: masked,
         event,
@@ -235,14 +222,11 @@ export class LimoSmsProvider implements SmsProvider {
         SendToBlocksNumber: false,
       });
       const ok = status >= 200 && status < 300 && parsed.success === true;
-      // eslint-disable-next-line no-console
-      console[ok ? 'log' : 'error'](
-        `[limosms] sendsms event=${event} mobile=${masked} http=${status} ` +
-          `Success=${parsed.success}` +
-          (ok
-            ? ` MessageId=${JSON.stringify(parsed.messageId ?? null)}`
-            : ` Message=${JSON.stringify(parsed.message ?? null)} raw=${raw.slice(0, 300)}`),
-      );
+      if (ok) {
+        log.info({ event, mobile: masked, http: status, messageId: parsed.messageId }, 'LimoSMS sendsms success');
+      } else {
+        log.error({ event, mobile: masked, http: status, success: parsed.success, message: parsed.message, raw: raw.slice(0, 300) }, 'LimoSMS sendsms rejected');
+      }
       await recordSmsLog({
         recipientMasked: masked,
         event,
@@ -252,8 +236,7 @@ export class LimoSmsProvider implements SmsProvider {
         error: ok ? null : parsed.message ?? raw.slice(0, 200) ?? `http ${status}`,
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[limosms] sendsms failed for ${masked}:`, (err as Error).message);
+      log.error({ event, mobile: masked, err }, 'LimoSMS sendsms failed');
       await recordSmsLog({
         recipientMasked: masked,
         event,

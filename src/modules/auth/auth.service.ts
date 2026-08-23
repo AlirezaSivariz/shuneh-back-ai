@@ -8,6 +8,9 @@ import { smsProvider } from '../../utils/sms';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt';
 import { AppError } from '../../utils/AppError';
 import { durationToMs } from '../../utils/duration';
+import { childLogger } from '../../utils/logger';
+
+const log = childLogger({ module: 'auth' });
 import { config } from '../../config/env';
 
 export interface TokenPair {
@@ -57,8 +60,7 @@ export async function requestOtp(phone: string): Promise<RequestOtpResult> {
     result = await smsProvider.sendOtp(phone);
   } catch (err) {
     const reason = (err as Error).message;
-    // eslint-disable-next-line no-console
-    console.error('[otp] send failed:', reason);
+    log.error({ reason }, 'OTP send failed');
     throw AppError.badRequest(
       'ارسال پیامک کد ناموفق بود. لطفاً دوباره تلاش کن.',
       'SMS_SEND_FAILED',
@@ -84,8 +86,7 @@ export async function verifyOtp(
   try {
     valid = await smsProvider.verifyOtp(phone, code);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[otp] verify failed:', (err as Error).message);
+    log.error({ err }, 'OTP verify failed');
     throw AppError.badRequest('بررسی کد ناموفق بود. لطفاً دوباره تلاش کن.', 'OTP_VERIFY_FAILED');
   }
   if (!valid) {
@@ -226,8 +227,7 @@ export async function resetPassword(
   try {
     valid = await smsProvider.verifyOtp(phone, code);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[otp] verify failed:', (err as Error).message);
+    log.error({ err }, 'OTP verify failed');
     throw AppError.badRequest('بررسی کد ناموفق بود. لطفاً دوباره تلاش کن.', 'OTP_VERIFY_FAILED');
   }
   if (!valid) {
