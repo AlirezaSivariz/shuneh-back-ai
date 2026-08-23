@@ -92,6 +92,8 @@ export interface AppConfig {
     merchant: string;
     baseUrl: string; // https://gateway.zibal.ir
   };
+  /** Comma-separated CORS allowlist. Empty in dev = open; non-empty = strict. */
+  corsOrigins: string[];
 }
 
 const nodeEnv = (process.env.NODE_ENV as AppConfig['nodeEnv']) || 'development';
@@ -107,8 +109,8 @@ export const config: AppConfig = {
     process.env.MONGODB_URI ||
     required('MONGO_URI', 'mongodb://127.0.0.1:27017/salon_reservation'),
   jwt: {
-    accessSecret: required('JWT_ACCESS_SECRET', 'dev_access_secret'),
-    refreshSecret: required('JWT_REFRESH_SECRET', 'dev_refresh_secret'),
+    accessSecret: required('JWT_ACCESS_SECRET', nodeEnv === 'production' ? undefined : 'dev_access_secret'),
+    refreshSecret: required('JWT_REFRESH_SECRET', nodeEnv === 'production' ? undefined : 'dev_refresh_secret'),
     accessTtl: required('ACCESS_TTL', '15m'),
     refreshTtl: required('REFRESH_TTL', '7d'),
   },
@@ -144,4 +146,8 @@ export const config: AppConfig = {
     merchant: process.env.ZIBAL_MERCHANT || 'zibal',
     baseUrl: (process.env.ZIBAL_BASE_URL || 'https://gateway.zibal.ir').replace(/\/$/, ''),
   },
+  corsOrigins: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 };

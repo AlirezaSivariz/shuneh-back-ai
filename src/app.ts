@@ -52,7 +52,14 @@ import bankRoutes from "./modules/bank/bank.routes";
 export function createApp(): Application {
   const app = express();
 
-  app.use(cors());
+  // CORS: allowlist from env; falls back to open in development only.
+  const corsOrigins = config.corsOrigins;
+  app.use(
+    cors({
+      origin: corsOrigins.length > 0 ? corsOrigins : config.isDev ? true : false,
+      credentials: corsOrigins.length > 0,
+    }),
+  );
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   if (config.isDev) app.use(morgan("dev"));

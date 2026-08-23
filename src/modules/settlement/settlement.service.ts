@@ -103,15 +103,8 @@ export interface SettlableReservation {
 export async function getSettlableReservations(
   stylistId: string,
 ): Promise<SettlableReservation[]> {
-  console.log("[Settlement] ===== getSettlableReservations START =====");
-  console.log("[Settlement] Stylist ID:", stylistId);
-
   // Get all settled/pending reservation IDs
   const excludedIds = await getExcludedReservationIds(stylistId);
-  console.log(
-    "[Settlement] Excluded reservation IDs (in pending/approved/paid):",
-    excludedIds.map(String),
-  );
 
   // Step 1: Find ALL reservations for this stylist
   const allReservations = await Reservation.find({
@@ -121,51 +114,16 @@ export async function getSettlableReservations(
       "_id status paymentStatus deposit financialAdjustments finalPrice price date startTime serviceId serviceIds customerId",
     )
     .lean();
-  console.log(
-    "[Settlement] Total reservations for stylist:",
-    allReservations.length,
-  );
-  console.log(
-    "[Settlement] All reservations:",
-    allReservations.map((r) => ({
-      id: String(r._id),
-      status: r.status,
-      paymentStatus: r.paymentStatus,
-      hasFinancialAdjustments: !!r.financialAdjustments?.length,
-      deposit: r.deposit,
-    })),
-  );
-
-  // DEBUG: Show all unique statuses in database for this stylist
-  const uniqueStatuses = [...new Set(allReservations.map((r) => r.status))];
-  const uniquePaymentStatuses = [
-    ...new Set(allReservations.map((r) => r.paymentStatus)),
-  ];
-  console.log("[Settlement] Unique statuses in DB:", uniqueStatuses);
-  console.log(
-    "[Settlement] Unique paymentStatuses in DB:",
-    uniquePaymentStatuses,
-  );
 
   // Step 2: Filter by paymentStatus = paid OR not_required
-  // paid = online payment completed
-  // not_required = no online payment (free service or on-site payment only) but deposit/financialAdjustments exist
   const validPaymentStatuses = ["paid", "not_required"];
   const validPaymentReservations = allReservations.filter((r) =>
     validPaymentStatuses.includes(r.paymentStatus),
-  );
-  console.log(
-    "[Settlement] After paymentStatus filter (paid/not_required):",
-    validPaymentReservations.length,
   );
 
   // Step 3: Filter by status = completed or confirmed
   const completedReservations = validPaymentReservations.filter((r) =>
     ["completed", "confirmed"].includes(r.status),
-  );
-  console.log(
-    "[Settlement] After status=completed/confirmed filter:",
-    completedReservations.length,
   );
 
   // Step 3b: Also include cancelled reservations with penalties (stylist earns the penalty)
@@ -179,10 +137,6 @@ export async function getSettlableReservations(
     );
     return hasPenalty;
   });
-  console.log(
-    "[Settlement] Cancelled with penalties:",
-    cancelledWithPenalties.length,
-  );
 
   // Merge both sets (deduplicate by _id)
   const mergedIds = new Set<string>();
@@ -200,14 +154,6 @@ export async function getSettlableReservations(
   const availableReservations = eligibleReservations.filter(
     (r) => !excludedIdStrings.includes(String(r._id)),
   );
-  console.log(
-    "[Settlement] After excluded IDs filter:",
-    availableReservations.length,
-  );
-  console.log(
-    "[Settlement] Available reservation IDs:",
-    availableReservations.map((r) => String(r._id)),
-  );
 
   // Populate service and customer info for available reservations
   let populatedReservations: any[] = [];
@@ -219,12 +165,6 @@ export async function getSettlableReservations(
       .populate("customerId", "firstName lastName phone")
       .populate("serviceIds", "name")
       .lean();
-    console.log(
-      "[Settlement] Populated reservations count:",
-      populatedReservations.length,
-    );
-  } else {
-    console.log("[Settlement] No available reservations after filtering");
   }
 
   // Compute finance for each reservation to get accurate net amount
@@ -284,22 +224,6 @@ export async function getSettlableReservations(
       }
     }
 
-    console.log("[Settlement] Reservation computed:", {
-      id: String(r._id),
-      serviceName: serviceNames || (r.serviceId as any)?.name || "خدمات",
-      customerName,
-      date: dateStr,
-      startTime: r.startTime,
-      status: r.status,
-      price,
-      depositAmount: finance.totalDeposit,
-      bookingFee: finance.totalBookingFee,
-      totalPenalties: finance.totalPenalties,
-      netRefund: finance.netRefund,
-      debt: finance.debt,
-      netAmount,
-    });
-
     results.push({
       id: String(r._id),
       serviceName: serviceNames || (r.serviceId as any)?.name || "خدمات",
@@ -318,8 +242,6 @@ export async function getSettlableReservations(
     });
   }
 
-  console.log("[Settlement] Final results count:", results.length);
-  console.log("[Settlement] ===== getSettlableReservations END =====");
   return results;
 }
 
@@ -334,20 +256,10 @@ async function getExcludedReservationIds(
     .select("depositReservationIds status")
     .lean();
 
-  console.log(
-    "[Settlement] Found settlements with pending/approved/paid:",
-    settlements.map((s) => ({
-      id: String(s._id),
-      status: s.status,
-      reservationIds: s.depositReservationIds?.map(String) ?? [],
-    })),
-  );
-
   const ids: Types.ObjectId[] = [];
   for (const s of settlements) {
     ids.push(...s.depositReservationIds);
   }
-  console.log("[Settlement] Total excluded reservation IDs:", ids.map(String));
   return ids;
 }
 

@@ -262,7 +262,6 @@ export async function awardFiveStarReview(stylistId: string, reviewId: string) {
 export async function applyCancellationPenalty(stylistId: string, reservationId: string) {
   const settings = await getCreditSettings();
   if (!settings.isEnabled || settings.consecutiveCancelPenalty <= 0) {
-    console.log('[credit] penalty skipped — system disabled or penalty=0');
     return null;
   }
 
@@ -290,13 +289,7 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
     }
   }
 
-  console.log(
-    `[credit] applyCancellationPenalty stylist=${stylistId} reservation=${reservationId} ` +
-    `found=${previousReservations.length} consecutiveCount=${consecutiveCount} threshold=${settings.consecutiveCancelThreshold} penalty=${settings.consecutiveCancelPenalty}`,
-  );
-
   if (consecutiveCount < settings.consecutiveCancelThreshold) {
-    console.log('[credit] penalty skipped — below threshold');
     return null;
   }
 
@@ -309,13 +302,8 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
       description: `${consecutiveCount + 1}امین لغو متوالی -${settings.consecutiveCancelPenalty} اعتبار`,
       metadata: { consecutiveCount: consecutiveCount + 1, threshold: settings.consecutiveCancelThreshold },
     });
-    console.log(
-      `[credit] penalty applied stylist=${stylistId} amount=-${settings.consecutiveCancelPenalty} ` +
-      `newBalance=${result.balance} totalSpent=${result.totalSpent}`,
-    );
     return result;
-  } catch (err) {
-    console.log(`[credit] penalty failed stylist=${stylistId} error=${err}`);
+  } catch {
     return null;
   }
 }

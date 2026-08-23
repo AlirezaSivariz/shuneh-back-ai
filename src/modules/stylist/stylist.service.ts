@@ -280,7 +280,7 @@ export async function leaveSalon(stylistId: string, salonId: string, force = fal
           });
         }
       }
-    })();
+    })().catch(() => undefined);
   }
 
   // Remove the membership and the now-orphan working hours for this salon.

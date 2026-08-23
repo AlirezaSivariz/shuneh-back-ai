@@ -398,7 +398,7 @@ export async function createReservation(customerId: string, input: CreateInput) 
   }
 
   // Auto-confirmed booking (gateway off / free service): notify both parties.
-  void sendReservationCreatedNotifications(reservation);
+  void sendReservationCreatedNotifications(reservation).catch(() => undefined);
 
   return {
     reservation: await serializeReservation(reservation),
@@ -459,7 +459,7 @@ export async function confirmPaidReservation(
     { new: true },
   );
   if (!reservation) return; // already confirmed or released — nothing to do
-  void sendReservationCreatedNotifications(reservation);
+  void sendReservationCreatedNotifications(reservation).catch(() => undefined);
 }
 
 /**
@@ -685,7 +685,7 @@ export async function cancelByStylist(
 
   notifyReservationCancelled(reservation, reason);
 
-  void applyCancellationPenalty(stylistId, reservationId);
+  void applyCancellationPenalty(stylistId, reservationId).catch(() => undefined);
 
   return serializeReservation(reservation, 'stylist');
 }
@@ -839,7 +839,7 @@ export async function rescheduleReservation(
     for (const p of parties) {
       if (p.phone) void notificationService.reservationRescheduled(p.phone, { date, startTime, by });
     }
-  })();
+  })().catch(() => undefined);
 
   return serializeReservation(reservation, by === 'stylist' ? 'stylist' : 'customer');
 }
