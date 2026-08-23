@@ -49,6 +49,8 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
 
 creditTransactionSchema.index({ userId: 1, createdAt: -1 });
 creditTransactionSchema.index({ referenceType: 1, referenceId: 1 });
+// Admin list-all transactions sorted by createdAt.
+creditTransactionSchema.index({ createdAt: -1 });
 
 export const CreditTransaction = model<ICreditTransaction>(
   'CreditTransaction',

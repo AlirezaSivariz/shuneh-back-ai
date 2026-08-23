@@ -107,5 +107,7 @@ const salonSchema = new Schema<ISalon>(
 
 // Geospatial index for "salons near me" search.
 salonSchema.index({ location: '2dsphere' });
+// Owner dashboard: Salons.find({ ownerId }).
+salonSchema.index({ ownerId: 1 });
 
 export const Salon = model<ISalon>('Salon', salonSchema);

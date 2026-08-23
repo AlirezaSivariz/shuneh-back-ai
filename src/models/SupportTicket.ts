@@ -54,5 +54,9 @@ const supportTicketSchema = new Schema<ISupportTicket>(
 );
 
 supportTicketSchema.index({ userId: 1, status: 1 });
+// Admin list tickets sorted by updatedAt.
+supportTicketSchema.index({ updatedAt: -1 });
+// Admin list/filter by role + status.
+supportTicketSchema.index({ role: 1, status: 1, createdAt: -1 });
 
 export const SupportTicket = model<ISupportTicket>('SupportTicket', supportTicketSchema);

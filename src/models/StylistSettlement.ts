@@ -48,6 +48,8 @@ const stylistSettlementSchema = new Schema<IStylistSettlement>(
 
 stylistSettlementSchema.index({ stylistId: 1, status: 1 });
 stylistSettlementSchema.index({ status: 1, createdAt: -1 });
+// $elemMatch lookups for deposit reservation dedup in settlement validation.
+stylistSettlementSchema.index({ depositReservationIds: 1 });
 
 export const StylistSettlement = model<IStylistSettlement>(
   'StylistSettlement',

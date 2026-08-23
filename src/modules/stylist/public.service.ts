@@ -240,39 +240,6 @@ async function computeDayAvailability(
  * first active-or-pending membership (rejected memberships are ignored) and
  * returns its membership status so the client can label "pending approval".
  */
-async function resolveStylistLocation(
-  userId: string,
-  profile: { workplaceType?: string; freelance?: { address?: string; location?: GeoPoint } },
-): Promise<{
-  location: GeoPoint | null;
-  address: string | null;
-  salon: ISalon | null;
-  salonStatus: 'active' | 'pending' | null;
-}> {
-  if (profile.workplaceType === 'freelance' && profile.freelance?.location) {
-    return {
-      location: profile.freelance.location,
-      address: profile.freelance.address ?? null,
-      salon: null,
-      salonStatus: null,
-    };
-  }
-
-  const link = await StylistSalon.findOne({
-    stylistId: userId,
-    status: { $in: ['active', 'pending'] },
-  })
-    .populate<{ salonId: ISalon }>('salonId')
-    .sort({ status: 1, createdAt: 1 }); // 'active' sorts before 'pending'
-  const salon = (link?.salonId as unknown as ISalon | null) ?? null;
-  return {
-    location: salon?.location ?? null,
-    address: salon?.address ?? null,
-    salon,
-    salonStatus: (link?.status as 'active' | 'pending' | undefined) ?? null,
-  };
-}
-
 export async function searchStylists(params: SearchParams) {
   // 1) Start from active stylist profiles that currently accept reservations.
   const profiles = await StylistProfile.find({
@@ -296,6 +263,22 @@ export async function searchStylists(params: SearchParams) {
   const userById = new Map(users.map((u) => [String(u._id), u]));
   // Only stylists with an active workplace are bookable → shown in search.
   const bookMap = await getBookabilityMap(profiles);
+
+  // Batch-load StylistSalon + Salon for all stylists (fixes N+1 on resolveStylistLocation).
+  const [stylistSalons, allSalons] = await Promise.all([
+    StylistSalon.find({
+      stylistId: { $in: stylistIds },
+      status: { $in: ['active', 'pending'] },
+    }).sort({ status: 1, createdAt: 1 }).lean(),
+    Salon.find().select('name address location serviceGender province city').lean(),
+  ]);
+  const salonById = new Map(allSalons.map((s) => [String(s._id), s]));
+  // First active/pending link per stylist (sorted by status then createdAt).
+  const stylistSalonByUser = new Map<string, typeof stylistSalons[number]>();
+  for (const link of stylistSalons) {
+    const uid = String(link.stylistId);
+    if (!stylistSalonByUser.has(uid)) stylistSalonByUser.set(uid, link);
+  }
 
   // Optional category filter resolves to a set of serviceIds.
   let categoryServiceIds: Set<string> | null = null;
@@ -335,7 +318,15 @@ export async function searchStylists(params: SearchParams) {
       if (!full.toLowerCase().includes(params.name.toLowerCase())) continue;
     }
 
-    const loc = await resolveStylistLocation(uid, profile);
+    // Resolve location from pre-loaded maps (no per-stylist DB query).
+    let loc: { location: GeoPoint | null; address: string | null; salon: ISalon | null; salonStatus: 'active' | 'pending' | null };
+    if (profile.workplaceType === 'freelance' && profile.freelance?.location) {
+      loc = { location: profile.freelance.location, address: profile.freelance.address ?? null, salon: null, salonStatus: null };
+    } else {
+      const link = stylistSalonByUser.get(uid);
+      const salon = link ? (salonById.get(String(link.salonId)) as unknown as ISalon | null) ?? null : null;
+      loc = { location: salon?.location ?? null, address: salon?.address ?? null, salon, salonStatus: (link?.status as 'active' | 'pending' | undefined) ?? null };
+    }
 
     // province/city filter: matches the USER profile's activity area (the single
     // source of truth — set during onboarding and editable from both dashboards).
@@ -734,7 +725,8 @@ export async function getAvailability(
   // intervals are excluded; pending salons are bookable.
   const hours = await WorkingHour.find({ stylistId, dayOfWeek })
     .populate<{ salonId: ISalon | null }>('salonId')
-    .sort({ start: 1 });
+    .sort({ start: 1 })
+    .lean();
 
   // Only ACTIVE workplaces are bookable: freelance intervals (no salon) count
   // only if the stylist is a freelancer; salon intervals only for active salons.

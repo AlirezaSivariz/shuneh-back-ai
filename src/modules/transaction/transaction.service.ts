@@ -1,5 +1,6 @@
 import { PaymentTransaction } from '../../models/PaymentTransaction';
 import { Reservation } from '../../models/Reservation';
+import { Service } from '../../models/Service';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
 
@@ -42,9 +43,13 @@ export interface EnrichedTransaction {
   payerName?: string | null;
 }
 
-async function enrichTransaction(
+function enrichTransactionFromMaps(
   tx: Record<string, any>,
-): Promise<EnrichedTransaction> {
+  maps: {
+    reservationById: Map<string, any>;
+    userById: Map<string, { firstName?: string; lastName?: string; phone?: string }>;
+  },
+): EnrichedTransaction {
   const e: EnrichedTransaction = {
     id: String(tx._id),
     provider: tx.provider,
@@ -66,21 +71,17 @@ async function enrichTransaction(
   if (tx.purpose === 'reservation_deposit') {
     const reservationId = meta.reservationId;
     if (typeof reservationId === 'string') {
-      const reservation = await Reservation.findById(reservationId)
-        .populate('serviceIds')
-        .lean();
+      const reservation = maps.reservationById.get(reservationId);
       if (reservation) {
-        const stylistUser = await User.findById(reservation.stylistId).select('firstName lastName phone').lean();
-        const stylistName =
-          stylistUser
-            ? `${stylistUser.firstName ?? ''} ${stylistUser.lastName ?? ''}`.trim()
-            : '';
+        const stylistUser = maps.userById.get(String(reservation.stylistId));
+        const stylistName = stylistUser
+          ? `${stylistUser.firstName ?? ''} ${stylistUser.lastName ?? ''}`.trim()
+          : '';
 
-        const customerUser = await User.findById(reservation.customerId).select('firstName lastName phone').lean();
-        const payerName =
-          customerUser
-            ? `${customerUser.firstName ?? ''} ${customerUser.lastName ?? ''}`.trim() || customerUser.phone
-            : null;
+        const customerUser = maps.userById.get(String(reservation.customerId));
+        const payerName = customerUser
+          ? `${customerUser.firstName ?? ''} ${customerUser.lastName ?? ''}`.trim() || customerUser.phone
+          : null;
 
         let serviceNames: string[] = [];
         if (reservation.serviceIds && Array.isArray(reservation.serviceIds)) {
@@ -105,7 +106,6 @@ async function enrichTransaction(
           originalPrice: reservation.originalPrice ?? null,
           discountAmount: reservation.discountAmount ?? null,
         };
-
         e.payerName = payerName;
       }
     }
@@ -116,6 +116,66 @@ async function enrichTransaction(
   }
 
   return e;
+}
+
+async function batchEnrichTransactions(
+  txs: Record<string, any>[],
+): Promise<EnrichedTransaction[]> {
+  if (txs.length === 0) return [];
+
+  // Collect reservation IDs from reservation_deposit transactions.
+  const reservationIds = new Set<string>();
+  for (const tx of txs) {
+    if (tx.purpose === 'reservation_deposit') {
+      const rid = (tx.meta ?? {})?.reservationId;
+      if (typeof rid === 'string') reservationIds.add(rid);
+    }
+  }
+
+  // Batch-load reservations + services + users.
+  const [reservations, allServices] = await Promise.all([
+    reservationIds.size > 0
+      ? Reservation.find({ _id: { $in: [...reservationIds] } })
+          .select('stylistId customerId serviceIds startTime endTime date status paymentStatus finalPrice price originalPrice discountAmount')
+          .lean()
+      : Promise.resolve([]),
+    Service.find().select('name').lean(),
+  ]);
+
+  const serviceById = new Map(allServices.map((s) => [String(s._id), s]));
+
+  // Populate serviceIds with names.
+  for (const r of reservations) {
+    if (r.serviceIds && Array.isArray(r.serviceIds)) {
+      r.serviceIds = r.serviceIds.map((id: any) => {
+        const svc = serviceById.get(String(id));
+        return svc ? { _id: svc._id, name: svc.name } : id;
+      });
+    }
+  }
+
+  const reservationById = new Map(reservations.map((r) => [String(r._id), r]));
+
+  // Collect user IDs from reservations.
+  const userIds = new Set<string>();
+  for (const r of reservations) {
+    userIds.add(String(r.stylistId));
+    userIds.add(String(r.customerId));
+  }
+
+  const users = userIds.size > 0
+    ? await User.find({ _id: { $in: [...userIds] } }).select('firstName lastName phone').lean()
+    : [];
+  const userById = new Map(users.map((u) => [String(u._id), u]));
+
+  const maps = { reservationById, userById };
+  return txs.map((tx) => enrichTransactionFromMaps(tx, maps));
+}
+
+async function enrichTransaction(
+  tx: Record<string, any>,
+): Promise<EnrichedTransaction> {
+  return batchEnrichTransactions([tx]).then((r) => r[0]);
 }
 
 export async function listMyTransactions(
@@ -138,7 +198,7 @@ export async function listMyTransactions(
     PaymentTransaction.countDocuments(filter),
   ]);
 
-  const items = await Promise.all(raw.map(enrichTransaction));
+  const items = await batchEnrichTransactions(raw);
   return { items, total, page, totalPages: Math.ceil(total / limit) };
 }
 
@@ -148,7 +208,7 @@ export async function getMyTransaction(
 ): Promise<EnrichedTransaction> {
   const tx = await PaymentTransaction.findOne({ _id: txId, userId }).lean();
   if (!tx) throw AppError.notFound('تراکنش یافت نشد');
-  return enrichTransaction(tx);
+  return batchEnrichTransactions([tx]).then((r) => r[0]);
 }
 
 export async function listStylistTransactions(
@@ -181,7 +241,7 @@ export async function listStylistTransactions(
     PaymentTransaction.countDocuments(filter),
   ]);
 
-  const items = await Promise.all(raw.map(enrichTransaction));
+  const items = await batchEnrichTransactions(raw);
   return { items, total, page, totalPages: Math.ceil(total / limit) };
 }
 
@@ -202,7 +262,7 @@ export async function getStylistTransaction(
     ],
   }).lean();
   if (!tx) throw AppError.notFound('تراکنش یافت نشد');
-  return enrichTransaction(tx);
+  return batchEnrichTransactions([tx]).then((r) => r[0]);
 }
 
 export async function getStylistTransactionStats(
@@ -220,27 +280,35 @@ export async function getStylistTransactionStats(
     .lean();
   const reserveTxIds = reservations.map((r) => r.paymentTxId).filter(Boolean);
 
-  const filter = {
+  const matchFilter = {
     $or: [
       { _id: { $in: reserveTxIds } },
       { userId: stylistUserId, purpose: { $in: ['plan_purchase', 'wallet_topup'] } },
     ],
   };
 
-  const all = await PaymentTransaction.find(filter).select('status amountToman').lean();
+  const pipeline = await PaymentTransaction.aggregate([
+    { $match: matchFilter },
+    {
+      $group: {
+        _id: null,
+        totalCount: { $sum: 1 },
+        totalAmount: { $sum: '$amountToman' },
+        paidCount: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, 1, 0] } },
+        paidAmount: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, '$amountToman', 0] } },
+        failedCount: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+        pendingCount: { $sum: { $cond: [{ $in: ['$status', ['pending', 'initiated']] }, 1, 0] } },
+      },
+    },
+  ]);
 
-  const totalCount = all.length;
-  const totalAmount = all.reduce((s, t) => s + t.amountToman, 0);
-  const paid = all.filter((t) => t.status === 'paid');
-  const failed = all.filter((t) => t.status === 'failed');
-  const pending = all.filter((t) => t.status === 'pending' || t.status === 'initiated');
-
+  const row = pipeline[0];
   return {
-    totalCount,
-    totalAmount,
-    paidCount: paid.length,
-    paidAmount: paid.reduce((s, t) => s + t.amountToman, 0),
-    failedCount: failed.length,
-    pendingCount: pending.length,
+    totalCount: row?.totalCount ?? 0,
+    totalAmount: row?.totalAmount ?? 0,
+    paidCount: row?.paidCount ?? 0,
+    paidAmount: row?.paidAmount ?? 0,
+    failedCount: row?.failedCount ?? 0,
+    pendingCount: row?.pendingCount ?? 0,
   };
 }

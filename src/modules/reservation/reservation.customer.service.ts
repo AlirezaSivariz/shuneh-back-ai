@@ -507,22 +507,22 @@ function filterQuery(base: Record<string, unknown>, filter: Filter) {
 export async function listCustomerReservations(customerId: string, filter: Filter) {
   const reservations = await Reservation.find(filterQuery({ customerId }, filter)).sort({
     startAt: filter === 'past' ? -1 : 1,
-  });
-  return Promise.all(reservations.map((r) => serializeReservation(r)));
+  }).lean();
+  return batchSerializeReservations(reservations, 'customer');
 }
 
 export async function listStylistReservations(stylistId: string, filter: Filter) {
   const reservations = await Reservation.find(filterQuery({ stylistId }, filter)).sort({
     startAt: filter === 'past' ? -1 : 1,
-  });
+  }).lean();
   // Flag future reservations that an hours change pushed outside the stylist's
   // current working hours (computed once for the whole list).
   const affected = await affectedReservationIds(stylistId);
-  return Promise.all(
-    reservations.map((r) =>
-      serializeReservation(r, 'stylist', { outOfHours: affected.has(String(r._id)) }),
-    ),
+  const extras = new Map(
+    reservations.map((r) => [String(r._id), { outOfHours: affected.has(String(r._id)) }]),
   );
+  const serialized = await batchSerializeReservations(reservations, 'stylist');
+  return serialized.map((s, i) => ({ ...s, outOfHours: extras.get(String(reservations[i]._id))?.outOfHours ?? false }));
 }
 
 export async function getReservation(userId: string, reservationId: string) {
@@ -1191,4 +1191,157 @@ async function serializeReservation(
     /** The customer may tip a completed reservation that has no tip yet. */
     canTip: r.status === 'completed' && !tip,
   };
+}
+
+/** Resolve a reservation from pre-loaded maps (used by batchSerializeReservations). */
+function resolveFromMaps(
+  r: Record<string, any>,
+  maps: {
+    serviceById: Map<string, { name: string; durationMin: number }>;
+    userById: Map<string, { firstName?: string; lastName?: string; profilePhoto?: string; phone?: string }>;
+    salonById: Map<string, { name: string; address?: string | null }>;
+    tipByReservation: Map<string, { amount: number; status: string }>;
+  },
+  viewer: 'customer' | 'stylist',
+  extra: { outOfHours?: boolean },
+) {
+  const ids: any[] = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
+  const serviceEntries = ids
+    .map((id: any) => maps.serviceById.get(String(id)))
+    .filter(Boolean)
+    .map((s: any) => ({ id: '', name: s!.name, durationMin: s!.durationMin }));
+
+  const stylistUser = maps.userById.get(String(r.stylistId));
+  const photo = stylistUser?.profilePhoto;
+
+  const customerUser = viewer === 'stylist' ? maps.userById.get(String(r.customerId)) : undefined;
+  const salon = r.salonId ? maps.salonById.get(String(r.salonId)) : undefined;
+  const tip = maps.tipByReservation.get(String(r._id));
+
+  return {
+    id: String(r._id),
+    status: r.status,
+    date: r.date.toISOString().slice(0, 10),
+    startTime: r.startTime,
+    endTime: r.endTime,
+    startAt: r.startAt,
+    endAt: r.endAt,
+    price: r.price ?? null,
+    discount: r.discountCode
+      ? {
+          code: r.discountCode,
+          type: r.discountType ?? null,
+          value: r.discountValue ?? null,
+          amount: r.discountAmount ?? 0,
+          originalPrice: r.originalPrice ?? r.price ?? null,
+          finalPrice: r.finalPrice ?? r.price ?? null,
+        }
+      : null,
+    services: serviceEntries.map((s: any) => ({ id: s.id, name: s.name, durationMin: s.durationMin })),
+    stylist: stylistUser
+      ? {
+          id: String(r.stylistId),
+          fullName:
+            `${stylistUser.firstName ?? ''} ${stylistUser.lastName ?? ''}`.trim() || 'متخصص',
+          profilePhoto: photo ? storageProvider.getUrl(photo) : null,
+          phone: stylistUser.phone ?? null,
+        }
+      : null,
+    customer:
+      viewer === 'stylist' && customerUser
+        ? {
+            id: String(r.customerId),
+            fullName: `${customerUser.firstName ?? ''} ${customerUser.lastName ?? ''}`.trim() || 'مشتری',
+            phone: customerUser.phone ?? null,
+          }
+        : null,
+    salon: salon ? { id: String(r.salonId!), name: salon.name, address: salon.address ?? null } : null,
+    customerNote: r.customerNote ?? null,
+    companionsCount: r.companionsCount ?? 0,
+    totalPersons: (r.companionsCount ?? 0) + 1,
+    totalDuration: Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime)),
+    cancelledBy: r.cancelledBy ?? null,
+    cancelReason: r.cancelReason ?? null,
+    deposit: r.deposit ?? null,
+    cancellationOutcome: r.cancellationOutcome ?? null,
+    rescheduleHistory: (r.rescheduleHistory ?? []).map((h: any) => ({
+      fromDate: h.fromDate,
+      fromStartTime: h.fromStartTime,
+      toDate: h.toDate,
+      toStartTime: h.toStartTime,
+      by: h.by,
+      at: h.at,
+      free: h.free ?? true,
+      penaltyAmount: h.penaltyAmount ?? null,
+    })),
+    financialAdjustments: (r.financialAdjustments ?? []).map((a: any) => ({
+      type: a.type,
+      label: a.label,
+      amount: a.amount,
+      direction: a.direction,
+      status: a.status,
+      reason: a.reason,
+      createdAt: a.createdAt,
+    })),
+    rescheduleCount: r.rescheduleCount ?? 0,
+    maxReschedules: r.maxReschedules ?? DEFAULT_MAX_RESCHEDULES,
+    tip: tip ? { amount: tip.amount, status: tip.status } : null,
+    outOfHours: extra.outOfHours ?? false,
+    canCancel:
+      ['pending', 'confirmed'].includes(r.status) && r.startAt.getTime() > Date.now(),
+    canCancelAsStylist: r.status === 'confirmed' && r.startAt.getTime() > Date.now(),
+    canReschedule: r.status === 'confirmed' && r.startAt.getTime() > Date.now(),
+    canTip: r.status === 'completed' && !tip,
+  };
+}
+
+/**
+ * Batch-serialize a list of reservations with only 5 total DB queries
+ * (services, users, salons, tips) instead of 5 queries PER reservation.
+ */
+async function batchSerializeReservations(
+  reservations: Record<string, any>[],
+  viewer: 'customer' | 'stylist' = 'customer',
+) {
+  if (reservations.length === 0) return [];
+
+  // Collect all unique IDs upfront.
+  const allServiceIds = new Set<string>();
+  const allStylistIds = new Set<string>();
+  const allCustomerIds = new Set<string>();
+  const allSalonIds = new Set<string>();
+  const allReservationIds = new Set<string>();
+
+  for (const r of reservations) {
+    const sIds = r.serviceIds?.length ? r.serviceIds : [r.serviceId];
+    for (const id of sIds) allServiceIds.add(String(id));
+    allStylistIds.add(String(r.stylistId));
+    if (viewer === 'stylist') allCustomerIds.add(String(r.customerId));
+    if (r.salonId) allSalonIds.add(String(r.salonId));
+    allReservationIds.add(String(r._id));
+  }
+
+  // 5 batch queries (parallel) instead of N*5.
+  const [allServices, allUsers, allSalons, allTips] = await Promise.all([
+    Service.find({ _id: { $in: [...allServiceIds] } }).select('name durationMin').lean(),
+    User.find({ _id: { $in: [...allStylistIds, ...allCustomerIds] } })
+      .select('firstName lastName profilePhoto phone')
+      .lean(),
+    allSalonIds.size > 0
+      ? Salon.find({ _id: { $in: [...allSalonIds] } }).select('name address').lean()
+      : Promise.resolve([]),
+    Tip.find({ reservationId: { $in: [...allReservationIds] } })
+      .select('reservationId amount status')
+      .lean(),
+  ]);
+
+  // Build lookup maps.
+  const serviceById = new Map(allServices.map((s) => [String(s._id), s]));
+  const userById = new Map(allUsers.map((u) => [String(u._id), u]));
+  const salonById = new Map(allSalons.map((s) => [String(s._id), s]));
+  const tipByReservation = new Map(allTips.map((t) => [String(t.reservationId), t]));
+
+  const maps = { serviceById, userById, salonById, tipByReservation };
+
+  return reservations.map((r) => resolveFromMaps(r, maps, viewer, {}));
 }

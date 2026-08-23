@@ -32,4 +32,7 @@ const tipSchema = new Schema<ITip>(
   { timestamps: true },
 );
 
+// Stylist tip history listing — sorted newest first.
+tipSchema.index({ stylistId: 1, createdAt: -1 });
+
 export const Tip = model<ITip>('Tip', tipSchema);

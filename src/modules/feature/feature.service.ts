@@ -6,7 +6,7 @@ export async function getFeatureOverride(
   userId: string,
   featureKey: FeatureKey,
 ): Promise<boolean | null> {
-  const override = await UserFeatureOverride.findOne({ userId, featureKey });
+  const override = await UserFeatureOverride.findOne({ userId, featureKey }).lean();
   return override ? override.enabled : null;
 }
 

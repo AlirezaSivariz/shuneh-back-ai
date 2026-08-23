@@ -49,4 +49,7 @@ const reviewSchema = new Schema<IReview>(
   { timestamps: true },
 );
 
+// Public stylist reviews listing — filtered by status, sorted newest first.
+reviewSchema.index({ stylistId: 1, status: 1, createdAt: -1 });
+
 export const Review = model<IReview>('Review', reviewSchema);

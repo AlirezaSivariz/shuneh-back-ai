@@ -327,5 +327,7 @@ reservationSchema.index({ customerId: 1, status: 1 });
 // Availability lookups filter by stylist + exact/range day + status — without
 // this, every slot lookup does a collection scan (slow under load).
 reservationSchema.index({ stylistId: 1, date: 1, status: 1 });
+// Past reservations query (customer view) — sorted by startAt descending.
+reservationSchema.index({ customerId: 1, startAt: -1 });
 
 export const Reservation = model<IReservation>('Reservation', reservationSchema);

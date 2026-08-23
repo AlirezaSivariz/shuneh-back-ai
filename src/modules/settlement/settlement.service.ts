@@ -13,58 +13,40 @@ import { computeFinance } from "../finance/finance.service";
 /**
  * Get the stylist's current settlement balance: total confirmed deposits
  * that are not yet settled, minus pending settlement requests.
+ * Uses MongoDB aggregation to avoid loading all reservation docs into memory.
  */
 export async function getSettlementBalance(stylistId: string) {
-  // All paid deposits on confirmed/completed reservations where no
-  // cancellation refund was issued (cancellationOutcome.settled !== true).
-  const reservations = await Reservation.find({
-    stylistId: new Types.ObjectId(stylistId),
-    paymentStatus: "paid",
-    status: { $in: ["confirmed", "completed"] },
-  })
-    .select("deposit")
-    .lean();
+  const stylistOid = new Types.ObjectId(stylistId);
 
-  const totalDeposits = reservations.reduce(
-    (sum, r) => sum + ((r.deposit?.amount ?? 0) - (r.deposit?.bookingFee ?? 0)),
-    0,
-  );
+  // Aggregate total deposits from confirmed/completed paid reservations.
+  const depositPipeline = await Reservation.aggregate([
+    { $match: { stylistId: stylistOid, paymentStatus: "paid", status: { $in: ["confirmed", "completed"] } } },
+    { $project: { netDeposit: { $subtract: [{ $ifNull: ["$deposit.amount", 0] }, { $ifNull: ["$deposit.bookingFee", 0] }] } } },
+    { $group: { _id: null, total: { $sum: "$netDeposit" } } },
+  ]);
+  const totalDeposits = depositPipeline[0]?.total ?? 0;
 
-  // Cancelled reservations with penalties: the penalty amount goes to the stylist.
-  const cancelled = await Reservation.find({
-    stylistId: new Types.ObjectId(stylistId),
-    paymentStatus: "paid",
-    status: "cancelled",
-  })
-    .select("financialAdjustments")
-    .lean();
-
-  const totalCancelledPenalties = cancelled.reduce((sum, r) => {
-    const penalties = (r.financialAdjustments ?? [])
-      .filter(
-        (a: any) =>
-          a.direction === "debit" &&
-          a.type?.startsWith?.("penalty_") &&
-          a.amount > 0,
-      )
-      .reduce((s: number, a: any) => s + a.amount, 0);
-    return sum + penalties;
-  }, 0);
+  // Aggregate penalties from cancelled paid reservations.
+  const penaltyPipeline = await Reservation.aggregate([
+    { $match: { stylistId: stylistOid, paymentStatus: "paid", status: "cancelled" } },
+    { $unwind: { path: "$financialAdjustments", preserveNullAndEmptyArrays: false } },
+    { $match: { "financialAdjustments.direction": "debit", "financialAdjustments.amount": { $gt: 0 } } },
+    { $project: { isPenalty: { $regexMatch: { input: "$financialAdjustments.type", regex: /^penalty_/ } } } },
+    { $match: { isPenalty: true } },
+    { $group: { _id: null, total: { $sum: "$financialAdjustments.amount" } } },
+  ]);
+  const totalCancelledPenalties = penaltyPipeline[0]?.total ?? 0;
 
   const grossBalance = totalDeposits + totalCancelledPenalties;
 
-  // Pending/approved (not yet paid/rejected) settlement amounts.
-  const pendingSettlements = await StylistSettlement.find({
-    stylistId: new Types.ObjectId(stylistId),
-    status: { $in: ["pending", "approved"] },
-  })
-    .select("amount")
-    .lean();
+  // Aggregate pending settlement amounts.
+  const pendingPipeline = await StylistSettlement.aggregate([
+    { $match: { stylistId: stylistOid, status: { $in: ["pending", "approved"] } } },
+    { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+  ]);
+  const pendingAmount = pendingPipeline[0]?.total ?? 0;
+  const pendingCount = pendingPipeline[0]?.count ?? 0;
 
-  const pendingAmount = pendingSettlements.reduce(
-    (sum, s) => sum + s.amount,
-    0,
-  );
   const availableBalance = Math.max(0, grossBalance - pendingAmount);
 
   return {
@@ -72,7 +54,7 @@ export async function getSettlementBalance(stylistId: string) {
     totalCancelledPenalties,
     pendingAmount,
     availableBalance,
-    pendingCount: pendingSettlements.length,
+    pendingCount,
   };
 }
 
@@ -169,21 +151,26 @@ export async function getSettlableReservations(
 
   // Compute finance for each reservation to get accurate net amount
   const results: SettlableReservation[] = [];
+  // Batch-load all services for eligible reservations (fixes N+1).
+  const allServiceIds = new Set<string>();
+  for (const r of populatedReservations) {
+    const sIds = r.serviceIds?.length
+      ? r.serviceIds.map((s: any) => String(s._id ?? s))
+      : [String(r.serviceId)];
+    for (const id of sIds) allServiceIds.add(id);
+  }
+  const allServices = allServiceIds.size > 0
+    ? await require("../../models/Service").Service.find({ _id: { $in: [...allServiceIds] } }).select("name").lean()
+    : [];
+  const serviceMapById = new Map<string, any>(allServices.map((s: any) => [String(s._id), s]));
+
   for (const r of populatedReservations) {
     const serviceIds = r.serviceIds?.length
       ? r.serviceIds.map((s: any) => s._id ?? s)
       : [r.serviceId];
-    const services = await Promise.all(
-      serviceIds.map((id: Types.ObjectId) =>
-        require("../../models/Service")
-          .Service.findById(id)
-          .select("name")
-          .lean(),
-      ),
-    );
-    const serviceNames = services
+    const serviceNames = serviceIds
+      .map((id: any) => serviceMapById.get(String(id))?.name)
       .filter(Boolean)
-      .map((s: any) => s.name)
       .join("، ");
 
     const customer = r.customerId as any;
