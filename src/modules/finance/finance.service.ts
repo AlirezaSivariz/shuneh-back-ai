@@ -182,10 +182,9 @@ export function computeFinance(
       : rawPayableOnSite;
 
   // Net amount payable to stylist:
-  // Only the deposit collected from customer goes to stylist.
-  // Penalties are on customer's invoice, NOT subtracted from stylist.
-  // Refunds are also not subtracted (handled separately).
-  const netStylistShare = totalDeposit;
+  // Deposit minus booking fee (platform keeps the fee).
+  // Refunds are handled separately and not subtracted here.
+  const netStylistShare = Math.max(0, totalDeposit - totalBookingFee);
 
   return {
     totalDeposit,

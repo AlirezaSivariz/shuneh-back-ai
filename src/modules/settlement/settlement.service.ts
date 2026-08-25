@@ -112,18 +112,39 @@ export async function getSettlementBalance(stylistId: string) {
   ]);
   const totalDeposits = depositPipeline[0]?.total ?? 0;
 
-  // Aggregate penalties from cancelled paid reservations.
-  const penaltyPipeline = await Reservation.aggregate([
+  // Aggregate stylist payouts from cancelled paid reservations.
+  // Payout = max(0, deposit - refund), mirroring cancelledStylistPayout().
+  const cancelledPayoutPipeline = await Reservation.aggregate([
     { $match: { stylistId: stylistOid, paymentStatus: "paid", status: "cancelled" } },
-    { $unwind: { path: "$financialAdjustments", preserveNullAndEmptyArrays: false } },
-    { $match: { "financialAdjustments.direction": "debit", "financialAdjustments.amount": { $gt: 0 } } },
-    { $project: { isPenalty: { $regexMatch: { input: "$financialAdjustments.type", regex: /^penalty_/ } } } },
-    { $match: { isPenalty: true } },
-    { $group: { _id: null, total: { $sum: "$financialAdjustments.amount" } } },
+    {
+      $project: {
+        deposit: { $ifNull: ["$deposit.amount", 0] },
+        refund: {
+          $let: {
+            vars: {
+              refunds: {
+                $filter: {
+                  input: { $ifNull: ["$financialAdjustments", []] },
+                  cond: {
+                    $and: [
+                      { $eq: ["$$this.type", "refund"] },
+                      { $eq: ["$$this.direction", "credit"] },
+                    ],
+                  },
+                },
+              },
+            },
+            in: { $sum: "$$refunds.amount" },
+          },
+        },
+      },
+    },
+    { $project: { payout: { $max: [0, { $subtract: ["$deposit", "$refund"] }] } } },
+    { $group: { _id: null, total: { $sum: "$payout" } } },
   ]);
-  const totalCancelledPenalties = penaltyPipeline[0]?.total ?? 0;
+  const totalCancelledPayouts = cancelledPayoutPipeline[0]?.total ?? 0;
 
-  const grossBalance = totalDeposits + totalCancelledPenalties;
+  const grossBalance = totalDeposits + totalCancelledPayouts;
 
   // Aggregate pending settlement amounts.
   const pendingPipeline = await StylistSettlement.aggregate([
@@ -137,7 +158,7 @@ export async function getSettlementBalance(stylistId: string) {
 
   return {
     totalDeposits,
-    totalCancelledPenalties,
+    totalCancelledPayouts,
     pendingAmount,
     availableBalance,
     pendingCount,
