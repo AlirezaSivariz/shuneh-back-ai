@@ -137,7 +137,7 @@ class SmsNotificationService implements NotificationService {
     await safeSend(
       phone,
       // `خدمت شما انجام شد 🌟 برای ثبت نظر و انعام وارد شوید: ${info.link}`,
-      `خدمت شما انجام شد , شونه`,
+      `خدمت شما انجام شد 🌷 نظرتون رو در بخش «رزروهای انجام‌شده» ثبت کنید. , شونه`,
       "service_completed",
     );
   }
