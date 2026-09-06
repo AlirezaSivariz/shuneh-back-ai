@@ -5,7 +5,12 @@ import { StylistService } from '../../models/StylistService';
 import { Salon, ISalon } from '../../models/Salon';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
-import { WorkplaceType, StylistProfile } from '../../models/StylistProfile';
+import {
+  WorkplaceType,
+  FreelanceServiceLocationType,
+  IFreelanceInfo,
+  StylistProfile,
+} from '../../models/StylistProfile';
 import { Reservation } from '../../models/Reservation';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
@@ -118,17 +123,46 @@ export async function setWorkplaceType(stylistId: string, type: WorkplaceType) {
   return profile;
 }
 
-/** Step 3a — freelance address & location. Completes the workplace step. */
+/** Step 3a — freelance service location. Completes the workplace step. */
 export async function setFreelance(
   stylistId: string,
-  data: { address: string; lng: number; lat: number },
+  data: {
+    serviceLocationType?: FreelanceServiceLocationType;
+    address?: string;
+    lng?: number;
+    lat?: number;
+    serviceArea?: string;
+    unrestricted?: boolean;
+  },
 ) {
   const profile = await ensureStylistProfile(stylistId);
   profile.workplaceType = 'freelance';
-  profile.freelance = {
-    address: data.address,
-    location: toGeoPoint(data.lng, data.lat),
+
+  const type = data.serviceLocationType ?? 'own_location';
+  const freelance: IFreelanceInfo = {
+    ...(profile.freelance ?? {}),
+    serviceLocationType: type,
   };
+  if (type === 'own_location') {
+    // Legacy/default flow: a workplace address + map point at the freelancer's
+    // own location. Customer-travel fields don't apply here.
+    freelance.address = data.address;
+    freelance.location = toGeoPoint(data.lng!, data.lat!);
+    delete freelance.serviceArea;
+    delete freelance.unrestricted;
+  } else {
+    // Customer-location flow: no fixed workplace point; an optional free-text
+    // service area unless the freelancer has no area restrictions.
+    delete freelance.address;
+    delete freelance.location;
+    freelance.unrestricted = data.unrestricted === true;
+    if (freelance.unrestricted) {
+      delete freelance.serviceArea;
+    } else {
+      freelance.serviceArea = data.serviceArea?.trim() || undefined;
+    }
+  }
+  profile.freelance = freelance;
   await profile.save();
   // NOTE: the onboarding step is NOT advanced here — a stylist may add several
   // workplaces; the 'workplace' step is finalized explicitly via

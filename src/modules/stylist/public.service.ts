@@ -618,7 +618,13 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
     province: user.province ?? null,
     city: user.city ?? null,
     freelance: profile.freelance
-      ? { address: profile.freelance.address ?? null, location: profile.freelance.location ?? null }
+      ? {
+          address: profile.freelance.address ?? null,
+          location: profile.freelance.location ?? null,
+          serviceLocationType: profile.freelance.serviceLocationType ?? null,
+          serviceArea: profile.freelance.serviceArea ?? null,
+          unrestricted: profile.freelance.unrestricted ?? null,
+        }
       : null,
     portfolio: (profile.portfolio ?? []).map((p) => storageProvider.getUrl(p)),
     cover: photoUrl(profile.cover),

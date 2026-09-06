@@ -153,11 +153,48 @@ export const workplaceTypeSchema = {
 };
 
 export const freelanceSchema = {
-  body: z.object({
-    address: z.string().trim().min(1, 'address is required'),
-    lng: z.number().min(-180).max(180),
-    lat: z.number().min(-90).max(90),
-  }),
+  body: z
+    .object({
+      serviceLocationType: z.enum(['own_location', 'customer_location']).optional(),
+      address: z.string().trim().min(1, 'آدرس محل کار لازم است').optional(),
+      lng: z.number().min(-180).max(180).optional(),
+      lat: z.number().min(-90).max(90).optional(),
+      serviceArea: z.string().trim().max(300).optional(),
+      unrestricted: z.boolean().optional(),
+    })
+    .superRefine((body, ctx) => {
+      const type = body.serviceLocationType ?? 'own_location';
+      if (type === 'own_location') {
+        // Legacy/default flow: a workplace address + map point are required.
+        if (!body.address) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['address'],
+            message: 'آدرس محل کار لازم است',
+          });
+        }
+        if (body.lng === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['lng'],
+            message: 'طول جغرافیایی لازم است',
+          });
+        }
+        if (body.lat === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['lat'],
+            message: 'عرض جغرافیایی لازم است',
+          });
+        }
+      } else if (!(body.serviceArea ?? '').trim() && body.unrestricted !== true) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['serviceArea'],
+          message: 'منطقه خدمت‌رسانی را وارد کنید یا «بدون محدودیت» را انتخاب کنید',
+        });
+      }
+    }),
 };
 
 export const joinSalonSchema = {

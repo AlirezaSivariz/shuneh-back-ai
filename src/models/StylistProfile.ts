@@ -63,9 +63,19 @@ export function planExpiryDate(): Date {
   return d;
 }
 
+/** Where a freelancer provides services: at their own workplace or by traveling
+ * to the customer's location. */
+export type FreelanceServiceLocationType = 'own_location' | 'customer_location';
+
 export interface IFreelanceInfo {
   address?: string;
   location?: GeoPoint;
+  /** Onboarding selection (defaults to `own_location` for existing profiles). */
+  serviceLocationType?: FreelanceServiceLocationType;
+  /** Free-text areas the freelancer serves when traveling to the customer. */
+  serviceArea?: string;
+  /** True when the freelancer serves anywhere (no area restrictions). */
+  unrestricted?: boolean;
 }
 
 /** A stylist's per-service cancellation policy override (gold plan only). */
@@ -187,6 +197,9 @@ const stylistProfileSchema = new Schema<IStylistProfile>(
         {
           address: { type: String },
           location: { type: geoPointSchema },
+          serviceLocationType: { type: String, enum: ['own_location', 'customer_location'] },
+          serviceArea: { type: String },
+          unrestricted: { type: Boolean },
         },
         { _id: false },
       ),
