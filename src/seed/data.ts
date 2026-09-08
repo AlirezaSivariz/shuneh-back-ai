@@ -174,4 +174,19 @@ export const seedCategories: SeedCategory[] = [
       { name: 'پاک‌سازی تاتو', durationMin: 45, defaultPrice: 800000 },
     ],
   },
+  {
+    name: 'تاتو و میکروپیگمنتیشن',
+    slug: 'tattoo',
+    description: 'تاتو و میکروپیگمنتیشن ابرو، لب، خط چشم و بدن',
+    order: 10,
+    services: [
+      { name: 'تاتو ابرو', durationMin: 120, defaultPrice: 1500000 },
+      { name: 'تاتو لب', durationMin: 90, defaultPrice: 1800000 },
+      { name: 'تاتو خط چشم', durationMin: 60, defaultPrice: 1500000 },
+      { name: 'تاتو خال', durationMin: 30, defaultPrice: 500000 },
+      { name: 'تاتو بدن و طراحی', durationMin: 120, defaultPrice: 2000000 },
+      { name: 'تاتو کاور', durationMin: 120, defaultPrice: 2500000 },
+      { name: 'پاک‌سازی و حذف تاتو', durationMin: 60, defaultPrice: 900000 },
+    ],
+  },
 ];

@@ -9,6 +9,8 @@ export interface IStylistService extends Document {
   serviceId: Types.ObjectId;
   price: number | null;
   durationMin: number | null;
+  /** Stylist-supplied description for this service (nullable = none). */
+  description: string | null;
   /** Per-service portfolio images (storage keys), max 3. */
   portfolioImages: string[];
   /** Whether the first portfolio image appears on the public service card. */
@@ -23,6 +25,7 @@ const stylistServiceSchema = new Schema<IStylistService>(
     serviceId: { type: Schema.Types.ObjectId, ref: 'Service', required: true, index: true },
     price: { type: Number, default: null, min: 0 },
     durationMin: { type: Number, default: null, min: 1 },
+    description: { type: String, default: null, maxlength: 1000 },
     portfolioImages: { type: [String], default: [] },
     showPortfolioOnCard: { type: Boolean, default: true },
   },

@@ -74,6 +74,7 @@ export const setServicesSchema = {
         serviceId: objectId,
         price: z.number().min(0).nullable().optional(),
         durationMin: z.number().int().min(1).nullable().optional(),
+        description: z.string().trim().max(1000).nullable().optional(),
       }),
     ),
   }),
@@ -88,6 +89,7 @@ export const replaceServicesSchema = {
           serviceId: objectId,
           price: z.number().min(0).nullable().optional(),
           durationMin: z.number().int().min(1).nullable().optional(),
+          description: z.string().trim().max(1000).nullable().optional(),
         }),
       )
       .min(0),
@@ -101,6 +103,7 @@ export const stylistServiceBodySchema = {
     price: z.number().min(0).nullable().optional(),
     durationMin: z.number().int().min(1).nullable().optional(),
     showPortfolioOnCard: z.boolean().optional(),
+    description: z.string().trim().max(1000).nullable().optional(),
   }),
 };
 
@@ -131,6 +134,7 @@ export const createCustomServiceSchema = {
     durationMin: z.number().int().min(1),
     price: z.number().min(0),
     categoryId: objectId.optional(),
+    description: z.string().trim().max(1000).optional(),
   }),
 };
 
@@ -142,6 +146,7 @@ export const updateCustomServiceSchema = {
       durationMin: z.number().int().min(1).optional(),
       price: z.number().min(0).optional(),
       categoryId: objectId.optional(),
+      description: z.string().trim().max(1000).optional(),
     })
     .refine((b) => Object.keys(b).length > 0, 'حداقل یک فیلد برای ویرایش لازم است'),
 };

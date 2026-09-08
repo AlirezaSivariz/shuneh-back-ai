@@ -47,6 +47,7 @@ interface ServiceItem {
   serviceId: string;
   price?: number | null;
   durationMin?: number | null;
+  description?: string | null;
 }
 
 /** Maximum portfolio images a stylist can attach to a single service. */
@@ -73,6 +74,7 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
         $set: {
           price: item.price ?? null,
           durationMin: item.durationMin ?? null,
+          description: item.description ?? null,
         },
       },
       { upsert: true },
@@ -650,6 +652,7 @@ export async function listStylistServices(stylistId: string) {
         durationMin: link.durationMin ?? svc.durationMin, // effective
         customPrice: link.price,
         customDurationMin: link.durationMin,
+        description: link.description ?? svc.description ?? null,
         defaultPrice: svc.defaultPrice,
         defaultDurationMin: svc.durationMin,
         isCustom: !!svc.isCustom,
@@ -678,7 +681,13 @@ export async function replaceStylistServices(stylistId: string, items: ServiceIt
   for (const item of items) {
     await StylistService.updateOne(
       { stylistId, serviceId: item.serviceId },
-      { $set: { price: item.price ?? null, durationMin: item.durationMin ?? null } },
+      {
+        $set: {
+          price: item.price ?? null,
+          durationMin: item.durationMin ?? null,
+          description: item.description ?? null,
+        },
+      },
       { upsert: true },
     );
   }
@@ -693,14 +702,20 @@ export async function replaceStylistServices(stylistId: string, items: ServiceIt
 export async function addStylistService(
   stylistId: string,
   serviceId: string,
-  data: { price?: number | null; durationMin?: number | null },
+  data: { price?: number | null; durationMin?: number | null; description?: string | null },
 ) {
   const svc = await Service.findById(serviceId).select('_id');
   if (!svc) throw AppError.notFound('خدمت یافت نشد', 'SERVICE_NOT_FOUND');
 
   await StylistService.updateOne(
     { stylistId, serviceId },
-    { $set: { price: data.price ?? null, durationMin: data.durationMin ?? null } },
+    {
+      $set: {
+        price: data.price ?? null,
+        durationMin: data.durationMin ?? null,
+        description: data.description ?? null,
+      },
+    },
     { upsert: true },
   );
   return listStylistServices(stylistId);
@@ -710,7 +725,12 @@ export async function addStylistService(
 export async function updateStylistService(
   stylistId: string,
   serviceId: string,
-  data: { price?: number | null; durationMin?: number | null; showPortfolioOnCard?: boolean },
+  data: {
+    price?: number | null;
+    durationMin?: number | null;
+    showPortfolioOnCard?: boolean;
+    description?: string | null;
+  },
 ) {
   const link = await StylistService.findOne({ stylistId, serviceId });
   if (!link) {
@@ -719,6 +739,7 @@ export async function updateStylistService(
   if (data.price !== undefined) link.price = data.price;
   if (data.durationMin !== undefined) link.durationMin = data.durationMin;
   if (data.showPortfolioOnCard !== undefined) link.showPortfolioOnCard = data.showPortfolioOnCard;
+  if (data.description !== undefined) link.description = data.description;
   await link.save();
   return listStylistServices(stylistId);
 }
@@ -760,7 +781,7 @@ async function resolveCategoryId(categoryId?: string): Promise<Types.ObjectId> {
  */
 export async function createCustomService(
   stylistId: string,
-  data: { name: string; durationMin: number; price: number; categoryId?: string },
+  data: { name: string; durationMin: number; price: number; categoryId?: string; description?: string | null },
 ) {
   const categoryId = await resolveCategoryId(data.categoryId);
   const service = await Service.create({
@@ -778,6 +799,7 @@ export async function createCustomService(
     serviceId: service._id,
     price: null,
     durationMin: null,
+    description: data.description ?? null,
   });
   return listStylistServices(stylistId);
 }
@@ -797,7 +819,7 @@ async function ownedCustomService(stylistId: string, serviceId: string) {
 export async function updateCustomService(
   stylistId: string,
   serviceId: string,
-  data: { name?: string; durationMin?: number; price?: number; categoryId?: string },
+  data: { name?: string; durationMin?: number; price?: number; categoryId?: string; description?: string | null },
 ) {
   const service = await ownedCustomService(stylistId, serviceId);
   if (data.name !== undefined) service.name = data.name;
@@ -805,6 +827,14 @@ export async function updateCustomService(
   if (data.price !== undefined) service.defaultPrice = data.price;
   if (data.categoryId !== undefined) service.categoryId = await resolveCategoryId(data.categoryId);
   await service.save();
+
+  if (data.description !== undefined) {
+    const link = await StylistService.findOne({ stylistId, serviceId: service._id });
+    if (link) {
+      link.description = data.description;
+      await link.save();
+    }
+  }
   return listStylistServices(stylistId);
 }
 

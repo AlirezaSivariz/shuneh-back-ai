@@ -531,7 +531,7 @@ export async function getStylistProfile(rawInput: string, viewerId?: string) {
       return {
         id: String(ss.serviceId),
         name: svc.name,
-        description: svc.description ?? null,
+        description: ss.description ?? svc.description ?? null,
         price: effectivePrice(ss.price, svc),
         durationMin: effectiveDuration(ss.durationMin, svc),
         category: cat ? { id: String(cat._id), name: cat.name } : null,
