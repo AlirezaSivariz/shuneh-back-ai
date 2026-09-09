@@ -89,6 +89,13 @@ export interface IUser extends Document {
   debtLockedAt?: Date | null;
   /** Admin note about the debt lock. */
   debtNote?: string | null;
+  /**
+   * Referral code (invite link). Auto-generated (unique, immutable). Null until
+   * generated — every user gets one lazily on first read and at registration.
+   */
+  referralCode?: string | null;
+  /** The user who invited this user (the referrer). One-time; never changed. */
+  referredBy?: Types.ObjectId | null;
   /** Bank card number (۱۶ digits). Stored by the user in their bank-info panel. */
   cardNumber?: string | null;
   /** Bank SHEBA/IBAN number (IR + ۲۴ digits). Stored by the user in their bank-info panel. */
@@ -140,6 +147,11 @@ const userSchema = new Schema<IUser>(
     // Bank info (user-managed, accessible by any role).
     cardNumber: { type: String, trim: true, default: null },
     shebaNumber: { type: String, trim: true, default: null },
+    // Referral code — unique when present (partial unique: most users just haven't
+    // had one generated yet); the referrer the user was invited by (display only;
+    // the Referral model is the authoritative one-time relationship).
+    referralCode: { type: String, trim: true, uppercase: true, default: null },
+    referredBy: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     // bcrypt-hashed password; null until the user sets one via set-password.
     password: { type: String, default: null },
   },
@@ -158,6 +170,13 @@ userSchema.index(
 userSchema.index(
   { foreignId: 1 },
   { unique: true, partialFilterExpression: { foreignId: { $type: 'string' } } },
+);
+
+// A referral code likewise identifies one account (partial-unique so users who
+// haven't had one generated yet never collide on null).
+userSchema.index(
+  { referralCode: 1 },
+  { unique: true, partialFilterExpression: { referralCode: { $type: 'string' } } },
 );
 
 export const User = model<IUser>('User', userSchema);

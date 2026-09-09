@@ -4,6 +4,8 @@ export interface ICreditSetting extends Document {
   _id: Types.ObjectId;
   completedReservationCredit: number;
   fiveStarReviewCredit: number;
+  /** Reward granted to a referrer when their invitee completes their profile. */
+  referralRewardAmount: number;
   consecutiveCancelPenalty: number;
   consecutiveCancelThreshold: number;
   silverCreditPrice: number;
@@ -17,6 +19,7 @@ const creditSettingSchema = new Schema<ICreditSetting>(
   {
     completedReservationCredit: { type: Number, default: 25, min: 0 },
     fiveStarReviewCredit: { type: Number, default: 15, min: 0 },
+    referralRewardAmount: { type: Number, default: 25, min: 0 },
     consecutiveCancelPenalty: { type: Number, default: 25, min: 0 },
     consecutiveCancelThreshold: { type: Number, default: 3, min: 1 },
     silverCreditPrice: { type: Number, default: 400, min: 1 },

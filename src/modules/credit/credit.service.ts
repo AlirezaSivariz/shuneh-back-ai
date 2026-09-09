@@ -8,6 +8,7 @@ import { AppError } from '../../utils/AppError';
 interface CreditSettings {
   completedReservationCredit: number;
   fiveStarReviewCredit: number;
+  referralRewardAmount: number;
   consecutiveCancelPenalty: number;
   consecutiveCancelThreshold: number;
   silverCreditPrice: number;
@@ -30,7 +31,7 @@ export async function getCreditSettings(): Promise<CreditSettings> {
   }
   if (!doc) {
     return {
-      completedReservationCredit: 25, fiveStarReviewCredit: 15,
+      completedReservationCredit: 25, fiveStarReviewCredit: 15, referralRewardAmount: 25,
       consecutiveCancelPenalty: 25, consecutiveCancelThreshold: 3,
       silverCreditPrice: 400, goldCreditPrice: 700, isEnabled: true,
     };
@@ -38,6 +39,7 @@ export async function getCreditSettings(): Promise<CreditSettings> {
   const settings: CreditSettings = {
     completedReservationCredit: doc.completedReservationCredit,
     fiveStarReviewCredit: doc.fiveStarReviewCredit,
+    referralRewardAmount: doc.referralRewardAmount ?? 25,
     consecutiveCancelPenalty: doc.consecutiveCancelPenalty,
     consecutiveCancelThreshold: doc.consecutiveCancelThreshold,
     silverCreditPrice: doc.silverCreditPrice,
@@ -191,7 +193,7 @@ export async function purchasePlanByCredit(userId: string, tier: 'silver' | 'gol
     const existing = await CreditWallet.findOne({ userId: oid });
     if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
     throw AppError.badRequest(
-      `اعتبار کافی نیست. نیاز: ${creditPrice} اعتبار`,
+      `اعتبار کافی نیست. نیاز: ${creditPrice} تومان`,
       'INSUFFICIENT_CREDIT',
     );
   }
@@ -225,6 +227,57 @@ export async function purchasePlanByCredit(userId: string, tier: 'silver' | 'gol
   return { balance: wallet.balance };
 }
 
+/**
+ * Atomically spend credit on a booking. Balance-guarded (`balance >= amount` so
+ * the balance can never go negative) and idempotent per reservation: the caller
+ * records exactly one spend per reservation and refunds it on hold release
+ * (`rollbackCredit` reverses this transaction). Each retry creates a NEW
+ * reservation + its own spend; expired holds are swept + refunded.
+ */
+export async function spendCreditForReservation(
+  customerId: string,
+  amount: number,
+  reservationId: string,
+) {
+  if (!Types.ObjectId.isValid(customerId)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const debitAmount = Math.trunc(amount);
+  if (!Number.isFinite(debitAmount) || debitAmount <= 0) {
+    throw AppError.badRequest('مقدار نادرست است', 'INVALID_AMOUNT');
+  }
+
+  const settings = await getCreditSettings();
+  if (!settings.isEnabled) {
+    throw AppError.badRequest('سیستم اعتبار غیرفعال است', 'CREDIT_SYSTEM_DISABLED');
+  }
+
+  const oid = new Types.ObjectId(customerId);
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId: oid, balance: { $gte: debitAmount } },
+    { $inc: { balance: -debitAmount, totalSpent: debitAmount, version: 1 } },
+    { new: true },
+  );
+  if (!wallet) {
+    const existing = await CreditWallet.findOne({ userId: oid });
+    if (!existing) throw AppError.notFound('کیف اعتبار یافت نشد', 'WALLET_NOT_FOUND');
+    throw AppError.badRequest(
+      `اعتبار کافی نیست. نیاز: ${debitAmount} تومان`,
+      'INSUFFICIENT_CREDIT',
+    );
+  }
+
+  await CreditTransaction.create({
+    userId: oid,
+    amount: -debitAmount,
+    balanceAfter: wallet.balance,
+    reason: 'reservation_credit_use' as CreditTxReason,
+    referenceType: 'reservation',
+    referenceId: new Types.ObjectId(reservationId),
+    description: `استفاده از اعتبار در رزرو -${debitAmount} تومان`,
+  });
+
+  return { balance: wallet.balance, totalEarned: wallet.totalEarned, totalSpent: wallet.totalSpent };
+}
+
 export async function awardCompletedReservation(stylistId: string, reservationId: string) {
   const settings = await getCreditSettings();
   if (!settings.isEnabled || settings.completedReservationCredit <= 0) return null;
@@ -235,7 +288,7 @@ export async function awardCompletedReservation(stylistId: string, reservationId
       reason: 'completed_reservation',
       referenceType: 'reservation',
       referenceId: reservationId,
-      description: `تکمیل رزرو +${settings.completedReservationCredit} اعتبار`,
+      description: `تکمیل رزرو +${settings.completedReservationCredit} تومان`,
     });
   } catch {
     return null;
@@ -252,7 +305,7 @@ export async function awardFiveStarReview(stylistId: string, reviewId: string) {
       reason: 'five_star_review',
       referenceType: 'review',
       referenceId: reviewId,
-      description: `امتیاز ۵ ستاره +${settings.fiveStarReviewCredit} اعتبار`,
+      description: `امتیاز ۵ ستاره +${settings.fiveStarReviewCredit} تومان`,
     });
   } catch {
     return null;
@@ -299,7 +352,7 @@ export async function applyCancellationPenalty(stylistId: string, reservationId:
       reason: 'consecutive_cancellation_penalty',
       referenceType: 'reservation',
       referenceId: reservationId,
-      description: `${consecutiveCount + 1}امین لغو متوالی -${settings.consecutiveCancelPenalty} اعتبار`,
+      description: `${consecutiveCount + 1}امین لغو متوالی -${settings.consecutiveCancelPenalty} تومان`,
       metadata: { consecutiveCount: consecutiveCount + 1, threshold: settings.consecutiveCancelThreshold },
     });
     return result;

@@ -17,6 +17,7 @@ import { hasPendingInvitesForPhone } from '../invite/invite.service';
 import { getBookability } from '../stylist/bookability';
 import { accountStatus } from '../../utils/foreignApproval';
 import { storageProvider } from '../../utils/storage';
+import { ensureReferralCode, claimReferralIfApplicable } from '../referral/referral.service';
 
 /** Stored image key → absolute URL (the convention used across all API outputs). */
 function photoUrl(key?: string | null): string | null {
@@ -126,6 +127,7 @@ export async function getOnboardingState(userId: string) {
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
       hasPassportImage: !!user.passportImage,
+      referralCode: user.referralCode ?? null,
     },
     onboardingStep: profile?.onboardingStep ?? 'role',
     status: profile?.status ?? 'draft',
@@ -245,6 +247,7 @@ export async function getUserState(userId: string) {
       foreignApprovalStatus: user.foreignApprovalStatus ?? 'not_required',
       foreignRejectionReason: user.foreignRejectionReason ?? null,
       hasPassportImage: !!user.passportImage,
+      referralCode: user.referralCode ?? null,
     },
     roles: user.roles,
     hasPersonalInfo,
@@ -273,6 +276,8 @@ export async function updatePersonal(
     nationalCode?: string;
     foreignId?: string;
     birthDate: Date;
+    /** Optional invite-a-friend code claimed at profile completion. */
+    referralCode?: string;
   },
 ): Promise<void> {
   const user = await User.findById(userId);
@@ -351,6 +356,16 @@ export async function updatePersonal(
       await profile.save();
     }
     await advanceStep(profile, 'personal');
+  }
+
+  // Invite-a-friend: make sure this user has their own invite code, and if they
+  // entered a code at profile completion, establish the one-time referral +
+  // reward the referrer. Both are best-effort — an invalid/unusable code must
+  // never roll back a successfully saved profile; the user can retry explicitly
+  // from their profile page (POST /me/referral/claim) for clear feedback.
+  await ensureReferralCode(userId).catch(() => undefined);
+  if (data.referralCode) {
+    await claimReferralIfApplicable(userId, data.referralCode);
   }
 }
 

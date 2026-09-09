@@ -43,7 +43,12 @@ import {
   FinanceComputation,
 } from '../finance/finance.service';
 import type { IFinancialAdjustment } from '../../models/Reservation';
-import { applyCancellationPenalty } from '../credit/credit.service';
+import {
+  applyCancellationPenalty,
+  getWallet,
+  spendCreditForReservation,
+  rollbackCredit,
+} from '../credit/credit.service';
 
 /** The deposit amount the customer actually paid online (for refund/penalty math). */
 function paidAmountOf(r: IReservation): number | null {
@@ -78,6 +83,8 @@ interface CreateInput {
   acceptedPolicy?: boolean;
   /** Number of companions (extra people). 0 = customer only. */
   companionsCount?: number;
+  /** Shuneh Credit to apply toward the online payable (capped server-side). */
+  shunehCreditUsed?: number;
 }
 
 function endTimeFrom(startTime: string, durationMin: number): string {
@@ -270,7 +277,21 @@ export async function createReservation(customerId: string, input: CreateInput) 
   const netPrice = (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
   const depositBreakdown = calculateDeposit(netPrice);
   const chargeToman = depositBreakdown.totalCharge;
-  const requiresPayment = config.paymentDriver === 'zibal' && chargeToman > 0;
+
+  // Shuneh Credit: reduce ONLY the online payable (deposit + booking fee). The
+  // `deposit` snapshot stays gross so invoice/commission/settlement math is
+  // unaffected; `shunehCreditUsed` records the credit portion and the gateway
+  // charge becomes `netCharge`. Credit is capped at min(requested, balance,
+  // charge) — a balance that dropped in the meantime is caught by the guarded
+  // atomic debit later, and the charge can never go negative.
+  let shunehCreditUsed = 0;
+  const creditRequested = input.shunehCreditUsed ?? 0;
+  if (creditRequested > 0 && chargeToman > 0) {
+    const wallet = await getWallet(customerId);
+    shunehCreditUsed = Math.min(Math.floor(creditRequested), wallet.balance, chargeToman);
+  }
+  const netCharge = Math.max(0, chargeToman - shunehCreditUsed);
+  const requiresPayment = config.paymentDriver === 'zibal' && netCharge > 0;
 
   // Resolve policy to get maxRescheduleCount for this reservation.
   const policyForCreate = await resolveCancellationPolicy({
@@ -311,6 +332,7 @@ export async function createReservation(customerId: string, input: CreateInput) 
     },
     customerNote,
     companionsCount,
+    shunehCreditUsed: shunehCreditUsed > 0 ? shunehCreditUsed : null,
     policyAcceptedAt,
     acceptedPolicies,
     status: requiresPayment ? 'pending' : 'confirmed',
@@ -356,6 +378,19 @@ export async function createReservation(customerId: string, input: CreateInput) 
     }
   }
 
+  // Debit the Shuneh Credit atomically (balance-guarded — never negative, and a
+  // balance that raced down between the pre-check and here surfaces as an error
+  // and rolls the hold back). One debit per reservation; refunded if the hold is
+  // released/expires (see refundReservationCredit).
+  if (shunehCreditUsed > 0) {
+    try {
+      await spendCreditForReservation(customerId, shunehCreditUsed, String(reservation._id));
+    } catch (err) {
+      await reservation.deleteOne().catch(() => {});
+      throw err;
+    }
+  }
+
   // Ensure the booker holds the 'customer' role (idempotent) — a multi-role user
   // (e.g. a stylist) booking for the first time becomes a customer too, so the
   // reservation shows in their customer panel and navigation treats them right.
@@ -370,12 +405,12 @@ export async function createReservation(customerId: string, input: CreateInput) 
       const { startPayment } = await import('../payment/payment.service');
       const customerUser = await User.findById(customerId).select('phone').lean();
       const pay = await startPayment(customerId, {
-        amountToman: chargeToman,
+        amountToman: netCharge,
         purpose: 'reservation_deposit',
         orderId: String(reservation._id),
         description: 'پرداخت رزرو نوبت شونه',
         mobile: customerUser?.phone,
-        meta: { reservationId: String(reservation._id) },
+        meta: { reservationId: String(reservation._id), creditUsed: shunehCreditUsed },
       });
       // Link the transaction to the hold (best-effort; the tx meta is authoritative).
       reservation.paymentTxId = new Types.ObjectId(pay.transactionId);
@@ -387,11 +422,13 @@ export async function createReservation(customerId: string, input: CreateInput) 
           paymentUrl: pay.paymentUrl,
           trackId: pay.trackId,
           transactionId: pay.transactionId,
-          amountToman: chargeToman,
+          amountToman: netCharge,
         },
       };
     } catch (err) {
       // Roll back the hold so the slot is freed and the customer can retry.
+      // Any Shuneh Credit debited for this hold is returned (best-effort).
+      await refundReservationCredit(reservation).catch(() => undefined);
       await reservation.deleteOne().catch(() => {});
       throw err;
     }
@@ -463,26 +500,51 @@ export async function confirmPaidReservation(
 }
 
 /**
+ * Refund the Shuneh Credit debited for a hold when it is released before
+ * payment (start-failure / cancel / expiry sweep). Idempotent: `rollbackCredit`
+ * only reverses the original spend transaction. Best-effort; throws are handled
+ * by callers.
+ */
+async function refundReservationCredit(reservation: {
+  _id: Types.ObjectId;
+  shunehCreditUsed?: number | null;
+}): Promise<void> {
+  if (!reservation.shunehCreditUsed || reservation.shunehCreditUsed <= 0) return;
+  await rollbackCredit('reservation', String(reservation._id));
+}
+
+/**
  * Release the slot held by an unpaid reservation (payment failed / canceled).
  * Only deletes a still-`awaiting` hold, so a paid booking is never removed.
  */
 export async function releaseUnpaidReservation(reservationId: string): Promise<void> {
   if (!Types.ObjectId.isValid(reservationId)) return;
-  await Reservation.deleteOne({ _id: reservationId, paymentStatus: 'awaiting' });
+  const reservation = await Reservation.findOneAndDelete({
+    _id: reservationId,
+    paymentStatus: 'awaiting',
+  });
+  if (reservation) await refundReservationCredit(reservation).catch(() => undefined);
 }
 
 /**
  * Sweep abandoned payment holds (customer left the gateway without returning).
  * Deletes `awaiting` holds older than `olderThanMinutes` so their slots free up.
  * The TTL comfortably exceeds a gateway session, so a late callback rarely loses
- * a booking.
+ * a booking. Credit used by the swept holds is returned best-effort.
  */
 export async function releaseExpiredHolds(olderThanMinutes = 30): Promise<{ removed: number }> {
   const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
-  const result = await Reservation.deleteMany({
+  const expired = await Reservation.find({
     paymentStatus: 'awaiting',
     createdAt: { $lt: cutoff },
-  });
+  })
+    .select('_id shunehCreditUsed')
+    .lean();
+  if (expired.length === 0) return { removed: 0 };
+  const result = await Reservation.deleteMany({ _id: { $in: expired.map((r) => r._id) } });
+  for (const r of expired) {
+    await refundReservationCredit(r).catch(() => undefined);
+  }
   return { removed: result.deletedCount ?? 0 };
 }
 
@@ -1145,6 +1207,7 @@ async function serializeReservation(
         : null,
     salon: salon ? { id: String(r.salonId), name: salon.name, address: salon.address ?? null } : null,
     customerNote: r.customerNote ?? null,
+    shunehCreditUsed: r.shunehCreditUsed ?? null,
     companionsCount: r.companionsCount ?? 0,
     totalPersons: (r.companionsCount ?? 0) + 1,
     totalDuration: Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime)),
@@ -1257,6 +1320,7 @@ function resolveFromMaps(
         : null,
     salon: salon ? { id: String(r.salonId!), name: salon.name, address: salon.address ?? null } : null,
     customerNote: r.customerNote ?? null,
+    shunehCreditUsed: r.shunehCreditUsed ?? null,
     companionsCount: r.companionsCount ?? 0,
     totalPersons: (r.companionsCount ?? 0) + 1,
     totalDuration: Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime)),

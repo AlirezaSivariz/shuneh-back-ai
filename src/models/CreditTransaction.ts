@@ -4,6 +4,8 @@ export type CreditTxReason =
   | 'completed_reservation'
   | 'five_star_review'
   | 'plan_purchase'
+  | 'referral'
+  | 'reservation_credit_use'
   | 'consecutive_cancellation_penalty'
   | 'admin_adjustment'
   | 'refund_rollback';
@@ -12,13 +14,21 @@ export const CREDIT_TX_REASONS: CreditTxReason[] = [
   'completed_reservation',
   'five_star_review',
   'plan_purchase',
+  'referral',
+  'reservation_credit_use',
   'consecutive_cancellation_penalty',
   'admin_adjustment',
   'refund_rollback',
 ];
 
-export type CreditTxRefType = 'reservation' | 'review' | 'plan' | 'none';
-export const CREDIT_TX_REF_TYPES: CreditTxRefType[] = ['reservation', 'review', 'plan', 'none'];
+export type CreditTxRefType = 'reservation' | 'review' | 'plan' | 'referral' | 'none';
+export const CREDIT_TX_REF_TYPES: CreditTxRefType[] = [
+  'reservation',
+  'review',
+  'plan',
+  'referral',
+  'none',
+];
 
 export interface ICreditTransaction extends Document {
   _id: Types.ObjectId;

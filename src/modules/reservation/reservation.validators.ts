@@ -21,6 +21,9 @@ export const createReservationSchema = {
       acceptedPolicy: z.boolean().optional(),
       // Optional number of companions (extra people receiving the same service).
       companionsCount: z.number().int().min(0).optional(),
+      // Optional Shuneh Credit the customer wants to apply toward the online
+      // payable (deposit + booking fee). Server-capped at balance & charge.
+      shunehCreditUsed: z.number().int().min(0).optional(),
     })
     .transform((b) => ({
       ...b,

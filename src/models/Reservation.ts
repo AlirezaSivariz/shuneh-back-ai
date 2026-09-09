@@ -115,6 +115,13 @@ export interface IReservation extends Document {
   } | null;
   /** Optional free-text note from the customer to the stylist (read-only for stylist). */
   customerNote?: string | null;
+  /**
+   * Shuneh Credit applied to the ONLINE payable (deposit + booking fee) at
+   * booking time. The `deposit` block stays gross (invoice/commission/settlement
+   * math untouched); only the gateway charge is reduced by this amount. Debit
+   * happens at creation and is refunded if the hold is released/expires.
+   */
+  shunehCreditUsed?: number | null;
   /** Number of companions (extra people receiving the same service). 0 = customer only. */
   companionsCount?: number;
   /** Audit trail of reschedules (oldest → newest). */
@@ -216,6 +223,7 @@ const reservationSchema = new Schema<IReservation>(
     originalPrice: { type: Number, default: null, min: 0 },
     finalPrice: { type: Number, default: null, min: 0 },
     customerNote: { type: String, default: null, maxlength: 500 },
+    shunehCreditUsed: { type: Number, default: null, min: 0 },
     companionsCount: { type: Number, default: 0, min: 0 },
     rescheduleHistory: {
       type: [

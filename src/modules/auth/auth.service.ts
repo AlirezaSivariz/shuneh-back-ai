@@ -9,6 +9,7 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../uti
 import { AppError } from '../../utils/AppError';
 import { durationToMs } from '../../utils/duration';
 import { childLogger } from '../../utils/logger';
+import { ensureReferralCode } from '../referral/referral.service';
 
 const log = childLogger({ module: 'auth' });
 import { config } from '../../config/env';
@@ -98,6 +99,13 @@ export async function verifyOtp(
   if (!user) {
     user = await User.create({ phone, roles: [] });
     isNewUser = true;
+    // Give every new account its unique invite-a-friend code right away
+    // (best-effort; lazily ensured on read for any legacy user who lacks one).
+    try {
+      await ensureReferralCode(String(user._id));
+    } catch {
+      /* non-fatal — code is ensured lazily on the profile/referral screen */
+    }
   }
 
   const tokens = await issueTokens(user);

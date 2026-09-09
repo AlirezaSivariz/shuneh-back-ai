@@ -31,6 +31,9 @@ export const personalSchema = {
           (d) => d.getTime() > Date.now() - 120 * 365 * 24 * 60 * 60 * 1000,
           'birthDate is not realistic',
         ),
+      // Optional invite-a-friend code claimed at profile completion (server-
+      // validated; never blocks the profile save if invalid/unusable).
+      referralCode: z.string().trim().min(1).max(32).optional(),
     })
     .superRefine((b, ctx) => {
       if (b.isForeignNational) {

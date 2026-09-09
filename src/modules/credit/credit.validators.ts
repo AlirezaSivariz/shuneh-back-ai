@@ -20,6 +20,7 @@ export const creditSettingsUpdateSchema = {
   body: z.object({
     completedReservationCredit: z.number().int().min(0).optional(),
     fiveStarReviewCredit: z.number().int().min(0).optional(),
+    referralRewardAmount: z.number().int().min(0).optional(),
     consecutiveCancelPenalty: z.number().int().min(0).optional(),
     consecutiveCancelThreshold: z.number().int().min(1).optional(),
     silverCreditPrice: z.number().int().min(1).optional(),

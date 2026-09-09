@@ -22,6 +22,7 @@ export async function getPublicSettings(req: Request, res: Response): Promise<vo
   sendSuccess(res, {
     completedReservationCredit: result.completedReservationCredit,
     fiveStarReviewCredit: result.fiveStarReviewCredit,
+    referralRewardAmount: result.referralRewardAmount,
     consecutiveCancelPenalty: result.consecutiveCancelPenalty,
     consecutiveCancelThreshold: result.consecutiveCancelThreshold,
     silverCreditPrice: result.silverCreditPrice,

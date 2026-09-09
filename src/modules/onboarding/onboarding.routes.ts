@@ -7,12 +7,14 @@ import * as messageController from '../message/message.controller';
 import * as walletController from '../wallet/wallet.controller';
 import * as creditController from '../credit/credit.controller';
 import * as socialController from '../social/social.controller';
+import * as referralController from '../referral/referral.controller';
 import { validate } from '../../middlewares/validate';
 import { authenticate } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { createUploader } from '../../middlewares/upload';
 import { z } from 'zod';
 import { setRolesSchema, personalSchema, nameEditSchema, locationSchema } from './onboarding.validators';
+import { claimReferralSchema } from '../referral/referral.validators';
 
 const messageIdParamsSchema = { params: z.object({ id: z.string().min(1) }) };
 import { reportRangeSchema } from '../reports/reports.validators';
@@ -33,6 +35,10 @@ meRouter.get('/state', asyncHandler(controller.getUserState));
 // Pending owner-invites by phone (discoverable without opening the magic link).
 meRouter.get('/pending-invites', asyncHandler(controller.getPendingInvites));
 meRouter.patch('/personal', validate(personalSchema), asyncHandler(controller.updatePersonal));
+// Referral (invite-a-friend): my own invite code + claiming one (explicitly, or
+// implicitly via referralCode on PATCH /me/personal at profile completion).
+meRouter.get('/referral', asyncHandler(referralController.getMyReferral));
+meRouter.post('/referral/claim', validate(claimReferralSchema), asyncHandler(referralController.claim));
 // Edit the profile's activity area (province/state + city) from any dashboard.
 meRouter.patch('/location', validate(locationSchema), asyncHandler(controller.updateLocation));
 // Reviewed display-name edit: request (pending until an admin approves) + read own pending.

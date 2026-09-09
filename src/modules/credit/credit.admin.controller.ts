@@ -10,6 +10,7 @@ export async function getSettings(_req: Request, res: Response): Promise<void> {
   sendSuccess(res, {
     completedReservationCredit: settings.completedReservationCredit,
     fiveStarReviewCredit: settings.fiveStarReviewCredit,
+    referralRewardAmount: settings.referralRewardAmount,
     consecutiveCancelPenalty: settings.consecutiveCancelPenalty,
     consecutiveCancelThreshold: settings.consecutiveCancelThreshold,
     silverCreditPrice: settings.silverCreditPrice,
