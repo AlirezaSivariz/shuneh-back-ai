@@ -32,7 +32,7 @@ RUN npm config set registry https://registry.npmjs.org/ \
 
 COPY --from=builder /app/dist ./dist
 
-# اگر داری
+# اگر 
 # COPY --from=builder /app/uploads ./uploads
 # COPY --from=builder /app/public ./public
 
