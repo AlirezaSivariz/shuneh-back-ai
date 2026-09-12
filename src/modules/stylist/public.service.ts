@@ -312,11 +312,6 @@ export async function searchStylists(params: SearchParams) {
     ) {
       continue;
     }
-    // name filter.
-    if (params.name) {
-      const full = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
-      if (!full.toLowerCase().includes(params.name.toLowerCase())) continue;
-    }
 
     // Resolve location from pre-loaded maps (no per-stylist DB query).
     let loc: { location: GeoPoint | null; address: string | null; salon: ISalon | null; salonStatus: 'active' | 'pending' | null };
@@ -326,6 +321,20 @@ export async function searchStylists(params: SearchParams) {
       const link = stylistSalonByUser.get(uid);
       const salon = link ? (salonById.get(String(link.salonId)) as unknown as ISalon | null) ?? null : null;
       loc = { location: salon?.location ?? null, address: salon?.address ?? null, salon, salonStatus: (link?.status as 'active' | 'pending' | undefined) ?? null };
+    }
+
+    // name filter — matches the stylist's name OR their salon's name (so
+    // searching by salon name also finds the people working there).
+    if (params.name) {
+      const needle = params.name.toLowerCase();
+      const stylistName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
+      const salonName = loc.salon?.name ?? '';
+      if (
+        !stylistName.toLowerCase().includes(needle) &&
+        !salonName.toLowerCase().includes(needle)
+      ) {
+        continue;
+      }
     }
 
     // province/city filter: matches the USER profile's activity area (the single
