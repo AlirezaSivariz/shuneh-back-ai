@@ -26,7 +26,7 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 
-RUN npm config set registry https://package-mirror.liara.ir/repository/npm/ \
+RUN npm config set registry https://registry.npmjs.org/ \
     && npm install --omit=dev \
     && npm cache clean --force
 
