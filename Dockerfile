@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # استفاده از میرور npm ایران
-RUN npm config set registry https://package-mirror.liara.ir/repository/npm/ \
+RUN npm config set registry https://registry.npmjs.org/ \
     && npm install
 
 COPY . .
@@ -32,7 +32,7 @@ RUN npm config set registry https://registry.npmjs.org/ \
 
 COPY --from=builder /app/dist ./dist
 
-# اگر 
+# اگر داری
 # COPY --from=builder /app/uploads ./uploads
 # COPY --from=builder /app/public ./public
 
