@@ -1272,7 +1272,7 @@ function resolveFromMaps(
   const serviceEntries = ids
     .map((id: any) => maps.serviceById.get(String(id)))
     .filter(Boolean)
-    .map((s: any) => ({ id: '', name: s!.name, durationMin: s!.durationMin }));
+    .map((s: any) => ({ id: String(s!._id), name: s!.name, durationMin: s!.durationMin }));
 
   const stylistUser = maps.userById.get(String(r.stylistId));
   const photo = stylistUser?.profilePhoto;

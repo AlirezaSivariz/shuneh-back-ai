@@ -108,6 +108,40 @@ describe("Reservation — availability & booking", () => {
     expect(res.body.data.reservation.services.length).toBe(2);
   });
 
+  it("reservation lists expose real service ids (reschedule date picker depends on them)", async () => {
+    // The reschedule sheet re-queries /available-days with the ids taken from the
+    // reservation LIST payload. Empty ids there made every date render disabled.
+    const stylist = await createStylist();
+    const customer = await createCustomer();
+    const date = futureDate(3);
+    const { slot } = await firstSlot(stylist.id, stylist.serviceIds[0], date);
+    const booked = await api()
+      .post("/reservations")
+      .set(...auth(customer.token))
+      .send({ stylistId: stylist.id, serviceIds: [stylist.serviceIds[0]], date, startTime: slot.startTime });
+    expect(booked.status).toBe(201);
+    const reservationId = booked.body.data.reservation.id;
+
+    const customerList = await api()
+      .get("/reservations?filter=upcoming")
+      .set(...auth(customer.token));
+    const asCustomer = customerList.body.data.reservations.find((r: any) => r.id === reservationId);
+    expect(asCustomer.services.map((s: any) => s.id)).toEqual([stylist.serviceIds[0]]);
+
+    const stylistList = await api()
+      .get("/stylist/reservations?filter=upcoming")
+      .set(...auth(stylist.token));
+    const asStylist = stylistList.body.data.reservations.find((r: any) => r.id === reservationId);
+    expect(asStylist.services.map((s: any) => s.id)).toEqual([stylist.serviceIds[0]]);
+
+    // The exact call the reschedule sheet makes with that id.
+    const days = await api().get(
+      `/stylists/${stylist.id}/available-days?from=${futureDate(0)}&to=${futureDate(10)}&serviceIds=${asCustomer.services[0].id}`,
+    );
+    expect(days.status).toBe(200);
+    expect(days.body.data.days.length).toBeGreaterThan(0);
+  });
+
   it("rejects a slot outside working hours and an unknown service", async () => {
     const stylist = await createStylist();
     const customer = await createCustomer();
