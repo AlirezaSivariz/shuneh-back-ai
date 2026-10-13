@@ -62,6 +62,23 @@ describe("Internal messages (admin → user)", () => {
   });
 });
 
+describe("Stylist onboarding welcome message", () => {
+  it("is delivered once when onboarding completes and shows in the panel messages", async () => {
+    const stylist = await createStylist();
+    const { sendStylistWelcomeMessage } = await import("../src/modules/message/message.service");
+
+    // The media (final) onboarding step calls this; run it twice to prove idempotency.
+    await sendStylistWelcomeMessage(stylist.id);
+    await sendStylistWelcomeMessage(stylist.id);
+
+    const msgs = await api().get("/me/messages").set(...auth(stylist.token));
+    const welcome = msgs.body.data.items.filter((m: any) => m.relatedType === "stylist_welcome");
+    expect(welcome).toHaveLength(1);
+    expect(welcome[0].body).toContain("به خانواده شونه خوش اومدی");
+    expect(msgs.body.data.unreadCount).toBe(1);
+  });
+});
+
 describe("Admin image deletion", () => {
   it("deletes a user's profile photo + (optionally) messages them", async () => {
     const admin = await createAdmin();

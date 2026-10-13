@@ -2,6 +2,7 @@ import { User } from '../../models/User';
 import { storageProvider } from '../../utils/storage';
 import { AppError } from '../../utils/AppError';
 import { ensureStylistProfile } from '../onboarding/onboarding.service';
+import { sendStylistWelcomeMessage } from '../message/message.service';
 
 /**
  * Step 5 — store the profile photo and portfolio images, then mark onboarding
@@ -70,6 +71,9 @@ export async function saveStylistMedia(
   profile.onboardingStep = 'completed';
   profile.status = 'active';
   await profile.save();
+
+  // One-time automated welcome message for the new stylist (idempotent).
+  await sendStylistWelcomeMessage(stylistId);
 
   const user = await User.findById(stylistId);
 

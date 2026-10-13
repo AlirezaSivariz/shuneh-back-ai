@@ -4,6 +4,8 @@ import { Schema, model, Document, Types } from 'mongoose';
  * One-way in-app message from support (admin) to a user. The user can read it
  * but not reply — it is purely a notification/communication channel inside the
  * panel (replaces approval/rejection SMS for review/foreign/verification).
+ * Automated system messages (e.g. the stylist onboarding welcome) have no
+ * admin sender, so `createdBy` is null for them.
  */
 export interface IMessage extends Document {
   _id: Types.ObjectId;
@@ -13,7 +15,7 @@ export interface IMessage extends Document {
   isRead: boolean;
   /** Optional context, e.g. 'review_rejected' | 'image_removed' | 'foreign_rejected'. */
   relatedType?: string | null;
-  createdBy: Types.ObjectId; // the admin who sent it
+  createdBy: Types.ObjectId | null; // the admin who sent it; null = system/automated
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,7 +27,7 @@ const messageSchema = new Schema<IMessage>(
     body: { type: String, required: true, trim: true, maxlength: 2000 },
     isRead: { type: Boolean, default: false, index: true },
     relatedType: { type: String, default: null },
-    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true },
 );

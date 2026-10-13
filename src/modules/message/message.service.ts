@@ -40,7 +40,8 @@ export async function createMessage(input: {
   body: string;
   title?: string;
   relatedType?: string;
-  createdBy: string;
+  /** The admin who sent it. Omit for automated/system messages (stored as null). */
+  createdBy?: string;
 }): Promise<IMessage> {
   if (!Types.ObjectId.isValid(input.recipientId)) {
     throw AppError.badRequest('شناسه‌ی کاربر نامعتبر است', 'INVALID_ID');
@@ -50,8 +51,45 @@ export async function createMessage(input: {
     body: input.body,
     title: input.title ?? null,
     relatedType: input.relatedType ?? null,
-    createdBy: new Types.ObjectId(input.createdBy),
+    createdBy: input.createdBy ? new Types.ObjectId(input.createdBy) : null,
   });
+}
+
+/** Context tag for the one-time stylist onboarding welcome message. */
+export const STYLIST_WELCOME_RELATED_TYPE = 'stylist_welcome';
+
+/** The welcome message body sent to a stylist once their onboarding completes. */
+export const STYLIST_WELCOME_BODY = [
+  '🎉 تبریک! به خانواده شونه خوش اومدی 💚',
+  '',
+  'مشتری هنگام رزرو، بیعانه رو از طریق شونه پرداخت می‌کنه و باقی مبلغ رو بعد از انجام خدمات، حضوری به خودت پرداخت می‌کنه.',
+  '',
+  '💰 بعد از انجام خدمت، کافیه از شونه درخواست تسویه ثبت کنی تا بیعانه‌ای که مشتری پرداخت کرده، به حسابت واریز بشه.',
+  '',
+  'با شونه، نوبت‌هات رو راحت‌تر مدیریت کن! ✨',
+].join('\n');
+
+/**
+ * Send the stylist onboarding welcome message exactly once (idempotent — the
+ * media endpoint that finalizes onboarding may be called again for later
+ * portfolio/cover uploads). Best-effort: messaging must never break onboarding.
+ */
+export async function sendStylistWelcomeMessage(stylistId: string): Promise<void> {
+  if (!Types.ObjectId.isValid(stylistId)) return;
+  try {
+    const already = await Message.exists({
+      recipientId: new Types.ObjectId(stylistId),
+      relatedType: STYLIST_WELCOME_RELATED_TYPE,
+    });
+    if (already) return;
+    await createMessage({
+      recipientId: stylistId,
+      body: STYLIST_WELCOME_BODY,
+      relatedType: STYLIST_WELCOME_RELATED_TYPE,
+    });
+  } catch {
+    /* onboarding completion must not fail because of messaging */
+  }
 }
 
 /** A user's own messages (newest first) + the unread count. */
