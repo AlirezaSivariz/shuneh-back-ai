@@ -139,6 +139,37 @@ describe("onboarding — step progression", () => {
   });
 });
 
+describe("onboarding — role replacement (go back + pick another role)", () => {
+  it("replace:true swaps a draft stylist for customer and drops the stylist draft", async () => {
+    const st = await freshStylist(); // holds 'stylist' + a draft profile, past personal/location
+
+    const res = await api()
+      .post("/onboarding/role")
+      .set(...auth(st.token))
+      .send({ roles: ["customer"], replace: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.roles).toContain("customer");
+    expect(res.body.data.roles).not.toContain("stylist");
+
+    // The stylist draft (profile + generated username) is gone — back to step 0.
+    const state = await api().get("/onboarding/state").set(...auth(st.token));
+    expect(state.body.data.onboardingStep).toBe("role");
+    expect(state.body.data.username).toBeNull();
+  });
+
+  it("replace (default) is additive: existing roles are kept", async () => {
+    const st = await freshStylist();
+
+    const res = await api()
+      .post("/onboarding/role")
+      .set(...auth(st.token))
+      .send({ roles: ["customer"] });
+
+    expect(res.body.data.roles).toEqual(expect.arrayContaining(["stylist", "customer"]));
+  });
+});
+
 describe("onboarding — custom services", () => {
   it("POST /stylist/services/custom → 201, appears in GET /stylist/services with isCustom:true", async () => {
     const st = await freshStylist();

@@ -11,7 +11,11 @@ export async function getPendingInvites(req: Request, res: Response): Promise<vo
 }
 
 export async function setRoles(req: Request, res: Response): Promise<void> {
-  const roles = await service.setRoles(req.user!.id, req.body.roles as Role[]);
+  const roles = await service.setRoles(
+    req.user!.id,
+    req.body.roles as Role[],
+    req.body.replace === true,
+  );
   // Return the stylist per-role state so the client knows where to go next.
   const stylist = await service.getStylistRoleState(req.user!.id);
   sendSuccess(res, { roles, stylist });

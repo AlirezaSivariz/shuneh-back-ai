@@ -9,6 +9,12 @@ export const setRolesSchema = {
     roles: z
       .array(z.enum(SELF_ASSIGNABLE_ROLES as [string, ...string[]]))
       .nonempty('At least one role is required'),
+    // When true the supplied roles REPLACE the user's self-assigned onboarding
+    // roles (used when going back and picking a different role mid-onboarding):
+    // the previous role's draft data is discarded. Roles the user did not gain
+    // through onboarding (admin, an owner of a salon, an active stylist) are
+    // always kept. Defaults to false (additive/idempotent).
+    replace: z.boolean().optional().default(false),
   }),
 };
 

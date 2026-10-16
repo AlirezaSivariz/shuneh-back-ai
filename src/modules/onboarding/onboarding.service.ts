@@ -9,6 +9,7 @@ import { StylistService } from '../../models/StylistService';
 import { StylistSalon } from '../../models/StylistSalon';
 import { WorkingHour } from '../../models/WorkingHour';
 import { Salon } from '../../models/Salon';
+import { Service } from '../../models/Service';
 import { ProfileEditRequest } from '../../models/ProfileEditRequest';
 import { containsBannedWord } from '../../config/bannedWords';
 import { AppError } from '../../utils/AppError';
@@ -62,10 +63,26 @@ export async function advanceStep(
 }
 
 /**
- * Add roles to a user (idempotent). Creates the StylistProfile when the
- * 'stylist' role is added so onboarding can begin.
+ * Set a user's roles.
+ *
+ * By default roles are ADDITIVE and idempotent (a user can be owner + stylist +
+ * customer at once). When `replace` is true the supplied roles REPLACE the
+ * user's self-assigned onboarding roles — used when the user goes back and picks
+ * a different role mid-onboarding, so the previous role's draft data is dropped.
+ *
+ * Roles the user did NOT gain through onboarding are always preserved:
+ *  - 'admin' (never self-assignable);
+ *  - 'owner' when they actually own a salon (e.g. accepted a salon invite);
+ *  - 'stylist' when their profile is already active (an established stylist).
+ *
+ * Creates the StylistProfile when the 'stylist' role is (re)added so onboarding
+ * can begin.
  */
-export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
+export async function setRoles(
+  userId: string,
+  roles: Role[],
+  replace = false,
+): Promise<Role[]> {
   const user = await User.findById(userId);
   if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
 
@@ -74,9 +91,44 @@ export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
     if (!SELF_ASSIGNABLE_ROLES.includes(role)) {
       throw AppError.badRequest('این نقش قابل انتخاب نیست', 'INVALID_ROLE');
     }
-    if (!user.roles.includes(role)) user.roles.push(role);
+  }
+
+  let removed: Role[] = [];
+
+  if (replace) {
+    // A self-assignable role is swappable only while it has no durable backing:
+    // 'customer' always; 'owner' only without an owned salon; 'stylist' only
+    // while still a draft. Everything else is kept.
+    const onboardingRoles: Role[] = ['customer'];
+    if (
+      user.roles.includes('owner') &&
+      (await Salon.countDocuments({ ownerId: user._id })) === 0
+    ) {
+      onboardingRoles.push('owner');
+    }
+    if (
+      user.roles.includes('stylist') &&
+      !(await StylistProfile.exists({ userId, status: 'active' }))
+    ) {
+      onboardingRoles.push('stylist');
+    }
+
+    const preserved = user.roles.filter((r) => !onboardingRoles.includes(r));
+    const nextRoles = Array.from(new Set<Role>([...preserved, ...roles]));
+    removed = user.roles.filter((r) => !nextRoles.includes(r));
+    user.roles = nextRoles;
+  } else {
+    for (const role of roles) {
+      if (!user.roles.includes(role)) user.roles.push(role);
+    }
   }
   await user.save();
+
+  // A swapped-away stylist role leaves a draft profile (and its draft data)
+  // behind — discard it so re-onboarding starts clean.
+  if (removed.includes('stylist')) {
+    await resetStylistDraft(userId);
+  }
 
   if (user.roles.includes('stylist')) {
     const profile = await ensureStylistProfile(userId);
@@ -84,6 +136,35 @@ export async function setRoles(userId: string, roles: Role[]): Promise<Role[]> {
   }
 
   return user.roles;
+}
+
+/**
+ * Discard a stylist's draft records when the role is swapped away during
+ * onboarding. The profile here is always a draft (active stylists are preserved
+ * by `setRoles`), so it is safe to remove the profile, its services/salon
+ * links/working hours, custom catalogue items, and any onboarding media it
+ * referenced.
+ */
+async function resetStylistDraft(userId: string): Promise<void> {
+  const profile = await StylistProfile.findOne({ userId })
+    .select('portfolio cover nationalCardFront nationalCardBack')
+    .lean();
+  await Promise.all([
+    StylistProfile.deleteMany({ userId }),
+    StylistService.deleteMany({ stylistId: userId }),
+    StylistSalon.deleteMany({ stylistId: userId }),
+    WorkingHour.deleteMany({ stylistId: userId }),
+    Service.deleteMany({ ownerStylistId: userId }),
+  ]);
+  if (profile) {
+    const keys = [
+      ...(profile.portfolio ?? []),
+      profile.cover,
+      profile.nationalCardFront,
+      profile.nationalCardBack,
+    ].filter((k): k is string => !!k);
+    await Promise.all(keys.map((k) => storageProvider.delete(k).catch(() => undefined)));
+  }
 }
 
 /**
