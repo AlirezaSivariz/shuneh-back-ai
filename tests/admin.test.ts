@@ -10,6 +10,11 @@ import {
 } from "./helpers";
 import { Reservation } from "../src/models/Reservation";
 import { AuditLog } from "../src/models/AuditLog";
+import { User } from "../src/models/User";
+import { Message } from "../src/models/Message";
+import { StylistProfile } from "../src/models/StylistProfile";
+import { Salon } from "../src/models/Salon";
+import { Types } from "mongoose";
 
 /**
  * Book a slot for `customer` with `stylist` on a given date, returning the
@@ -278,6 +283,71 @@ describe("Admin area", () => {
         .send({ isActive: false });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("CANNOT_DISABLE_SELF");
+    });
+
+    it("DELETE /admin/users/:id hard-deletes the user + personal data and audits", async () => {
+      const admin = await createAdmin();
+      const customer = await createCustomer();
+      // A personal record belonging only to this user.
+      await api()
+        .post("/admin/messages")
+        .set(...auth(admin.token))
+        .send({ recipientId: customer.id, body: "اطلاعیه" });
+      expect(await User.findById(customer.id)).not.toBeNull();
+      expect(await Message.countDocuments({ recipientId: customer.id })).toBe(1);
+
+      const before = await AuditLog.countDocuments();
+      const res = await api()
+        .delete(`/admin/users/${customer.id}`)
+        .set(...auth(admin.token));
+      expect(res.status).toBe(200);
+      expect(res.body.data.id).toBe(customer.id);
+
+      expect(await User.findById(customer.id)).toBeNull();
+      expect(await Message.countDocuments({ recipientId: customer.id })).toBe(0);
+      expect(await AuditLog.countDocuments()).toBe(before + 1);
+    });
+
+    it("DELETE /admin/users/:id keeps shared records but drops the user's own profile", async () => {
+      const admin = await createAdmin();
+      const stylist = await createStylist();
+      const customer = await createCustomer();
+      const reservation = await book(stylist, customer.token, futureDate(2));
+
+      const res = await api()
+        .delete(`/admin/users/${stylist.id}`)
+        .set(...auth(admin.token));
+      expect(res.status).toBe(200);
+
+      expect(await User.findById(stylist.id)).toBeNull();
+      expect(await StylistProfile.findOne({ userId: stylist.id })).toBeNull();
+      // The salon the stylist owned is deleted with them (no orphan salon)...
+      expect(await Salon.findById(stylist.salonId)).toBeNull();
+      // ...but the shared reservation survives so the customer's history stays intact.
+      expect(await Reservation.findById(reservation.id)).not.toBeNull();
+    });
+
+    it("DELETE /admin/users guards: self, admin accounts and unknown ids", async () => {
+      const admin = await createAdmin();
+
+      const self = await api()
+        .delete(`/admin/users/${admin.user.id}`)
+        .set(...auth(admin.token));
+      expect(self.status).toBe(400);
+      expect(self.body.error.code).toBe("CANNOT_DELETE_SELF");
+
+      const otherAdmin = await createAdmin();
+      const forbidden = await api()
+        .delete(`/admin/users/${otherAdmin.user.id}`)
+        .set(...auth(admin.token));
+      expect(forbidden.status).toBe(400);
+      expect(forbidden.body.error.code).toBe("ADMIN_NOT_DELETABLE");
+
+      const missing = await api()
+        .delete(`/admin/users/${new Types.ObjectId().toString()}`)
+        .set(...auth(admin.token));
+      expect(missing.status).toBe(404);
+      expect(missing.body.error.code).toBe("USER_NOT_FOUND");
     });
 
     it("POST /admin/stylists/:id/promote and /unpromote update the profile + audit", async () => {

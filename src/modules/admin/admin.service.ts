@@ -18,6 +18,7 @@ import {
 import { StylistSalon } from '../../models/StylistSalon';
 import { StylistService } from '../../models/StylistService';
 import { Salon, ServiceGender } from '../../models/Salon';
+import { SalonInvite } from '../../models/SalonInvite';
 import { Service } from '../../models/Service';
 import { ServiceCategory } from '../../models/ServiceCategory';
 import { Promotion, IPromotion } from '../../models/Promotion';
@@ -27,6 +28,17 @@ import { ContentReport } from '../../models/ContentReport';
 import { ProfileEditRequest } from '../../models/ProfileEditRequest';
 import { Story } from '../../models/Story';
 import { StoryView } from '../../models/StoryView';
+import { RefreshToken } from '../../models/RefreshToken';
+import { Message } from '../../models/Message';
+import { Referral } from '../../models/Referral';
+import { Follow } from '../../models/Follow';
+import { SavedPost } from '../../models/SavedPost';
+import { UserFeatureOverride } from '../../models/UserFeatureOverride';
+import { SupportTicket } from '../../models/SupportTicket';
+import { CreditWallet } from '../../models/CreditWallet';
+import { CreditTransaction } from '../../models/CreditTransaction';
+import { WorkingHour } from '../../models/WorkingHour';
+import { StylistSettlement } from '../../models/StylistSettlement';
 import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { maskSheba, maskCard, listStylistServices as ssListStylistServices, addStylistService as ssAddStylistService, updateStylistService as ssUpdateStylistService, removeStylistService as ssRemoveStylistService, createCustomService as ssCreateCustomService } from '../stylist/stylist.service';
 import { validateOwnerPolicy, resolveCancellationPolicy } from '../policy/policy.service';
@@ -390,6 +402,77 @@ export async function adminUpdateUser(
     birthDate: user.birthDate ?? null,
     foreignId: user.foreignId ?? null,
   };
+}
+
+/**
+ * Permanently delete a user plus everything that belongs to that user alone
+ * (their profile, wallet/credit, tokens, messages, requests, referrals,
+ * followers, owned discount codes/promotions, their stylist records and any
+ * salons they own).
+ *
+ * Records shared with another party — reservations, reviews, tips, payments and
+ * social content — are intentionally kept, so deleting a customer does not wipe
+ * a stylist's history (and vice versa). Admin accounts and your own account can
+ * never be deleted. Irreversible; audited.
+ */
+export async function deleteUser(adminId: string, id: string) {
+  if (!Types.ObjectId.isValid(id)) throw AppError.badRequest('شناسه‌ی نامعتبر', 'INVALID_ID');
+  const user = await User.findById(id).select('phone roles firstName lastName').lean();
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+  if ((user.roles ?? []).includes('admin')) {
+    throw AppError.badRequest('حساب مدیر قابل حذف نیست', 'ADMIN_NOT_DELETABLE');
+  }
+  if (id === adminId) throw AppError.badRequest('امکان حذف حساب خودتان وجود ندارد', 'CANNOT_DELETE_SELF');
+
+  const uid = new Types.ObjectId(id);
+
+  // The salons this user owns go with them (an owner-less salon would be an
+  // orphan). Their member links, working hours and pending invites go too.
+  const ownedSalonIds = (await Salon.find({ ownerId: uid }).select('_id').lean()).map((s) => s._id);
+  if (ownedSalonIds.length) {
+    await Promise.all([
+      StylistSalon.deleteMany({ salonId: { $in: ownedSalonIds } }),
+      WorkingHour.deleteMany({ salonId: { $in: ownedSalonIds } }),
+      SalonInvite.deleteMany({ salonId: { $in: ownedSalonIds } }),
+      Salon.deleteMany({ _id: { $in: ownedSalonIds } }),
+    ]);
+  }
+
+  await Promise.all([
+    // account + sessions
+    RefreshToken.deleteMany({ userId: uid }),
+    UserFeatureOverride.deleteMany({ userId: uid }),
+    Message.deleteMany({ recipientId: uid }),
+    SupportTicket.deleteMany({ userId: uid }),
+    ProfileEditRequest.deleteMany({ userId: uid }),
+    Referral.deleteMany({ $or: [{ referrerId: uid }, { refereeId: uid }] }),
+    // money owned by this account only
+    WalletTransaction.deleteMany({ userId: uid }),
+    CreditWallet.deleteMany({ userId: uid }),
+    CreditTransaction.deleteMany({ userId: uid }),
+    // social graph of this account
+    Follow.deleteMany({ $or: [{ followerId: uid }, { stylistId: uid }] }),
+    SavedPost.deleteMany({ userId: uid }),
+    ContentReport.deleteMany({ reporterId: uid }),
+    // stylist-side records
+    StylistProfile.deleteMany({ userId: uid }),
+    StylistSalon.deleteMany({ stylistId: uid }),
+    StylistService.deleteMany({ stylistId: uid }),
+    WorkingHour.deleteMany({ stylistId: uid }),
+    DiscountCode.deleteMany({ stylistId: uid }),
+    Promotion.deleteMany({ stylistId: uid }),
+    StylistSettlement.deleteMany({ stylistId: uid }),
+    // custom catalogue services created by this stylist (not shared catalogue items)
+    Service.deleteMany({ ownerStylistId: uid }),
+  ]);
+  await User.deleteOne({ _id: uid });
+
+  await audit(adminId, 'user.delete', 'user', id, {
+    phone: user.phone,
+    roles: user.roles,
+    name: fullName(user),
+  });
+  return { id };
 }
 
 // ──────────────── messages + image moderation ────────────────

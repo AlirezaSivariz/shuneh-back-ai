@@ -107,6 +107,8 @@ adminRouter.get('/salons/:id', validate(idParamsSchema), asyncHandler(controller
 // ── Write (conservative; audited) ──
 adminRouter.patch('/users/:id/status', validate(setUserStatusSchema), asyncHandler(controller.setUserStatus));
 adminRouter.patch('/users/:id', validate(updateUserSchema), asyncHandler(controller.updateUser));
+// Permanent account deletion (personal data only; shared bookings/reviews stay).
+adminRouter.delete('/users/:id', validate(idParamsSchema), asyncHandler(controller.deleteUser));
 adminRouter.post('/messages', validate(sendMessageSchema), asyncHandler(controller.sendMessage));
 adminRouter.delete('/users/:id/profile-photo', validate(deleteImageSchema), asyncHandler(controller.deleteProfilePhoto));
 adminRouter.delete('/users/:id/portfolio/:imageId', validate(deletePortfolioImageSchema), asyncHandler(controller.deletePortfolioItem));

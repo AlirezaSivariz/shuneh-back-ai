@@ -37,6 +37,11 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
   sendSuccess(res, result);
 }
 
+/** Permanently delete a user and their personal data (irreversible). */
+export async function deleteUser(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await service.deleteUser(req.user!.id, req.params.id));
+}
+
 export async function impersonateUser(req: Request, res: Response): Promise<void> {
   const result = await service.impersonateUser(req.user!.id, req.params.id);
   sendSuccess(res, result);
