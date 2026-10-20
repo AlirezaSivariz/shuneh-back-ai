@@ -47,6 +47,7 @@ import {
   createStylistTicketRoutes,
   createAdminTicketRoutes,
 } from "./modules/ticket/ticket.routes";
+import chatRoutes from "./modules/chat/chat.routes";
 import { adminFeatureRouter, userFeatureRouter } from "./modules/feature/feature.routes";
 import bankRoutes from "./modules/bank/bank.routes";
 
@@ -132,6 +133,8 @@ export function createApp(): Application {
   app.use("/me/tickets", createCustomerTicketRoutes());
   app.use("/stylist/tickets", createStylistTicketRoutes());
   app.use("/admin/tickets", createAdminTicketRoutes());
+  // Direct customer ↔ stylist chat (both sides use the same endpoints).
+  app.use("/chat", chatRoutes);
   app.use("/admin/features", adminFeatureRouter);
   app.use("/me", userFeatureRouter);
   app.use("/me", bankRoutes);

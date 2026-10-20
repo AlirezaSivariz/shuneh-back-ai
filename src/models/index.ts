@@ -12,6 +12,8 @@ export * from './SalonInvite';
 export * from './Reservation';
 export * from './Review';
 export * from './SupportTicket';
+export * from './ChatConversation';
+export * from './ChatMessage';
 export * from './UserFeatureOverride';
 export * from './CreditWallet';
 export * from './CreditTransaction';
