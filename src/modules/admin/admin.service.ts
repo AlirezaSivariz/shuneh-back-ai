@@ -5,6 +5,8 @@
  * Sensitive fields (e.g. nationalCode) are returned ONLY here, to admins.
  * All date filters are on `reservation.date` (an Iran calendar day stored at
  * its UTC midnight); the timezone is fixed (Iran).
+ * 
+ * 
  */
 import { Types } from 'mongoose';
 import { User, Role, ROLES } from '../../models/User';
