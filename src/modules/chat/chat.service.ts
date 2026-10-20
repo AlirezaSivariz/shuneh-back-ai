@@ -4,6 +4,7 @@ import { ChatMessage } from '../../models/ChatMessage';
 import { StylistProfile } from '../../models/StylistProfile';
 import { User } from '../../models/User';
 import { AppError } from '../../utils/AppError';
+import { notificationService } from '../../utils/notification';
 import { storageProvider } from '../../utils/storage';
 
 interface ChatPeerResponse {
@@ -290,14 +291,49 @@ export async function sendMessage(
     lastMessageSenderId: new Types.ObjectId(userId),
     lastMessageAt: message.createdAt,
   };
+  const inc = { [isCustomer ? 'stylistUnread' : 'customerUnread']: 1 };
 
-  await ChatConversation.updateOne(
-    { _id: conv._id },
-    {
-      $set: update,
-      $inc: { [isCustomer ? 'stylistUnread' : 'customerUnread']: 1 },
-    },
-  );
+  // Only the very first customer message notifies the stylist, and only the
+  // stylist's first reply notifies the customer. The atomic null filters
+  // guarantee exactly one SMS even when sends race.
+  const isFirstMessage = isCustomer && !conv.lastMessageAt;
+  const isFirstReply = !isCustomer && !conv.stylistRepliedAt;
+  let notifyStylist = false;
+  let notifyCustomer = false;
+
+  if (isFirstMessage || isFirstReply) {
+    const filter = isFirstMessage
+      ? { _id: conv._id, lastMessageAt: null }
+      : { _id: conv._id, stylistRepliedAt: null };
+    const set = isFirstReply ? { ...update, stylistRepliedAt: message.createdAt } : update;
+    const updated = await ChatConversation.findOneAndUpdate(filter, { $set: set, $inc: inc });
+    if (isFirstMessage) notifyStylist = !!updated;
+    else notifyCustomer = !!updated;
+    if (!updated) {
+      await ChatConversation.updateOne({ _id: conv._id }, { $set: update, $inc: inc });
+    }
+  } else {
+    await ChatConversation.updateOne({ _id: conv._id }, { $set: update, $inc: inc });
+  }
+
+  if (notifyStylist) {
+    // Best-effort; an SMS failure must never fail the chat message.
+    try {
+      const stylist = await User.findById(conv.stylistUserId).select('phone').lean();
+      if (stylist?.phone) await notificationService.chatFirstMessage(stylist.phone);
+    } catch {
+      /* swallow */
+    }
+  }
+
+  if (notifyCustomer) {
+    try {
+      const customer = await User.findById(conv.customerId).select('phone').lean();
+      if (customer?.phone) await notificationService.chatStylistReplied(customer.phone);
+    } catch {
+      /* swallow */
+    }
+  }
 
   return {
     id: String(message._id),

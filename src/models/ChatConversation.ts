@@ -14,6 +14,9 @@ export interface IChatConversation extends Document {
   lastMessageText: string;
   lastMessageSenderId: Types.ObjectId | null;
   lastMessageAt: Date | null;
+  /** When the stylist sent their first reply (null until then). Used so the
+   * customer is SMS-notified exactly once per thread. */
+  stylistRepliedAt: Date | null;
   customerUnread: number;
   stylistUnread: number;
   createdAt: Date;
@@ -27,6 +30,7 @@ const chatConversationSchema = new Schema<IChatConversation>(
     lastMessageText: { type: String, default: '', maxlength: 500 },
     lastMessageSenderId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     lastMessageAt: { type: Date, default: null },
+    stylistRepliedAt: { type: Date, default: null },
     customerUnread: { type: Number, default: 0, min: 0 },
     stylistUnread: { type: Number, default: 0, min: 0 },
   },

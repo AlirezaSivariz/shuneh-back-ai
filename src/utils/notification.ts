@@ -72,6 +72,10 @@ export interface NotificationService {
   ticketCreated(phone: string): Promise<void>;
   /** Tell a ticket owner that an admin replied to their ticket. */
   ticketAdminReplied(phone: string): Promise<void>;
+  /** Tell a stylist that a customer opened a new chat and awaits a reply. */
+  chatFirstMessage(phone: string): Promise<void>;
+  /** Tell a customer that the stylist replied to their chat for the first time. */
+  chatStylistReplied(phone: string): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -229,8 +233,24 @@ class SmsNotificationService implements NotificationService {
   async ticketAdminReplied(phone: string) {
     await safeSend(
       phone,
-      "پاسخ جدیدی برای تیکت شما ثبت شده است.",
+      "پاسخ پشتیبانی به تیکت شما ارسال شد.",
       "ticket_admin_replied",
+    );
+  }
+
+  async chatFirstMessage(phone: string) {
+    await safeSend(
+      phone,
+      "شونه: مشتری جدیدی در انتظار پاسخ شماست. لطفاً وارد بخش گفتگوهای پنل شوید.",
+      "chat_first_message",
+    );
+  }
+
+  async chatStylistReplied(phone: string) {
+    await safeSend(
+      phone,
+      "شونه: متخصص به پیام شما پاسخ داد. برای مشاهده و ادامه گفتگو وارد پنل شوید.",
+      "chat_stylist_replied",
     );
   }
 }
