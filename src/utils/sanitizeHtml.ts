@@ -4,7 +4,9 @@ import sanitizeHtml from 'sanitize-html';
  * Allowlist sanitizer for admin-authored blog HTML (TipTap output). Admins are
  * trusted, but we still strip scripts/handlers/unknown tags so stored content
  * can be rendered with `dangerouslySetInnerHTML` without XSS risk. The tag set
- * mirrors what the rich editor can produce.
+ * mirrors what the rich editor can produce. Link `rel` is normalized here:
+ * `noopener noreferrer` always, `nofollow` only when the author enabled it in
+ * the editor's nofollow switch.
  */
 export function sanitizeRichHtml(dirty: string): string {
   if (!dirty) return '';
@@ -27,8 +29,17 @@ export function sanitizeRichHtml(dirty: string): string {
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowProtocolRelative: false,
     transformTags: {
-      // Force safe rel on every link.
-      a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer nofollow' }, true),
+      /**
+       * Keep the `rel` the editor produced. The safety attributes are always
+       * present; `nofollow` is only kept when the author enabled it in the
+       * editor's nofollow switch (internal links should stay follow).
+       */
+      a: (tagName: string, attribs: Record<string, string>) => {
+        const rel = new Set((attribs.rel ?? '').split(/\s+/).filter(Boolean));
+        rel.add('noopener');
+        rel.add('noreferrer');
+        return { tagName, attribs: { ...attribs, rel: [...rel].join(' ') } };
+      },
     },
   });
 }
