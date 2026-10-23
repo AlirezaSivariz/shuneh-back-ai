@@ -24,6 +24,7 @@ import {
   getStylistProfile,
 } from '../onboarding/onboarding.service';
 import { reconcileStylistHours } from './hoursReconcile';
+import { registerStylistUsernameChange } from '../redirect/redirect.service';
 import {
   getStylistPolicyOverview,
   validatePolicyForPlan,
@@ -104,8 +105,13 @@ export async function setServices(stylistId: string, items: ServiceItem[]) {
 /** Set or change the stylist's username (called by the stylist themselves). */
 export async function setUsername(stylistId: string, username: string) {
   const profile = await ensureStylistProfile(stylistId);
+  const previous = profile.username;
   profile.username = username;
   await profile.save();
+  // The old profile URL must keep working: 301 to the new slug.
+  if (previous !== profile.username) {
+    await registerStylistUsernameChange(previous, profile.username).catch(() => undefined);
+  }
   return { username: profile.username };
 }
 

@@ -49,6 +49,10 @@ import {
 } from "./modules/ticket/ticket.routes";
 import chatRoutes from "./modules/chat/chat.routes";
 import { adminFeatureRouter, userFeatureRouter } from "./modules/feature/feature.routes";
+import {
+  adminRedirectRouter,
+  redirectPublicRouter,
+} from "./modules/redirect/redirect.routes";
 import bankRoutes from "./modules/bank/bank.routes";
 
 export function createApp(): Application {
@@ -125,6 +129,9 @@ export function createApp(): Application {
   app.use("/me/transactions", createCustomerTransactionRoutes());
   app.use("/stylist/transactions", createStylistTransactionRoutes());
   app.use("/reservations", reservationRouter);
+  // Redirects: public map (storefront edge) + admin management.
+  app.use("/redirects", redirectPublicRouter);
+  app.use("/admin/redirects", adminRedirectRouter);
   app.use("/admin", adminRouter);
   app.use("/plans", planRoutes);
   app.use("/stylist/settlements", createStylistSettlementRoutes());

@@ -65,6 +65,7 @@ import { accountStatus } from '../../utils/foreignApproval';
 import { issueTokens } from '../auth/auth.service';
 import { validateUsernameFormat } from '../../utils/username';
 import { isUsernameAvailable } from '../stylist/public.service';
+import { registerStylistUsernameChange } from '../redirect/redirect.service';
 import { planExpiryDate } from '../../models/StylistProfile';
 
 // ───────────────────────── helpers ─────────────────────────
@@ -2248,9 +2249,14 @@ export async function adminSetStylistUsername(adminId: string, stylistId: string
   if (fmtErr) throw AppError.badRequest(fmtErr, 'INVALID_USERNAME');
   const available = await isUsernameAvailable(username, stylistId);
   if (!available) throw AppError.conflict('این نام کاربری قبلاً انتخاب شده است', 'USERNAME_TAKEN');
+  const previous = profile.username;
   profile.username = username;
   await profile.save();
   await audit(adminId, 'stylist.setUsername', 'stylist', stylistId, { username });
+  // Keep the old profile URL alive as a permanent redirect to the new one.
+  if (previous !== profile.username) {
+    await registerStylistUsernameChange(previous, profile.username).catch(() => undefined);
+  }
   return { stylistId, username };
 }
 

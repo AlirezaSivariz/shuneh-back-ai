@@ -19,6 +19,7 @@ import { getBookability } from '../stylist/bookability';
 import { accountStatus } from '../../utils/foreignApproval';
 import { storageProvider } from '../../utils/storage';
 import { ensureReferralCode, claimReferralIfApplicable } from '../referral/referral.service';
+import { registerStylistUsernameChange } from '../redirect/redirect.service';
 
 /** Stored image key → absolute URL (the convention used across all API outputs). */
 function photoUrl(key?: string | null): string | null {
@@ -431,10 +432,15 @@ export async function updatePersonal(
 
   if (user.roles.includes('stylist')) {
     const profile = await ensureStylistProfile(userId);
+    const previousUsername = profile.username;
     const newUsername = generateUsername(data.firstName, data.lastName, userId);
     if (profile.username !== newUsername) {
       profile.username = newUsername;
       await profile.save();
+    }
+    // The generated slug follows the name; keep the previous profile URL alive.
+    if (previousUsername !== profile.username) {
+      await registerStylistUsernameChange(previousUsername, profile.username).catch(() => undefined);
     }
     await advanceStep(profile, 'personal');
   }
