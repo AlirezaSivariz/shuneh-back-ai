@@ -76,6 +76,8 @@ export interface NotificationService {
   chatFirstMessage(phone: string): Promise<void>;
   /** Tell a customer that the stylist replied to their chat for the first time. */
   chatStylistReplied(phone: string): Promise<void>;
+  /** Push notification for any new message in an existing chat. */
+  chatNewMessage(phone: string, info: { senderName: string }): Promise<void>;
 }
 
 async function safeSend(phone: string, message: string, event: string) {
@@ -251,6 +253,14 @@ class SmsNotificationService implements NotificationService {
       phone,
       "شونه: متخصص به پیام شما پاسخ داد. برای مشاهده و ادامه گفتگو وارد پنل شوید.",
       "chat_stylist_replied",
+    );
+  }
+
+  async chatNewMessage(phone: string, info: { senderName: string }) {
+    await safeSend(
+      phone,
+      `شونه: پیام جدیدی از ${info.senderName} در گفتگو دریافت شده است. برای مشاهده وارد پنل شوید.`,
+      "chat_new_message",
     );
   }
 }

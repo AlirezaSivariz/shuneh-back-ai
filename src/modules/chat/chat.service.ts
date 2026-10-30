@@ -19,7 +19,9 @@ interface ChatMessageResponse {
   id: string;
   conversationId: string;
   senderId: string;
-  text: string;
+  type: 'text' | 'image';
+  text?: string | null;
+  imageUrl?: string | null;
   createdAt: string;
   isMine: boolean;
 }
@@ -43,6 +45,20 @@ interface ChatConversationResponse {
 function iso(value: unknown): string | null {
   if (!value) return null;
   return new Date(value as string | Date).toISOString();
+}
+
+function toMessageResponse(m: Record<string, any>, userId: string): ChatMessageResponse {
+  const imageUrl = m.imageKey ? storageProvider.getUrl(m.imageKey) : null;
+  return {
+    id: String(m._id),
+    conversationId: String(m.conversationId),
+    senderId: String(m.senderId),
+    type: m.type || (m.imageKey ? 'image' : 'text'),
+    text: m.text ?? null,
+    imageUrl,
+    createdAt: iso(m.createdAt)!,
+    isMine: String(m.senderId) === userId,
+  };
 }
 
 async function buildPeer(userId: string, isStylist: boolean): Promise<ChatPeerResponse | null> {
@@ -259,14 +275,7 @@ export async function listMessages(
   const peer = await resolvePeerForViewer(conv, userId);
 
   return {
-    items: raw.map((m) => ({
-      id: String(m._id),
-      conversationId,
-      senderId: String(m.senderId),
-      text: m.text,
-      createdAt: iso(m.createdAt)!,
-      isMine: String(m.senderId) === userId,
-    })),
+    items: raw.map((m) => toMessageResponse(m, userId)),
     conversation: toConversationResponse(conv, userId, peer),
   };
 }
@@ -274,20 +283,38 @@ export async function listMessages(
 export async function sendMessage(
   userId: string,
   conversationId: string,
-  text: string,
+  payload: { text?: string; image?: Express.Multer.File },
 ): Promise<ChatMessageResponse> {
   const conv = await findConversationOrThrow(conversationId);
   assertParticipant(conv, userId);
 
+  const text = (payload.text ?? '').trim();
+  const hasImage = !!payload.image;
+
+  if (!text && !hasImage) {
+    throw AppError.badRequest('متن یا عکس الزامی است', 'EMPTY_MESSAGE');
+  }
+
+  let imageKey: string | undefined;
+  if (hasImage && payload.image) {
+    const stored = await storageProvider.save(payload.image, {
+      ownerType: 'chat',
+      ownerId: conversationId,
+    });
+    imageKey = stored.path;
+  }
+
   const message = await ChatMessage.create({
     conversationId: conv._id,
     senderId: userId,
-    text,
+    type: hasImage ? 'image' : 'text',
+    text: text || undefined,
+    imageKey,
   });
 
   const isCustomer = String(conv.customerId) === userId;
   const update: Record<string, any> = {
-    lastMessageText: text.slice(0, 200),
+    lastMessageText: hasImage ? '📷 عکس' : text.slice(0, 200),
     lastMessageSenderId: new Types.ObjectId(userId),
     lastMessageAt: message.createdAt,
   };
@@ -298,8 +325,8 @@ export async function sendMessage(
   // guarantee exactly one SMS even when sends race.
   const isFirstMessage = isCustomer && !conv.lastMessageAt;
   const isFirstReply = !isCustomer && !conv.stylistRepliedAt;
-  let notifyStylist = false;
-  let notifyCustomer = false;
+  let notifyStylistFirst = false;
+  let notifyCustomerFirst = false;
 
   if (isFirstMessage || isFirstReply) {
     const filter = isFirstMessage
@@ -307,8 +334,8 @@ export async function sendMessage(
       : { _id: conv._id, stylistRepliedAt: null };
     const set = isFirstReply ? { ...update, stylistRepliedAt: message.createdAt } : update;
     const updated = await ChatConversation.findOneAndUpdate(filter, { $set: set, $inc: inc });
-    if (isFirstMessage) notifyStylist = !!updated;
-    else notifyCustomer = !!updated;
+    if (isFirstMessage) notifyStylistFirst = !!updated;
+    else notifyCustomerFirst = !!updated;
     if (!updated) {
       await ChatConversation.updateOne({ _id: conv._id }, { $set: update, $inc: inc });
     }
@@ -316,33 +343,37 @@ export async function sendMessage(
     await ChatConversation.updateOne({ _id: conv._id }, { $set: update, $inc: inc });
   }
 
-  if (notifyStylist) {
-    // Best-effort; an SMS failure must never fail the chat message.
-    try {
+  try {
+    if (notifyStylistFirst) {
       const stylist = await User.findById(conv.stylistUserId).select('phone').lean();
       if (stylist?.phone) await notificationService.chatFirstMessage(stylist.phone);
-    } catch {
-      /* swallow */
+    } else if (isCustomer && !isFirstMessage) {
+      const stylist = await User.findById(conv.stylistUserId).select('phone').lean();
+      const sender = await User.findById(userId).select('firstName lastName').lean();
+      if (stylist?.phone) {
+        const name =
+          `${sender?.firstName ?? ''} ${sender?.lastName ?? ''}`.trim() || 'مشتری';
+        await notificationService.chatNewMessage(stylist.phone, { senderName: name });
+      }
     }
-  }
 
-  if (notifyCustomer) {
-    try {
+    if (notifyCustomerFirst) {
       const customer = await User.findById(conv.customerId).select('phone').lean();
       if (customer?.phone) await notificationService.chatStylistReplied(customer.phone);
-    } catch {
-      /* swallow */
+    } else if (!isCustomer && !isFirstReply) {
+      const customer = await User.findById(conv.customerId).select('phone').lean();
+      const sender = await User.findById(userId).select('firstName lastName').lean();
+      if (customer?.phone) {
+        const name =
+          `${sender?.firstName ?? ''} ${sender?.lastName ?? ''}`.trim() || 'متخصص';
+        await notificationService.chatNewMessage(customer.phone, { senderName: name });
+      }
     }
+  } catch {
+    /* swallow */
   }
 
-  return {
-    id: String(message._id),
-    conversationId,
-    senderId: userId,
-    text: message.text,
-    createdAt: message.createdAt.toISOString(),
-    isMine: true,
-  };
+  return toMessageResponse(message.toObject(), userId);
 }
 
 export async function markRead(userId: string, conversationId: string): Promise<{ unreadCount: number }> {

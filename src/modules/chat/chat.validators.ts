@@ -20,7 +20,16 @@ export const listMessagesSchema = {
 
 export const sendMessageSchema = {
   params: z.object({ id: z.string().min(1) }),
-  body: z.object({
-    text: z.string().trim().min(1, 'متن پیام الزامی است').max(2000, 'متن پیام بیش از حد طولانی است'),
-  }),
+  body: z
+    .object({
+      text: z
+        .string()
+        .trim()
+        .max(2000, 'متن پیام بیش از حد طولانی است')
+        .optional()
+        .or(z.literal('')),
+    })
+    .refine((data) => (data.text && data.text.length > 0) || true, {
+      message: 'متن پیام الزامی است',
+    }),
 };

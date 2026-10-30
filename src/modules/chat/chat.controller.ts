@@ -21,7 +21,10 @@ export async function messages(req: Request, res: Response): Promise<void> {
 }
 
 export async function send(req: Request, res: Response): Promise<void> {
-  const result = await service.sendMessage(req.user!.id, req.params.id, req.body.text);
+  const result = await service.sendMessage(req.user!.id, req.params.id, {
+    text: req.body.text,
+    image: req.file,
+  });
   sendSuccess(res, result, 201);
 }
 

@@ -1,9 +1,13 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
+export type ChatMessageType = 'text' | 'image';
+
 export interface IChatMessage extends Document {
   conversationId: Types.ObjectId;
   senderId: Types.ObjectId;
-  text: string;
+  type: ChatMessageType;
+  text?: string;
+  imageKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -17,7 +21,9 @@ const chatMessageSchema = new Schema<IChatMessage>(
       index: true,
     },
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    text: { type: String, required: true, trim: true, maxlength: 2000 },
+    type: { type: String, enum: ['text', 'image'], default: 'text' },
+    text: { type: String, trim: true, maxlength: 2000 },
+    imageKey: { type: String },
   },
   { timestamps: true },
 );
