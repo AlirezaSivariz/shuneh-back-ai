@@ -241,10 +241,9 @@ async function computeDayAvailability(
  * returns its membership status so the client can label "pending approval".
  */
 export async function searchStylists(params: SearchParams) {
-  // 1) Start from active stylist profiles that currently accept reservations.
+  // 1) Start from active stylist profiles (still show those who disabled reservations).
   const profiles = await StylistProfile.find({
     status: 'active',
-    isAcceptingReservations: { $ne: false },
   }).lean();
   if (profiles.length === 0) return [];
 
@@ -401,6 +400,7 @@ export async function searchStylists(params: SearchParams) {
       // Context-promoted flag is filled after the loop (needs the promo map).
       isPromoted: false,
       isVerified: profile.isVerified === true,
+      isAcceptingReservations: profile.isAcceptingReservations !== false,
       // Day-availability ({count, firstSlot}) — only populated when `date` is set.
       availableThatDay: null as { count: number; firstSlot: string | null } | null,
       // Registration time — used only by the home fallback ranking (tie-break
