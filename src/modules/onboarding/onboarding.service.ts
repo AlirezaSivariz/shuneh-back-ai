@@ -456,6 +456,40 @@ export async function updatePersonal(
   }
 }
 
+/** Update only a user's national code without resubmitting their personal profile. */
+export async function updateNationalCode(userId: string, value: string): Promise<string | null> {
+  const user = await User.findById(userId);
+  if (!user) throw AppError.notFound('کاربر یافت نشد', 'USER_NOT_FOUND');
+
+  const nationalCode = value.trim();
+  if (user.isForeignNational && nationalCode) {
+    throw AppError.badRequest('برای اتباع، کد ملی نباید وارد شود', 'NATIONAL_CODE_NOT_ALLOWED');
+  }
+
+  if (nationalCode) {
+    const duplicate = await User.findOne({ nationalCode, _id: { $ne: user._id } })
+      .select('_id')
+      .lean();
+    if (duplicate) {
+      throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+    }
+    user.nationalCode = nationalCode;
+  } else {
+    user.nationalCode = undefined;
+  }
+
+  try {
+    await user.save();
+  } catch (err) {
+    if ((err as { code?: number }).code === 11000) {
+      throw AppError.conflict('این کد ملی قبلاً ثبت شده است', 'NATIONAL_CODE_TAKEN');
+    }
+    throw err;
+  }
+
+  return user.nationalCode ?? null;
+}
+
 /**
  * Update ONLY the profile's activity area (province/state + city) — used by the
  * stylist/owner dashboards to edit their location, and by the onboarding

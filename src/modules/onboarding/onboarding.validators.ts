@@ -78,6 +78,16 @@ export const personalSchema = {
     })
 };
 
+export const nationalCodeSchema = {
+  body: z.object({
+    nationalCode: z
+      .string()
+      .trim()
+      .max(10, 'کد ملی باید ۱۰ رقم باشد')
+      .refine((code) => !code || isValidNationalCode(code), 'کد ملی معتبر نیست'),
+  }),
+};
+
 /**
  * Standalone location update (PATCH /me/location) — used by the stylist/owner
  * dashboards to edit the profile's activity area WITHOUT resubmitting the whole

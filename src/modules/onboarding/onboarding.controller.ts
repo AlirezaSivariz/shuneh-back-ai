@@ -38,6 +38,11 @@ export async function updatePersonal(req: Request, res: Response): Promise<void>
   sendSuccess(res, state);
 }
 
+export async function updateNationalCode(req: Request, res: Response): Promise<void> {
+  const nationalCode = await service.updateNationalCode(req.user!.id, req.body.nationalCode);
+  sendSuccess(res, { nationalCode });
+}
+
 /** Edit ONLY the profile's province/state + city (single source of truth). */
 export async function updateLocation(req: Request, res: Response): Promise<void> {
   const result = await service.updateLocation(req.user!.id, req.body.province, req.body.city);
