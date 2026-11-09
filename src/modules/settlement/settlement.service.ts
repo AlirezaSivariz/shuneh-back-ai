@@ -62,9 +62,11 @@ function financeOf(r: Record<string, any>) {
 /** Net amount payable to the stylist for one reservation, by its status. */
 function netStylistAmount(r: Record<string, any>): number {
   const finance = financeOf(r);
-  return r.status === "cancelled"
-    ? cancelledStylistPayout(finance)
-    : finance.netStylistShare;
+  if (r.status === "cancelled") return cancelledStylistPayout(finance);
+  // Completed reservations: Shuneh reimburses the specialist for the platform
+  // coupon discount that reduced the on-site payable.
+  const couponFunding = r.coupon?.platformFundedAmount ?? 0;
+  return finance.netStylistShare + couponFunding;
 }
 
 /** Business-rule check: can THIS reservation be included in a settlement? */
@@ -123,7 +125,22 @@ export async function getSettlementBalance(stylistId: string) {
   ]);
   const totalCancelledPenalties = penaltyPipeline[0]?.total ?? 0;
 
-  const grossBalance = totalDeposits + totalCancelledPenalties;
+  // Aggregate Shuneh-funded coupon discounts on completed reservations. This is
+  // platform money owed to the specialist, not customer deposits.
+  const couponFundingPipeline = await Reservation.aggregate([
+    {
+      $match: {
+        stylistId: stylistOid,
+        paymentStatus: "paid",
+        status: "completed",
+        "coupon.platformFundedAmount": { $gt: 0 },
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$coupon.platformFundedAmount" } } },
+  ]);
+  const totalCouponFunding = couponFundingPipeline[0]?.total ?? 0;
+
+  const grossBalance = totalDeposits + totalCancelledPenalties + totalCouponFunding;
 
   // Aggregate pending settlement amounts.
   const pendingPipeline = await StylistSettlement.aggregate([
@@ -138,6 +155,7 @@ export async function getSettlementBalance(stylistId: string) {
   return {
     totalDeposits,
     totalCancelledPenalties,
+    totalCouponFunding,
     pendingAmount,
     availableBalance,
     pendingCount,
@@ -159,6 +177,8 @@ export interface SettlableReservation {
   totalPenalties: number;
   netRefund: number;
   debt: number;
+  /** Shuneh-funded coupon discount reimbursed to the stylist. */
+  couponFunding: number;
   /** Net amount payable to stylist for this reservation */
   netAmount: number;
 }
@@ -180,7 +200,7 @@ export async function getSettlableReservations(
     stylistId: new Types.ObjectId(stylistId),
   })
     .select(
-      "_id status paymentStatus deposit financialAdjustments finalPrice price date startTime serviceId serviceIds customerId",
+      "_id status paymentStatus deposit financialAdjustments finalPrice price coupon date startTime serviceId serviceIds customerId",
     )
     .lean();
 
@@ -294,6 +314,9 @@ export async function getSettlableReservations(
       totalPenalties: finance.totalPenalties,
       netRefund: finance.netRefund,
       debt: finance.debt,
+      // Platform funding is only reimbursed for performed bookings.
+      couponFunding:
+        r.status === "cancelled" ? 0 : (r.coupon?.platformFundedAmount ?? 0),
       netAmount,
     });
   }
@@ -348,7 +371,7 @@ export async function createSettlementRequest(
       _id: { $in: providedIds },
       stylistId: new Types.ObjectId(stylistId),
     })
-      .select("_id paymentStatus status financialAdjustments finalPrice price deposit")
+      .select("_id paymentStatus status financialAdjustments finalPrice price deposit coupon")
       .lean();
 
     if (reservations.length !== providedIds.length) {
@@ -413,7 +436,7 @@ export async function createSettlementRequest(
       ],
       _id: { $nin: await getSettledReservationIds(stylistId) },
     })
-      .select("_id financialAdjustments finalPrice price status deposit")
+      .select("_id financialAdjustments finalPrice price status deposit coupon")
       .lean();
 
     let runningTotal = 0;
@@ -538,7 +561,7 @@ async function getReservationDetails(
     .populate("customerId", "firstName lastName phone")
     .populate("serviceIds", "name")
     .select(
-      "serviceId serviceIds customerId date startTime status finalPrice price financialAdjustments",
+      "serviceId serviceIds customerId date startTime status finalPrice price financialAdjustments coupon",
     )
     .lean();
 
@@ -583,6 +606,9 @@ async function getReservationDetails(
       totalPenalties: finance.totalPenalties,
       netRefund: finance.netRefund,
       debt: finance.debt,
+      // Platform funding is only reimbursed for performed bookings.
+      couponFunding:
+        r.status === "cancelled" ? 0 : (r.coupon?.platformFundedAmount ?? 0),
       netAmount,
     });
   }

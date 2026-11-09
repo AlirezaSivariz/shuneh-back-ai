@@ -444,3 +444,20 @@ export async function consumeDiscount(codeId: Types.ObjectId) {
   }
   return updated;
 }
+
+/**
+ * Best-effort rollback of a stylist discount consumption when the reservation
+ * it was consumed for is deleted (failed hold / unpaid release / expiry).
+ * Idempotent enough for cleanup paths: never drops the counter below zero.
+ */
+export async function releaseDiscountUsage(stylistId: string, code: string): Promise<void> {
+  if (!code) return;
+  await DiscountCode.updateOne(
+    {
+      stylistId: new Types.ObjectId(stylistId),
+      codeLower: code.trim().toLowerCase(),
+      usedCount: { $gt: 0 },
+    },
+    { $inc: { usedCount: -1 } },
+  ).catch(() => undefined);
+}

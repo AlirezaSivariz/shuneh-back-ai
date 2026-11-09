@@ -174,7 +174,26 @@ export async function getReservationInvoice(
     view: viewer,
     price,
     discount: reservation.discountCode
-      ? { code: reservation.discountCode, amount: reservation.discountAmount ?? 0 }
+      ? {
+          code: reservation.discountCode,
+          amount: reservation.discountAmount ?? 0,
+          finalPrice: reservation.coupon?.priceBeforeCoupon ?? null,
+        }
+      : null,
+    coupon: reservation.coupon
+      ? {
+          code: reservation.coupon.code,
+          name: reservation.coupon.name ?? null,
+          campaign: reservation.coupon.campaign,
+          type: reservation.coupon.type,
+          value: reservation.coupon.value,
+          originalPrice: reservation.coupon.originalPrice,
+          priceBeforeCoupon: reservation.coupon.priceBeforeCoupon,
+          amount: reservation.coupon.discountAmount,
+          finalPrice: reservation.coupon.finalPrice,
+          platformFundedAmount: reservation.coupon.platformFundedAmount,
+          depositAmount: reservation.coupon.depositAmount,
+        }
       : null,
     deposit: {
       amount: finance.totalDeposit,

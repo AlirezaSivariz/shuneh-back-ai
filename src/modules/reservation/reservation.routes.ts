@@ -19,6 +19,8 @@ import {
   reservationIdParamsSchema as reviewReservationIdParams,
 } from '../review/review.validators';
 import { validateDiscountSchema } from '../discount/discount.validators';
+import { validateCouponSchema } from '../coupon/coupon.validators';
+import * as couponController from '../coupon/coupon.controller';
 
 // Routes under /internal — operational/testing triggers.
 export const internalRouter = Router();
@@ -57,6 +59,12 @@ reservationRouter.post(
   '/validate-discount',
   validate(validateDiscountSchema),
   asyncHandler(customer.validateDiscount),
+);
+// Preview/validate a platform (Shuneh-funded) coupon before booking.
+reservationRouter.post(
+  '/validate-coupon',
+  validate(validateCouponSchema),
+  asyncHandler(couponController.preview),
 );
 reservationRouter.get('/', validate(listReservationsSchema), asyncHandler(customer.list));
 reservationRouter.get('/:id', validate(reservationIdParamsSchema), asyncHandler(customer.detail));

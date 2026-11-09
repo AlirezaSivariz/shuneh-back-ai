@@ -71,6 +71,14 @@ import {
 } from './admin.validators';
 import { creditSettingsUpdateSchema, adminCreditAdjustSchema, adminListSchema } from '../credit/credit.validators';
 import * as creditAdminController from '../credit/credit.admin.controller';
+import * as couponController from '../coupon/coupon.controller';
+import {
+  createCouponSchema,
+  updateCouponSchema,
+  couponIdParamsSchema,
+  setCouponStatusSchema,
+  listCouponsSchema,
+} from '../coupon/coupon.validators';
 
 /**
  * Admin (support) area. EVERY route is guarded by `authenticate` → `requireAdmin`
@@ -183,6 +191,13 @@ adminRouter.put(
   validate(setStylistFreelanceLocationSchema),
   asyncHandler(controller.setStylistFreelanceLocation),
 );
+
+// ── Platform coupon management (Shuneh-funded; audited) ──
+adminRouter.get('/coupons', validate(listCouponsSchema), asyncHandler(couponController.list));
+adminRouter.post('/coupons', validate(createCouponSchema), asyncHandler(couponController.create));
+adminRouter.patch('/coupons/:id', validate(updateCouponSchema), asyncHandler(couponController.update));
+adminRouter.patch('/coupons/:id/status', validate(setCouponStatusSchema), asyncHandler(couponController.setStatus));
+adminRouter.delete('/coupons/:id', validate(couponIdParamsSchema), asyncHandler(couponController.remove));
 
 // ── Blog management (audited) ──
 const blogCoverUpload = createUploader('blog');

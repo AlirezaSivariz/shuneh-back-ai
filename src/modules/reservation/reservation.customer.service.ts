@@ -20,7 +20,12 @@ import { effectivePrice, effectiveDuration } from '../stylist/public.service';
 import { resolveActiveSalons } from '../stylist/bookability';
 import { affectedReservationIds } from '../stylist/hoursReconcile';
 import { isForeignRestricted } from '../../utils/foreignApproval';
-import { resolveDiscountForBooking, consumeDiscount } from '../discount/discount.service';
+import { resolveDiscountForBooking, consumeDiscount, releaseDiscountUsage } from '../discount/discount.service';
+import {
+  resolveCouponForBooking,
+  consumeCoupon,
+  releaseCouponUsage,
+} from '../coupon/coupon.service';
 import { config } from '../../config/env';
 import { Tip } from '../../models/Tip';
 import { notificationService } from '../../utils/notification';
@@ -78,6 +83,8 @@ interface CreateInput {
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
   discountCode?: string;
+  /** Optional platform (Shuneh-funded) coupon code, applied after any discount. */
+  couponCode?: string;
   customerNote?: string;
   /** Customer ticked the "I accept the cancellation/reschedule terms" box. */
   acceptedPolicy?: boolean;
@@ -252,6 +259,23 @@ export async function createReservation(customerId: string, input: CreateInput) 
     };
   }
 
+  const priceBeforeCoupon =
+    (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
+
+  // Optional platform coupon — applied AFTER any stylist discount. Its discount
+  // is capped so the payable never falls below the (pre-coupon) deposit.
+  let couponResolution: Awaited<ReturnType<typeof resolveCouponForBooking>> | null = null;
+  if (input.couponCode) {
+    couponResolution = await resolveCouponForBooking({
+      code: input.couponCode,
+      customerId,
+      stylistId,
+      items,
+      persons,
+      priceBeforeCoupon,
+    });
+  }
+
   // Optional customer note for the stylist (trimmed; length capped by Zod).
   const customerNote = input.customerNote?.trim() || null;
 
@@ -273,9 +297,12 @@ export async function createReservation(customerId: string, input: CreateInput) 
   }
 
   // Deposit-only: charge a deposit (not the full price) plus a small booking fee.
-  // The deposit model is computed by the centralized finance service.
-  const netPrice = (discountSnapshot.finalPrice as number | undefined) ?? totalPrice;
-  const depositBreakdown = calculateDeposit(netPrice);
+  // The deposit is ALWAYS computed on the pre-coupon price so the specialist's
+  // deposit share, refunds and settlements stay unchanged.
+  const depositBreakdown = calculateDeposit(priceBeforeCoupon);
+  const payableOnSite = couponResolution?.payableOnSite ?? depositBreakdown.payableOnSite;
+  const topLevelFinalPrice =
+    couponResolution?.finalPrice ?? (discountSnapshot.finalPrice as number | undefined);
   const chargeToman = depositBreakdown.totalCharge;
 
   // Shuneh Credit: reduce ONLY the online payable (deposit + booking fee). The
@@ -306,9 +333,9 @@ export async function createReservation(customerId: string, input: CreateInput) 
     makeAdjustment('deposit', 'بیعانه', depositBreakdown.depositAmount, 'debit', 'پرداخت بیعانه هنگام رزرو'),
     makeAdjustment('booking_fee', 'هزینه پردازش', depositBreakdown.bookingFee, 'debit', 'کارمزد پردازش رزرو'),
   ];
-  if (depositBreakdown.payableOnSite > 0) {
+  if (payableOnSite > 0) {
     bookingAdjustments.push(
-      makeAdjustment('payable_on_site', 'قابل پرداخت در محل', depositBreakdown.payableOnSite, 'credit', 'مبلغ قابل پرداخت در محل'),
+      makeAdjustment('payable_on_site', 'قابل پرداخت در محل', payableOnSite, 'credit', 'مبلغ قابل پرداخت در محل'),
     );
   }
 
@@ -324,11 +351,29 @@ export async function createReservation(customerId: string, input: CreateInput) 
     endTime,
     price: totalPrice,
     ...discountSnapshot,
+    ...(topLevelFinalPrice != null ? { finalPrice: topLevelFinalPrice } : {}),
+    coupon: couponResolution
+      ? {
+          couponId: couponResolution.coupon._id,
+          code: couponResolution.coupon.code,
+          name: couponResolution.coupon.name ?? null,
+          campaign: couponResolution.coupon.campaign,
+          type: couponResolution.coupon.type,
+          value: couponResolution.coupon.value,
+          originalPrice: couponResolution.originalPrice,
+          priceBeforeCoupon,
+          discountAmount: couponResolution.discountAmount,
+          finalPrice: couponResolution.finalPrice,
+          platformFundedAmount: couponResolution.discountAmount,
+          depositAmount: depositBreakdown.depositAmount,
+          redemptionId: null,
+        }
+      : null,
     deposit: {
       amount: depositBreakdown.depositAmount,
       bookingFee: depositBreakdown.bookingFee,
       totalCharge: depositBreakdown.totalCharge,
-      payableOnSite: depositBreakdown.payableOnSite,
+      payableOnSite,
     },
     customerNote,
     companionsCount,
@@ -369,10 +414,43 @@ export async function createReservation(customerId: string, input: CreateInput) 
   // Atomically consume usage AFTER the reservation exists, so the usage limit
   // can't be exceeded by concurrent bookings. If the cap was hit in the
   // meantime, undo the reservation and surface a clear error.
+  let discountConsumed = false;
   if (codeIdToConsume) {
     try {
       await consumeDiscount(codeIdToConsume);
+      discountConsumed = true;
     } catch (err) {
+      await reservation.deleteOne().catch(() => {});
+      throw err;
+    }
+  }
+
+  // Redeem the platform coupon (global + per-customer atomic counters, then an
+  // immutable redemption row). Any failure rolls the reservation back.
+  if (couponResolution) {
+    try {
+      const redemptionId = await consumeCoupon({
+        coupon: couponResolution.coupon,
+        customerId,
+        stylistId,
+        reservationId: reservation._id,
+        originalPrice: couponResolution.originalPrice,
+        priceBeforeCoupon,
+        discountAmount: couponResolution.discountAmount,
+        finalPrice: couponResolution.finalPrice,
+        depositAmount: depositBreakdown.depositAmount,
+      });
+      if (reservation.coupon) reservation.coupon.redemptionId = redemptionId;
+      await Reservation.updateOne(
+        { _id: reservation._id },
+        { $set: { 'coupon.redemptionId': redemptionId } },
+      );
+    } catch (err) {
+      if (discountConsumed && discountSnapshot.discountCode) {
+        await releaseDiscountUsage(stylistId, String(discountSnapshot.discountCode)).catch(
+          () => undefined,
+        );
+      }
       await reservation.deleteOne().catch(() => {});
       throw err;
     }
@@ -386,6 +464,12 @@ export async function createReservation(customerId: string, input: CreateInput) 
     try {
       await spendCreditForReservation(customerId, shunehCreditUsed, String(reservation._id));
     } catch (err) {
+      await releaseCouponUsage(reservation._id).catch(() => undefined);
+      if (discountConsumed && discountSnapshot.discountCode) {
+        await releaseDiscountUsage(stylistId, String(discountSnapshot.discountCode)).catch(
+          () => undefined,
+        );
+      }
       await reservation.deleteOne().catch(() => {});
       throw err;
     }
@@ -427,8 +511,15 @@ export async function createReservation(customerId: string, input: CreateInput) 
       };
     } catch (err) {
       // Roll back the hold so the slot is freed and the customer can retry.
-      // Any Shuneh Credit debited for this hold is returned (best-effort).
+      // Any Shuneh Credit debited for this hold is returned, and coupon/stylist
+      // discount usage is released (best-effort).
       await refundReservationCredit(reservation).catch(() => undefined);
+      await releaseCouponUsage(reservation._id).catch(() => undefined);
+      if (discountConsumed && discountSnapshot.discountCode) {
+        await releaseDiscountUsage(stylistId, String(discountSnapshot.discountCode)).catch(
+          () => undefined,
+        );
+      }
       await reservation.deleteOne().catch(() => {});
       throw err;
     }
@@ -523,7 +614,14 @@ export async function releaseUnpaidReservation(reservationId: string): Promise<v
     _id: reservationId,
     paymentStatus: 'awaiting',
   });
-  if (reservation) await refundReservationCredit(reservation).catch(() => undefined);
+  if (!reservation) return;
+  await refundReservationCredit(reservation).catch(() => undefined);
+  await releaseCouponUsage(reservation._id).catch(() => undefined);
+  if (reservation.discountCode) {
+    await releaseDiscountUsage(String(reservation.stylistId), reservation.discountCode).catch(
+      () => undefined,
+    );
+  }
 }
 
 /**
@@ -538,12 +636,16 @@ export async function releaseExpiredHolds(olderThanMinutes = 30): Promise<{ remo
     paymentStatus: 'awaiting',
     createdAt: { $lt: cutoff },
   })
-    .select('_id shunehCreditUsed')
+    .select('_id shunehCreditUsed stylistId discountCode')
     .lean();
   if (expired.length === 0) return { removed: 0 };
   const result = await Reservation.deleteMany({ _id: { $in: expired.map((r) => r._id) } });
   for (const r of expired) {
     await refundReservationCredit(r).catch(() => undefined);
+    await releaseCouponUsage(r._id).catch(() => undefined);
+    if (r.discountCode) {
+      await releaseDiscountUsage(String(r.stylistId), r.discountCode).catch(() => undefined);
+    }
   }
   return { removed: result.deletedCount ?? 0 };
 }
@@ -1184,7 +1286,23 @@ async function serializeReservation(
           value: r.discountValue ?? null,
           amount: r.discountAmount ?? 0,
           originalPrice: r.originalPrice ?? r.price ?? null,
-          finalPrice: r.finalPrice ?? r.price ?? null,
+          finalPrice: r.coupon?.priceBeforeCoupon ?? r.finalPrice ?? r.price ?? null,
+        }
+      : null,
+    coupon: r.coupon
+      ? {
+          id: String(r.coupon.couponId),
+          code: r.coupon.code,
+          name: r.coupon.name ?? null,
+          campaign: r.coupon.campaign,
+          type: r.coupon.type,
+          value: r.coupon.value,
+          originalPrice: r.coupon.originalPrice,
+          priceBeforeCoupon: r.coupon.priceBeforeCoupon,
+          amount: r.coupon.discountAmount,
+          finalPrice: r.coupon.finalPrice,
+          platformFundedAmount: r.coupon.platformFundedAmount,
+          depositAmount: r.coupon.depositAmount,
         }
       : null,
     services: services.map((s) => ({ id: String(s._id), name: s.name, durationMin: s.durationMin })),
@@ -1297,7 +1415,23 @@ function resolveFromMaps(
           value: r.discountValue ?? null,
           amount: r.discountAmount ?? 0,
           originalPrice: r.originalPrice ?? r.price ?? null,
-          finalPrice: r.finalPrice ?? r.price ?? null,
+          finalPrice: r.coupon?.priceBeforeCoupon ?? r.finalPrice ?? r.price ?? null,
+        }
+      : null,
+    coupon: r.coupon
+      ? {
+          id: String(r.coupon.couponId),
+          code: r.coupon.code,
+          name: r.coupon.name ?? null,
+          campaign: r.coupon.campaign,
+          type: r.coupon.type,
+          value: r.coupon.value,
+          originalPrice: r.coupon.originalPrice,
+          priceBeforeCoupon: r.coupon.priceBeforeCoupon,
+          amount: r.coupon.discountAmount,
+          finalPrice: r.coupon.finalPrice,
+          platformFundedAmount: r.coupon.platformFundedAmount,
+          depositAmount: r.coupon.depositAmount,
         }
       : null,
     services: serviceEntries.map((s: any) => ({ id: s.id, name: s.name, durationMin: s.durationMin })),

@@ -15,6 +15,8 @@ export const createReservationSchema = {
       startTime: z.string().refine(isValidHHmm, 'startTime must be HH:mm'),
       // Optional discount code, re-validated and applied server-side.
       discountCode: z.string().trim().min(1).max(32).optional(),
+      // Optional Shuneh-funded platform coupon (applied after any discount).
+      couponCode: z.string().trim().min(1).max(30).optional(),
       // Optional free-text note from the customer to the stylist.
       customerNote: z.string().trim().max(500).optional(),
       // The customer ticked "I accept the cancellation/reschedule terms".

@@ -675,7 +675,23 @@ async function enrichReservations(rows: IReservation[]) {
       endTime: r.endTime,
       price: r.price ?? null,
       discount: r.discountCode
-        ? { code: r.discountCode, amount: r.discountAmount ?? 0, finalPrice: r.finalPrice ?? null }
+        ? { code: r.discountCode, amount: r.discountAmount ?? 0, finalPrice: r.coupon?.priceBeforeCoupon ?? r.finalPrice ?? null }
+        : null,
+      coupon: r.coupon
+        ? {
+            id: String(r.coupon.couponId),
+            code: r.coupon.code,
+            name: r.coupon.name ?? null,
+            campaign: r.coupon.campaign,
+            type: r.coupon.type,
+            value: r.coupon.value,
+            originalPrice: r.coupon.originalPrice,
+            priceBeforeCoupon: r.coupon.priceBeforeCoupon,
+            amount: r.coupon.discountAmount,
+            finalPrice: r.coupon.finalPrice,
+            platformFundedAmount: r.coupon.platformFundedAmount,
+            depositAmount: r.coupon.depositAmount,
+          }
         : null,
       customerNote: r.customerNote ?? null,
       customer: cust

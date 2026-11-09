@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { iranWallClockToUtc } from '../utils/timezone';
 import { ICancellationPolicy, cancellationPolicySchema } from './cancellationPolicy';
+import { COUPON_CAMPAIGN_TYPES, CouponCampaignType } from './Coupon';
 
 // ── Financial Adjustment Types ──────────────────────────────────────────────
 
@@ -106,6 +107,27 @@ export interface IReservation extends Document {
   discountAmount?: number | null;
   originalPrice?: number | null;
   finalPrice?: number | null;
+  /**
+   * Immutable platform-coupon snapshot (set only when a Shuneh-funded coupon
+   * was applied). `priceBeforeCoupon` is the amount after any stylist discount;
+   * `discountAmount` is funded entirely by Shuneh and never reduces the
+   * specialist's share. `depositAmount` is computed on `priceBeforeCoupon`.
+   */
+  coupon?: {
+    couponId: Types.ObjectId;
+    code: string;
+    name: string | null;
+    campaign: CouponCampaignType;
+    type: 'percentage' | 'fixed';
+    value: number;
+    originalPrice: number;
+    priceBeforeCoupon: number;
+    discountAmount: number;
+    finalPrice: number;
+    platformFundedAmount: number;
+    depositAmount: number;
+    redemptionId?: Types.ObjectId | null;
+  } | null;
   /** Deposit-related financial breakdown snapshotted at booking time. */
   deposit?: {
     amount: number;
@@ -222,6 +244,27 @@ const reservationSchema = new Schema<IReservation>(
     discountAmount: { type: Number, default: null, min: 0 },
     originalPrice: { type: Number, default: null, min: 0 },
     finalPrice: { type: Number, default: null, min: 0 },
+    coupon: {
+      type: new Schema(
+        {
+          couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', required: true },
+          code: { type: String, required: true },
+          name: { type: String, default: null },
+          campaign: { type: String, enum: COUPON_CAMPAIGN_TYPES, required: true },
+          type: { type: String, enum: ['percentage', 'fixed'], required: true },
+          value: { type: Number, required: true, min: 0 },
+          originalPrice: { type: Number, required: true, min: 0 },
+          priceBeforeCoupon: { type: Number, required: true, min: 0 },
+          discountAmount: { type: Number, required: true, min: 0 },
+          finalPrice: { type: Number, required: true, min: 0 },
+          platformFundedAmount: { type: Number, required: true, min: 0 },
+          depositAmount: { type: Number, required: true, min: 0 },
+          redemptionId: { type: Schema.Types.ObjectId, ref: 'CouponRedemption', default: null },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     customerNote: { type: String, default: null, maxlength: 500 },
     shunehCreditUsed: { type: Number, default: null, min: 0 },
     companionsCount: { type: Number, default: 0, min: 0 },
