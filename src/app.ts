@@ -54,6 +54,7 @@ import {
   redirectPublicRouter,
 } from "./modules/redirect/redirect.routes";
 import bankRoutes from "./modules/bank/bank.routes";
+import advertisementRoutes from "./modules/advertisement/advertisement.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -132,6 +133,8 @@ export function createApp(): Application {
   // Redirects: public map (storefront edge) + admin management.
   app.use("/redirects", redirectPublicRouter);
   app.use("/admin/redirects", adminRedirectRouter);
+  // Public advertising campaigns (optional auth for audience targeting).
+  app.use("/ads", advertisementRoutes);
   app.use("/admin", adminRouter);
   app.use("/plans", planRoutes);
   app.use("/stylist/settlements", createStylistSettlementRoutes());

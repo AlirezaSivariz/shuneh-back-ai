@@ -79,6 +79,14 @@ import {
   setCouponStatusSchema,
   listCouponsSchema,
 } from '../coupon/coupon.validators';
+import * as advertisementController from '../advertisement/advertisement.controller';
+import {
+  createAdvertisementSchema,
+  updateAdvertisementSchema,
+  advertisementIdParamsSchema,
+  setAdvertisementStatusSchema,
+  listAdvertisementsSchema,
+} from '../advertisement/advertisement.validators';
 
 /**
  * Admin (support) area. EVERY route is guarded by `authenticate` → `requireAdmin`
@@ -198,6 +206,23 @@ adminRouter.post('/coupons', validate(createCouponSchema), asyncHandler(couponCo
 adminRouter.patch('/coupons/:id', validate(updateCouponSchema), asyncHandler(couponController.update));
 adminRouter.patch('/coupons/:id/status', validate(setCouponStatusSchema), asyncHandler(couponController.setStatus));
 adminRouter.delete('/coupons/:id', validate(couponIdParamsSchema), asyncHandler(couponController.remove));
+
+// ── Advertisement management (audited) ──
+const advertisementUpload = createUploader('ads');
+adminRouter.get('/ads', validate(listAdvertisementsSchema), asyncHandler(advertisementController.adminList));
+adminRouter.post('/ads', validate(createAdvertisementSchema), asyncHandler(advertisementController.create));
+adminRouter.post(
+  '/ads/image',
+  advertisementUpload.single('image'),
+  asyncHandler(advertisementController.uploadImage),
+);
+adminRouter.patch('/ads/:id', validate(updateAdvertisementSchema), asyncHandler(advertisementController.update));
+adminRouter.patch(
+  '/ads/:id/status',
+  validate(setAdvertisementStatusSchema),
+  asyncHandler(advertisementController.setStatus),
+);
+adminRouter.delete('/ads/:id', validate(advertisementIdParamsSchema), asyncHandler(advertisementController.remove));
 
 // ── Blog management (audited) ──
 const blogCoverUpload = createUploader('blog');

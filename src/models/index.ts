@@ -13,6 +13,8 @@ export * from './Reservation';
 export * from './Coupon';
 export * from './CouponCustomerUsage';
 export * from './CouponRedemption';
+export * from './Advertisement';
+export * from './AdView';
 export * from './Review';
 export * from './SupportTicket';
 export * from './ChatConversation';
