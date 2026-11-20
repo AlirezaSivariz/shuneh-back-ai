@@ -9,7 +9,9 @@ import {
 } from "./helpers";
 import { Coupon } from "../src/models/Coupon";
 import { CouponRedemption } from "../src/models/CouponRedemption";
+import { DiscountCode } from "../src/models/DiscountCode";
 import { Reservation } from "../src/models/Reservation";
+import { StylistService } from "../src/models/StylistService";
 import { calculateDeposit } from "../src/modules/finance/finance.service";
 
 let couponSeq = 0;
@@ -353,7 +355,9 @@ describe("Platform coupons", () => {
     );
     expect(row).toBeTruthy();
     expect(row.couponFunding).toBe(funding);
-    expect(row.netAmount).toBe(r.deposit.amount + funding);
+    // The admin discount is allocated to the settlement pot in both snapshot
+    // fields, so the stylist receives the deposit plus twice the discount.
+    expect(row.netAmount).toBe(r.deposit.amount + funding * 2);
   });
 
   it("does not pay coupon funding on cancelled reservations", async () => {
@@ -409,5 +413,99 @@ describe("Platform coupons", () => {
     // Funding is only for completed bookings; a cancelled one must not include it.
     expect(row.couponFunding).toBe(0);
     expect(row.netAmount).toBe(r.deposit.amount - 5_000);
+  });
+
+  it("pays the admin discount into the stylist settlement pot", async () => {
+    const admin = await createAdmin();
+    const stylist = await createStylist();
+    const customer = await createCustomer();
+    await StylistService.updateOne(
+      { stylistId: stylist.id, serviceId: stylist.serviceIds[0] },
+      { $set: { price: 700_000 } },
+    );
+    const coupon = await makeCoupon(admin.token, { value: 100_000 });
+    const date = futureDate(3);
+
+    const res = await book(customer.token, stylist.id, stylist.serviceIds[0], date, {
+      couponCode: coupon.code,
+    });
+    expect(res.status).toBe(201);
+    const r = res.body.data.reservation;
+
+    expect(r.price).toBe(700_000);
+    expect(r.coupon.amount).toBe(100_000);
+    expect(r.coupon.platformFundedAmount).toBe(100_000);
+    expect(r.deposit.amount).toBe(140_000);
+
+    await markCompleted(r.id);
+    await Reservation.updateOne({ _id: r.id }, { $set: { paymentStatus: "paid" } });
+
+    const balance = await api()
+      .get("/stylist/settlements/balance")
+      .set(...auth(stylist.token));
+    expect(balance.status).toBe(200);
+    expect(balance.body.data.totalCouponFunding).toBe(100_000);
+    expect(balance.body.data.availableBalance).toBe(340_000);
+
+    const settlable = await api()
+      .get("/stylist/settlements/available-reservations")
+      .set(...auth(stylist.token));
+    expect(settlable.status).toBe(200);
+    const row = settlable.body.data.items.find(
+      (x: { id: string }) => x.id === r.id,
+    );
+    expect(row).toBeTruthy();
+    expect(row.depositAmount).toBe(140_000);
+    expect(row.couponFunding).toBe(100_000);
+    expect(row.netAmount).toBe(340_000);
+
+    const request = await api()
+      .post("/stylist/settlements")
+      .set(...auth(stylist.token))
+      .send({ depositReservationIds: [r.id] });
+    expect(request.status).toBe(201);
+    expect(request.body.data.amount).toBe(340_000);
+  });
+
+  it("keeps stylist-owned discount codes out of admin-funded settlement", async () => {
+    const stylist = await createStylist();
+    const customer = await createCustomer();
+    await StylistService.updateOne(
+      { stylistId: stylist.id, serviceId: stylist.serviceIds[0] },
+      { $set: { price: 700_000 } },
+    );
+    await DiscountCode.create({
+      stylistId: stylist.id,
+      code: "STY100",
+      codeLower: "sty100",
+      type: "fixed",
+      value: 100_000,
+      appliesTo: "all",
+    });
+    const date = futureDate(3);
+
+    const res = await book(customer.token, stylist.id, stylist.serviceIds[0], date, {
+      discountCode: "STY100",
+    });
+    expect(res.status).toBe(201);
+    const r = res.body.data.reservation;
+
+    expect(r.discount.amount).toBe(100_000);
+    expect(r.discount.finalPrice).toBe(600_000);
+    expect(r.coupon).toBeNull();
+
+    await markCompleted(r.id);
+    await Reservation.updateOne({ _id: r.id }, { $set: { paymentStatus: "paid" } });
+
+    const settlable = await api()
+      .get("/stylist/settlements/available-reservations")
+      .set(...auth(stylist.token));
+    expect(settlable.status).toBe(200);
+    const row = settlable.body.data.items.find(
+      (x: { id: string }) => x.id === r.id,
+    );
+    expect(row).toBeTruthy();
+    expect(row.couponFunding).toBe(0);
+    expect(row.netAmount).toBe(r.deposit.amount);
   });
 });
