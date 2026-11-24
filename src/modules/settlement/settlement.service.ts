@@ -61,21 +61,16 @@ function financeOf(r: Record<string, any>) {
 
 /**
  * Shuneh-funded admin discount allocated to a completed reservation's
- * settlement. The coupon snapshot records the same discount twice for two
- * different purposes: `discountAmount` is the concession the customer received,
- * and `platformFundedAmount` is Shuneh's reimbursement. Both must be allocated
- * to the stylist's settlement pot; counting only one leaves the stylist short by
- * the value of the admin discount. Stylist-owned `discountCode` amounts are
- * deliberately excluded.
+ * settlement. The coupon snapshot stores the same value twice for two different
+ * purposes: `discountAmount` is the concession the customer received and
+ * `platformFundedAmount` is Shuneh's reimbursement to the stylist. Allocate the
+ * reimbursement ONCE — adding both fields pays the discount twice. Stylist-owned
+ * `discountCode` amounts have no `coupon` snapshot and are excluded.
  */
 function adminDiscountSettlementAllocation(r: Record<string, any>): number {
   if (r.status === "cancelled" || !r.coupon) return 0;
   const platformFundedAmount = Number(r.coupon.platformFundedAmount ?? 0);
-  const discountAmount = Number(r.coupon.discountAmount ?? 0);
-  return (
-    (Number.isFinite(platformFundedAmount) ? platformFundedAmount : 0) +
-    (Number.isFinite(discountAmount) ? discountAmount : 0)
-  );
+  return Number.isFinite(platformFundedAmount) ? platformFundedAmount : 0;
 }
 
 /** Net amount payable to the stylist for one reservation, by its status. */
@@ -142,43 +137,29 @@ export async function getSettlementBalance(stylistId: string) {
   ]);
   const totalCancelledPenalties = penaltyPipeline[0]?.total ?? 0;
 
-  // Aggregate Shuneh-funded admin discounts on completed reservations. Both
-  // snapshot amounts are allocated to the settlement pot (see
-  // `adminDiscountSettlementAllocation`); `totalCouponFunding` keeps reporting
-  // the coupon's actual platform-funded value.
+  // Aggregate Shuneh-funded admin discounts on completed reservations. The
+  // reimbursement is allocated ONCE per reservation, matching
+  // `adminDiscountSettlementAllocation`.
   const couponFundingPipeline = await Reservation.aggregate([
     {
       $match: {
         stylistId: stylistOid,
         paymentStatus: "paid",
         status: "completed",
-        $or: [
-          { "coupon.platformFundedAmount": { $gt: 0 } },
-          { "coupon.discountAmount": { $gt: 0 } },
-        ],
+        "coupon.platformFundedAmount": { $gt: 0 },
       },
     },
     {
       $group: {
         _id: null,
         totalFunding: { $sum: { $ifNull: ["$coupon.platformFundedAmount", 0] } },
-        totalAllocation: {
-          $sum: {
-            $add: [
-              { $ifNull: ["$coupon.platformFundedAmount", 0] },
-              { $ifNull: ["$coupon.discountAmount", 0] },
-            ],
-          },
-        },
       },
     },
   ]);
   const totalCouponFunding = couponFundingPipeline[0]?.totalFunding ?? 0;
-  const totalAdminDiscountAllocation =
-    couponFundingPipeline[0]?.totalAllocation ?? 0;
 
   const grossBalance =
-    totalDeposits + totalCancelledPenalties + totalAdminDiscountAllocation;
+    totalDeposits + totalCancelledPenalties + totalCouponFunding;
 
   // Aggregate pending settlement amounts.
   const pendingPipeline = await StylistSettlement.aggregate([

@@ -355,9 +355,9 @@ describe("Platform coupons", () => {
     );
     expect(row).toBeTruthy();
     expect(row.couponFunding).toBe(funding);
-    // The admin discount is allocated to the settlement pot in both snapshot
-    // fields, so the stylist receives the deposit plus twice the discount.
-    expect(row.netAmount).toBe(r.deposit.amount + funding * 2);
+    // The two coupon fields represent one discount; allocate the Shuneh
+    // reimbursement once so the stylist gets deposit + discount.
+    expect(row.netAmount).toBe(r.deposit.amount + funding);
   });
 
   it("does not pay coupon funding on cancelled reservations", async () => {
@@ -415,7 +415,7 @@ describe("Platform coupons", () => {
     expect(row.netAmount).toBe(r.deposit.amount - 5_000);
   });
 
-  it("pays the admin discount into the stylist settlement pot", async () => {
+  it("reimburses the admin discount exactly once in the stylist settlement", async () => {
     const admin = await createAdmin();
     const stylist = await createStylist();
     const customer = await createCustomer();
@@ -445,7 +445,7 @@ describe("Platform coupons", () => {
       .set(...auth(stylist.token));
     expect(balance.status).toBe(200);
     expect(balance.body.data.totalCouponFunding).toBe(100_000);
-    expect(balance.body.data.availableBalance).toBe(340_000);
+    expect(balance.body.data.availableBalance).toBe(240_000);
 
     const settlable = await api()
       .get("/stylist/settlements/available-reservations")
@@ -457,14 +457,14 @@ describe("Platform coupons", () => {
     expect(row).toBeTruthy();
     expect(row.depositAmount).toBe(140_000);
     expect(row.couponFunding).toBe(100_000);
-    expect(row.netAmount).toBe(340_000);
+    expect(row.netAmount).toBe(240_000);
 
     const request = await api()
       .post("/stylist/settlements")
       .set(...auth(stylist.token))
       .send({ depositReservationIds: [r.id] });
     expect(request.status).toBe(201);
-    expect(request.body.data.amount).toBe(340_000);
+    expect(request.body.data.amount).toBe(240_000);
   });
 
   it("keeps stylist-owned discount codes out of admin-funded settlement", async () => {
