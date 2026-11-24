@@ -5,6 +5,7 @@
  *
  * All methods are best-effort and MUST NOT throw into the caller — notifying a
  * user should never fail a domain operation.
+ * test
  */
 import { smsProvider } from "./sms";
 import type { SettlementStatus } from "../models/StylistSettlement";
