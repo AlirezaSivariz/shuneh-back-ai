@@ -80,7 +80,18 @@ function netStylistAmount(r: Record<string, any>): number {
   return finance.netStylistShare + adminDiscountSettlementAllocation(r);
 }
 
-/** Business-rule check: can THIS reservation be included in a settlement? */
+/** Business rule: can THIS reservation be included in a settlement? */
+function isSettleable(r: Record<string, any> | undefined): boolean {
+  if (!r) return false;
+  if (!SETTLABLE_PAYMENT_STATUSES.includes(r.paymentStatus)) return false;
+  if (r.status === "completed") return true;
+  return (
+    r.status === "cancelled" &&
+    hasCancellationFinance(r.financialAdjustments ?? []) &&
+    cancelledStylistPayout(financeOf(r)) > 0
+  );
+}
+
 function assertSettlable(r: Record<string, any> | undefined): void {
   if (!r) {
     throw AppError.badRequest(
@@ -94,72 +105,64 @@ function assertSettlable(r: Record<string, any> | undefined): void {
       "RESERVATION_NOT_PAID",
     );
   }
-  if (r.status === "completed") return;
-  if (
-    r.status === "cancelled" &&
-    hasCancellationFinance(r.financialAdjustments ?? []) &&
-    cancelledStylistPayout(financeOf(r)) > 0
-  ) {
-    return;
+  if (!isSettleable(r)) {
+    throw AppError.badRequest(
+      "فقط رزروهای انجام‌شده یا لغوشده با محاسبه‌ی سیاست لغو قابل تسویه هستند",
+      "RESERVATION_NOT_SETTLABLE",
+    );
   }
-  throw AppError.badRequest(
-    "فقط رزروهای انجام‌شده یا لغوشده با محاسبه‌ی سیاست لغو قابل تسویه هستند",
-    "RESERVATION_NOT_SETTLABLE",
-  );
 }
 
 /**
- * Get the stylist's current settlement balance: total confirmed deposits
- * that are not yet settled, minus pending settlement requests.
- * Uses MongoDB aggregation to avoid loading all reservation docs into memory.
+ * Get the stylist's current settlement balance: the sum of exactly the same
+ * per-reservation payouts exposed by `getSettlableReservations`, minus pending
+ * settlement requests.
+ *
+ * We deliberately reuse `isSettleable` + `netStylistAmount` here instead of a
+ * separate Mongo aggregation: duplicating the finance formula in aggregation
+ * expressions is what allows the balance and the reservation rows to drift
+ * apart (double-paid coupons, cancelled penalties treated as stylist income).
  */
 export async function getSettlementBalance(stylistId: string) {
   const stylistOid = new Types.ObjectId(stylistId);
+  const reservations = await Reservation.find({
+    stylistId: stylistOid,
+    paymentStatus: { $in: SETTLABLE_PAYMENT_STATUSES },
+  })
+    .select("_id status paymentStatus deposit financialAdjustments finalPrice price coupon")
+    .lean();
 
-  // Aggregate the full deposit share of completed (service performed) paid
-  // reservations. `computeFinance` (used by the per-reservation payout) treats
-  // the whole deposit as the stylist's share, so the balance must use the same
-  // definition. Freshly-booked (`confirmed`) reservations are NOT settleable yet.
-  const depositPipeline = await Reservation.aggregate([
-    { $match: { stylistId: stylistOid, paymentStatus: "paid", status: "completed" } },
-    { $group: { _id: null, total: { $sum: { $ifNull: ["$deposit.amount", 0] } } } },
-  ]);
-  const totalDeposits = depositPipeline[0]?.total ?? 0;
+  const excludedIds = new Set(
+    (await getExcludedReservationIds(stylistId)).map(String),
+  );
 
-  // Aggregate penalties from cancelled paid reservations.
-  const penaltyPipeline = await Reservation.aggregate([
-    { $match: { stylistId: stylistOid, paymentStatus: "paid", status: "cancelled" } },
-    { $unwind: { path: "$financialAdjustments", preserveNullAndEmptyArrays: false } },
-    { $match: { "financialAdjustments.direction": "debit", "financialAdjustments.amount": { $gt: 0 } } },
-    { $project: { isPenalty: { $regexMatch: { input: "$financialAdjustments.type", regex: /^penalty_/ } } } },
-    { $match: { isPenalty: true } },
-    { $group: { _id: null, total: { $sum: "$financialAdjustments.amount" } } },
-  ]);
-  const totalCancelledPenalties = penaltyPipeline[0]?.total ?? 0;
+  let availableBalance = 0;
+  let totalDeposits = 0;
+  let totalCouponFunding = 0;
+  let totalCancelledPenalties = 0;
 
-  // Aggregate Shuneh-funded admin discounts on completed reservations. The
-  // reimbursement is allocated ONCE per reservation, matching
-  // `adminDiscountSettlementAllocation`.
-  const couponFundingPipeline = await Reservation.aggregate([
-    {
-      $match: {
-        stylistId: stylistOid,
-        paymentStatus: "paid",
-        status: "completed",
-        "coupon.platformFundedAmount": { $gt: 0 },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalFunding: { $sum: { $ifNull: ["$coupon.platformFundedAmount", 0] } },
-      },
-    },
-  ]);
-  const totalCouponFunding = couponFundingPipeline[0]?.totalFunding ?? 0;
-
-  const grossBalance =
-    totalDeposits + totalCancelledPenalties + totalCouponFunding;
+  for (const r of reservations) {
+    if (!isSettleable(r)) continue;
+    const netAmount = netStylistAmount(r);
+    // Reservations already in a non-rejected request must not be withdrawable
+    // twice — including after an admin marks that request as paid.
+    if (!excludedIds.has(String(r._id))) availableBalance += netAmount;
+    if (r.status === "completed") {
+      totalDeposits += financeOf(r).totalDeposit;
+      totalCouponFunding += adminDiscountSettlementAllocation(r);
+    } else if (r.status === "cancelled") {
+      // Informational only: cancellation penalties are the customer's debt,
+      // not stylist income, so they are NOT added to the payout.
+      totalCancelledPenalties += (r.financialAdjustments ?? []).reduce(
+        (sum: number, a: any) =>
+          sum +
+          (a.type === "penalty_cancellation" && a.direction === "debit"
+            ? Number(a.amount) || 0
+            : 0),
+        0,
+      );
+    }
+  }
 
   // Aggregate pending settlement amounts.
   const pendingPipeline = await StylistSettlement.aggregate([
@@ -168,8 +171,6 @@ export async function getSettlementBalance(stylistId: string) {
   ]);
   const pendingAmount = pendingPipeline[0]?.total ?? 0;
   const pendingCount = pendingPipeline[0]?.count ?? 0;
-
-  const availableBalance = Math.max(0, grossBalance - pendingAmount);
 
   return {
     totalDeposits,
@@ -223,38 +224,9 @@ export async function getSettlableReservations(
     )
     .lean();
 
-  // Step 2: Filter by paymentStatus = paid OR not_required
-  const validPaymentReservations = allReservations.filter((r) =>
-    SETTLABLE_PAYMENT_STATUSES.includes(r.paymentStatus),
-  );
-
-  // Step 3: Only completed reservations (service performed) are settleable.
-  // Freshly-created (`confirmed`) bookings must never appear here.
-  const completedReservations = validPaymentReservations.filter(
-    (r) => r.status === "completed",
-  );
-
-  // Step 3b: Cancelled reservations whose payout was computed per the
-  // reservation's cancellation policy (refund/penalty adjustments applied at
-  // cancel time) and that still leave money for the stylist.
-  const cancelledWithPayout = validPaymentReservations.filter((r) => {
-    if (r.status !== "cancelled") return false;
-    return (
-      hasCancellationFinance(r.financialAdjustments ?? []) &&
-      cancelledStylistPayout(financeOf(r)) > 0
-    );
-  });
-
-  // Merge both sets (deduplicate by _id)
-  const mergedIds = new Set<string>();
-  const eligibleReservations = [...completedReservations, ...cancelledWithPayout].filter(
-    (r) => {
-      const id = String(r._id);
-      if (mergedIds.has(id)) return false;
-      mergedIds.add(id);
-      return true;
-    },
-  );
+  // Only performed bookings and policy-cancelled bookings with a positive
+  // payout are settleable. Same predicate as the balance endpoint.
+  const eligibleReservations = allReservations.filter((r) => isSettleable(r));
 
   // Step 4: Exclude already settled reservations
   const excludedIdStrings = excludedIds.map(String);

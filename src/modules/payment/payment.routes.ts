@@ -28,4 +28,8 @@ router.post('/plan', authenticate, validate(planPurchaseSchema), asyncHandler(co
 // Always ends in a 302 to the frontend result page.
 router.get('/callback', validate(callbackSchema), asyncHandler(controller.callback));
 
+// Authenticated status lookup — the receipt page uses this to confirm the
+// server-side truth instead of trusting URL params alone.
+router.get('/status', authenticate, asyncHandler(controller.status));
+
 export default router;

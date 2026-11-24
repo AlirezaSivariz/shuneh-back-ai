@@ -179,6 +179,57 @@ export async function startWalletTopup(
  * from `PLAN_PRICES_TOMAN` (server-side source of truth) so the amount charged
  * always matches the tier; the tier is applied on the verified callback.
  */
+export interface PaymentStatusView {
+  status: 'paid' | 'failed' | 'pending';
+  amount?: number;
+  refNumber?: string;
+  trackId?: string;
+  orderId?: string;
+  message?: string;
+}
+
+/**
+ * Read the authoritative payment status for the authenticated user. The receipt
+ * page calls this so it does not have to trust the gateway redirect params.
+ */
+export async function getPaymentStatus(
+  userId: string,
+  input: { trackId?: string; orderId?: string },
+): Promise<PaymentStatusView> {
+  const trackId = (input.trackId ?? '').trim();
+  const orderId = (input.orderId ?? '').trim();
+  if (!trackId && !orderId) {
+    return { status: 'failed', message: 'شناسه پرداخت نامعتبر است' };
+  }
+  // The callback URL carries the Zibal trackId AND the *client* order id (the
+  // reservation id), while `PaymentTransaction.orderId` is our own `pay_…` id.
+  // Prefer the authoritative trackId; only fall back to an order-id lookup that
+  // checks BOTH fields so a valid payment is never reported as failed.
+  const tx =
+    (trackId
+      ? await PaymentTransaction.findOne({ userId, trackId }).sort({ createdAt: -1 }).lean()
+      : null) ??
+    (orderId
+      ? await PaymentTransaction.findOne({
+          userId,
+          $or: [{ orderId }, { 'meta.clientOrderId': orderId }],
+        })
+          .sort({ createdAt: -1 })
+          .lean()
+      : null);
+  if (!tx) return { status: 'failed', trackId, orderId, message: 'تراکنش یافت نشد' };
+  const status: PaymentStatusView['status'] =
+    tx.status === 'paid' ? 'paid' : tx.status === 'failed' ? 'failed' : 'pending';
+  return {
+    status,
+    amount: tx.amountToman,
+    refNumber: tx.refNumber ?? undefined,
+    trackId: tx.trackId ?? (trackId || undefined),
+    orderId: (tx.meta as any)?.clientOrderId ?? tx.orderId,
+    message: tx.message ?? undefined,
+  };
+}
+
 export async function startPlanPurchase(
   userId: string,
   tier: PurchasablePlan,

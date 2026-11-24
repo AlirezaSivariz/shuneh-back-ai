@@ -41,11 +41,8 @@ import {
 } from '../policy/policy.service';
 import {
   calculateDeposit,
-  calculateRefund,
-  calculatePenalty,
   computeFinance,
   makeAdjustment,
-  FinanceComputation,
 } from '../finance/finance.service';
 import type { IFinancialAdjustment } from '../../models/Reservation';
 import {
@@ -54,6 +51,8 @@ import {
   spendCreditForReservation,
   rollbackCredit,
 } from '../credit/credit.service';
+import { buildCancellationFinance } from '../finance/cancellation.service';
+import { postCustomerDebt } from '../finance/debt.service';
 
 /** The deposit amount the customer actually paid online (for refund/penalty math). */
 function paidAmountOf(r: IReservation): number | null {
@@ -740,33 +739,15 @@ async function applyCancellationFinance(
   cancelledBy: 'customer' | 'stylist' | 'admin',
 ): Promise<{ debtCreated: number }> {
   const paidAmt = paidAmountOf(reservation) ?? depositAmount;
-  const outcome = computeCancellationOutcome(resolved, reservation.startAt, paidAmt);
-  const grossRefund = calculateRefund(depositAmount, outcome.refundPercent);
-  const cancelPenalty = calculatePenalty(depositAmount, outcome.penaltyPercent);
-
-  // Create the cancellation adjustments.
-  const newAdjustments: IFinancialAdjustment[] = [];
-  if (grossRefund > 0) {
-    newAdjustments.push(
-      makeAdjustment('refund', 'بازگشت وجه', grossRefund, 'credit', `لغو نوبت ${outcome.hoursBeforeStart} ساعت قبل از شروع (${outcome.refundPercent}٪ بازگشت)`),
-    );
-  }
-  if (cancelPenalty > 0) {
-    newAdjustments.push(
-      makeAdjustment('penalty_cancellation', 'جریمه لغو', cancelPenalty, 'debit', `جریمه لغو ${outcome.hoursBeforeStart} ساعت قبل از شروع`),
-    );
-  }
-
-  // Merge with existing adjustments and compute net.
-  const allAdjustments = [...(reservation.financialAdjustments ?? []), ...newAdjustments];
-  const finance = computeFinance(allAdjustments);
-
-  // Create debt adjustment if penalties exceed refund.
-  if (finance.debt > 0) {
-    newAdjustments.push(
-      makeAdjustment('debt', 'بدهی', finance.debt, 'debit', `مازاد جریمه‌ها بر بازگشت وجه (${finance.totalPenalties.toLocaleString('fa')} - ${finance.grossRefund.toLocaleString('fa')})`),
-    );
-  }
+  const { newAdjustments, finance, outcome, debtCreated } =
+    buildCancellationFinance({
+      existingAdjustments: reservation.financialAdjustments ?? [],
+      resolved,
+      startAt: reservation.startAt,
+      paidAmount: paidAmt,
+      depositAmount,
+      actor: cancelledBy,
+    });
 
   // Snapshot the cancellation outcome.
   reservation.cancellationOutcome = {
@@ -775,12 +756,10 @@ async function applyCancellationFinance(
     penaltyAmount: finance.totalPenalties,
     settled: false,
   };
-
-  // Append new adjustments.
   reservation.financialAdjustments.push(...newAdjustments);
   reservation.status = 'cancelled';
 
-  return { debtCreated: finance.debt };
+  return { debtCreated };
 }
 
 export async function cancelReservation(customerId: string, reservationId: string) {
@@ -804,9 +783,19 @@ export async function cancelReservation(customerId: string, reservationId: strin
 
   const depositAmount = reservation.deposit?.amount ?? 0;
   const resolved = await resolvePolicyFor(reservation);
-  await applyCancellationFinance(reservation, resolved, depositAmount, 'customer');
+  const { debtCreated } = await applyCancellationFinance(
+    reservation,
+    resolved,
+    depositAmount,
+    'customer',
+  );
   reservation.cancelledBy = 'customer';
   await reservation.save();
+  await postCustomerDebt(
+    reservation.customerId,
+    debtCreated,
+    `لغو رزرو ${String(reservation._id)}`,
+  );
 
   notifyReservationCancelled(reservation);
   return serializeReservation(reservation);
@@ -842,10 +831,20 @@ export async function cancelByStylist(
 
   const depositAmount = reservation.deposit?.amount ?? 0;
   const resolvedS = await resolvePolicyFor(reservation);
-  await applyCancellationFinance(reservation, resolvedS, depositAmount, 'stylist');
+  const { debtCreated } = await applyCancellationFinance(
+    reservation,
+    resolvedS,
+    depositAmount,
+    'stylist',
+  );
   reservation.cancelledBy = 'stylist';
   reservation.cancelReason = reason ?? null;
   await reservation.save();
+  await postCustomerDebt(
+    reservation.customerId,
+    debtCreated,
+    `لغو رزرو ${String(reservation._id)} توسط متخصص`,
+  );
 
   notifyReservationCancelled(reservation, reason);
 

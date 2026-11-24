@@ -41,3 +41,8 @@ export async function callback(req: Request, res: Response): Promise<void> {
   const { redirectUrl } = await service.handleCallback({ trackId, success, orderId });
   res.redirect(302, redirectUrl);
 }
+
+export async function status(req: Request, res: Response): Promise<void> {
+  const { trackId, orderId } = req.query as Record<string, string | undefined>;
+  sendSuccess(res, await service.getPaymentStatus(req.user!.id, { trackId, orderId }));
+}

@@ -10,7 +10,6 @@
  */
 import { Types } from 'mongoose';
 import { User, Role, ROLES } from '../../models/User';
-import type { IFinancialAdjustment } from '../../models/Reservation';
 import {
   StylistProfile,
   IStylistProfile,
@@ -45,7 +44,8 @@ import { updateSalon as updateSalonRecord } from '../salon/salon.service';
 import { maskSheba, maskCard, listStylistServices as ssListStylistServices, addStylistService as ssAddStylistService, updateStylistService as ssUpdateStylistService, removeStylistService as ssRemoveStylistService, createCustomService as ssCreateCustomService } from '../stylist/stylist.service';
 import { validateOwnerPolicy, resolveCancellationPolicy } from '../policy/policy.service';
 import { ICancellationPolicy } from '../../models/cancellationPolicy';
-import { calculateRefund, calculatePenalty, computeFinance, makeAdjustment } from '../finance/finance.service';
+import { buildCancellationFinance } from '../finance/cancellation.service';
+import { postCustomerDebt } from '../finance/debt.service';
 import { applyWalletChange } from '../wallet/wallet.service';
 import { OpeningHoursInput } from '../../utils/openingHours';
 import { nanoid } from 'nanoid';
@@ -755,61 +755,41 @@ export async function cancelReservation(adminId: string, id: string, reason?: st
     throw AppError.badRequest('این رزرو قابل لغو نیست', 'NOT_CANCELLABLE');
   }
 
-  // Apply cancellation finance (refund + penalties + debt).
+  // Apply the SAME cancellation finance used by customer/stylist cancellations.
   const depositAmount = reservation.deposit?.amount ?? 0;
+  const paidAmount = depositAmount || reservation.finalPrice || reservation.price || 0;
   const serviceIds = (reservation.serviceIds?.length ? reservation.serviceIds : [reservation.serviceId]).map(String);
   const resolved = await resolveCancellationPolicy({
     stylistId: String(reservation.stylistId),
     salonId: reservation.salonId ? String(reservation.salonId) : null,
     serviceIds,
   });
-  const hrs = (reservation.startAt.getTime() - Date.now()) / 3_600_000;
-  const rules = [...resolved.policy.rules].sort((a, b) => b.hoursBeforeStart - a.hoursBeforeStart);
-  let refundPercent = 0;
-  for (const r of rules) {
-    if (hrs >= r.hoursBeforeStart) { refundPercent = r.refundPercent; break; }
-  }
-  const penaltyPercent = 100 - refundPercent;
-  const grossRefund = calculateRefund(depositAmount, refundPercent);
-  const cancelPenalty = calculatePenalty(depositAmount, penaltyPercent);
-
-  const newAdjustments: IFinancialAdjustment[] = [];
-  if (grossRefund > 0) {
-    newAdjustments.push(
-      { type: 'refund', label: 'بازگشت وجه', amount: grossRefund, direction: 'credit', status: 'applied', reason: `لغو توسط پشتیبانی (${refundPercent}٪ بازگشت)`, createdAt: new Date() },
-    );
-  }
-  if (cancelPenalty > 0) {
-    newAdjustments.push(
-      { type: 'penalty_cancellation', label: 'جریمه لغو', amount: cancelPenalty, direction: 'debit', status: 'applied', reason: 'لغو توسط پشتیبانی', createdAt: new Date() },
-    );
-  }
-
-  const allAdjustments = [...(reservation.financialAdjustments ?? []), ...newAdjustments];
-  const finance = computeFinance(allAdjustments);
-
-  if (finance.debt > 0) {
-    newAdjustments.push(
-      { type: 'debt', label: 'بدهی', amount: finance.debt, direction: 'debit', status: 'applied', reason: `مازاد جریمه‌ها بر بازگشت وجه (لغو توسط پشتیبانی)`, createdAt: new Date() },
-    );
-  }
+  const { newAdjustments, finance, outcome, debtCreated } = buildCancellationFinance({
+    existingAdjustments: reservation.financialAdjustments ?? [],
+    resolved,
+    startAt: reservation.startAt,
+    paidAmount,
+    depositAmount,
+    actor: 'admin',
+  });
 
   reservation.cancellationOutcome = {
-    source: resolved.source,
-    hoursBeforeStart: Math.max(0, Math.round(hrs * 10) / 10),
-    refundPercent,
-    penaltyPercent,
+    ...outcome,
     refundAmount: finance.netRefund,
     penaltyAmount: finance.totalPenalties,
     settled: false,
   };
-
   reservation.financialAdjustments.push(...newAdjustments);
   reservation.status = 'cancelled';
   reservation.cancelledBy = 'admin';
   reservation.cancelReason = reason ?? 'cancelled_by_admin';
 
   await reservation.save();
+  await postCustomerDebt(
+    reservation.customerId,
+    debtCreated,
+    `لغو رزرو ${String(reservation._id)} توسط پشتیبانی`,
+  );
 
   void (async () => {
     const parties = await User.find({ _id: { $in: [reservation.customerId, reservation.stylistId] } })
