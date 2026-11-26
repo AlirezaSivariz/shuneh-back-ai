@@ -17,6 +17,8 @@ export interface IAdvertisement extends Document {
   description: string | null;
   /** Storage key; resolve to a URL with `storageProvider.getUrl`. */
   image: string;
+  /** Optional mobile-specific image; the desktop image is used when absent. */
+  mobileImage: string | null;
   /** Where the image/CTA navigates (http(s) URL or an internal "/path"). */
   destinationUrl: string;
   ctaText: string;
@@ -45,6 +47,7 @@ const advertisementSchema = new Schema<IAdvertisement>(
     title: { type: String, trim: true, default: null },
     description: { type: String, trim: true, default: null },
     image: { type: String, required: true },
+    mobileImage: { type: String, trim: true, default: null },
     destinationUrl: { type: String, required: true, trim: true },
     ctaText: { type: String, trim: true, default: 'مشاهده' },
     discountCode: { type: String, trim: true, default: null },

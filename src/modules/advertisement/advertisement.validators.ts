@@ -27,6 +27,7 @@ const baseFields = {
   title: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(500).nullable().optional(),
   image: z.string().trim().min(1, 'تصویر تبلیغ لازم است').max(500),
+  mobileImage: z.string().trim().max(500).nullable().optional(),
   destinationUrl,
   ctaText: z.string().trim().max(40).nullable().optional(),
   discountCode: z.string().trim().max(32).nullable().optional(),

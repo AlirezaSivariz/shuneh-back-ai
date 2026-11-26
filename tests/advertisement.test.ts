@@ -47,6 +47,7 @@ describe('Advertisements', () => {
       description: 'تخفیف ویژه رزرو',
       discountCode: 'SHUNEH20',
       image: upload.body.data.key,
+      mobileImage: 'ads/mobile-test.webp',
       audience: 'customers',
       startDate: futureDate(0),
       endDate: futureDate(10),
@@ -56,6 +57,8 @@ describe('Advertisements', () => {
     expect(created.audience).toBe('customers');
     expect(created.status).toBe('active');
     expect(created.imageUrl).toContain(upload.body.data.key);
+    expect(created.mobileImageKey).toBe('ads/mobile-test.webp');
+    expect(created.mobileImageUrl).toContain('ads/mobile-test.webp');
     expect(created.discountCode).toBe('SHUNEH20');
 
     const list = await api().get('/admin/ads').set(...auth(admin.token));
@@ -66,10 +69,11 @@ describe('Advertisements', () => {
     const updated = await api()
       .patch(`/admin/ads/${created.id}`)
       .set(...auth(admin.token))
-      .send({ title: 'کمپین زمستانه', discountCode: null });
+      .send({ title: 'کمپین زمستانه', discountCode: null, mobileImage: null });
     expect(updated.status).toBe(200);
     expect(updated.body.data.advertisement.title).toBe('کمپین زمستانه');
     expect(updated.body.data.advertisement.discountCode).toBeNull();
+    expect(updated.body.data.advertisement.mobileImageUrl).toBeNull();
 
     const disabled = await api()
       .patch(`/admin/ads/${created.id}/status`)
@@ -101,12 +105,14 @@ describe('Advertisements', () => {
     const ad = await createAd(admin.token, {
       displayIntervalMinutes: 60,
       discountCode: 'WELCOME10',
+      mobileImage: 'ads/public-mobile.webp',
     });
 
     const first = await api().get('/ads/next?viewer=guest_test_device_1');
     expect(first.status).toBe(200);
     expect(first.body.data.ad.id).toBe(ad.id);
     expect(first.body.data.ad.discountCode).toBe('WELCOME10');
+    expect(first.body.data.ad.mobileImageUrl).toContain('ads/public-mobile.webp');
 
     const claim = await api()
       .post(`/ads/${ad.id}/impression`)

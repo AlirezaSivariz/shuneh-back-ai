@@ -31,6 +31,7 @@ export interface AdvertisementInput {
   title?: string | null;
   description?: string | null;
   image?: string;
+  mobileImage?: string | null;
   destinationUrl?: string;
   ctaText?: string | null;
   discountCode?: string | null;
@@ -121,6 +122,8 @@ function toAdmin(ad: IAdvertisement) {
     description: ad.description,
     imageKey: ad.image,
     imageUrl: storageProvider.getUrl(ad.image),
+    mobileImageKey: ad.mobileImage,
+    mobileImageUrl: ad.mobileImage ? storageProvider.getUrl(ad.mobileImage) : null,
     destinationUrl: ad.destinationUrl,
     ctaText: ad.ctaText,
     discountCode: ad.discountCode,
@@ -145,6 +148,7 @@ export function toPublic(ad: IAdvertisement) {
     title: ad.title,
     description: ad.description,
     imageUrl: storageProvider.getUrl(ad.image),
+    mobileImageUrl: ad.mobileImage ? storageProvider.getUrl(ad.mobileImage) : null,
     destinationUrl: ad.destinationUrl,
     ctaText: ad.ctaText,
     discountCode: ad.discountCode,
@@ -224,6 +228,7 @@ export async function createAdvertisement(adminId: string, data: AdvertisementIn
     title: data.title ?? null,
     description: data.description ?? null,
     image: data.image,
+    mobileImage: data.mobileImage?.trim() || null,
     destinationUrl: data.destinationUrl,
     ctaText: data.ctaText?.trim() || 'مشاهده',
     discountCode: data.discountCode?.trim() || null,
@@ -288,6 +293,12 @@ export async function updateAdvertisement(
     if (oldKey) await storageProvider.delete(oldKey).catch(() => undefined);
   }
 
+  if (data.mobileImage !== undefined && data.mobileImage !== ad.mobileImage) {
+    const oldMobileKey = ad.mobileImage;
+    ad.mobileImage = data.mobileImage?.trim() || null;
+    if (oldMobileKey) await storageProvider.delete(oldMobileKey).catch(() => undefined);
+  }
+
   await ad.save();
   await audit(adminId, 'advertisement.update', id, { fields: Object.keys(data) });
   return toAdmin(ad);
@@ -307,6 +318,7 @@ export async function removeAdvertisement(adminId: string, id: string) {
   if (!ad) throw AppError.notFound('تبلیغ یافت نشد', 'ADVERTISEMENT_NOT_FOUND');
 
   if (ad.image) await storageProvider.delete(ad.image).catch(() => undefined);
+  if (ad.mobileImage) await storageProvider.delete(ad.mobileImage).catch(() => undefined);
   await AdView.deleteMany({ advertisement: ad._id });
   await ad.deleteOne();
   await audit(adminId, 'advertisement.delete', id, { title: ad.title });
