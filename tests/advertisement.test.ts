@@ -45,6 +45,7 @@ describe('Advertisements', () => {
     const created = await createAd(admin.token, {
       title: 'کمپین پاییزه',
       description: 'تخفیف ویژه رزرو',
+      discountCode: 'SHUNEH20',
       image: upload.body.data.key,
       audience: 'customers',
       startDate: futureDate(0),
@@ -55,6 +56,7 @@ describe('Advertisements', () => {
     expect(created.audience).toBe('customers');
     expect(created.status).toBe('active');
     expect(created.imageUrl).toContain(upload.body.data.key);
+    expect(created.discountCode).toBe('SHUNEH20');
 
     const list = await api().get('/admin/ads').set(...auth(admin.token));
     expect(list.status).toBe(200);
@@ -64,9 +66,10 @@ describe('Advertisements', () => {
     const updated = await api()
       .patch(`/admin/ads/${created.id}`)
       .set(...auth(admin.token))
-      .send({ title: 'کمپین زمستانه' });
+      .send({ title: 'کمپین زمستانه', discountCode: null });
     expect(updated.status).toBe(200);
     expect(updated.body.data.advertisement.title).toBe('کمپین زمستانه');
+    expect(updated.body.data.advertisement.discountCode).toBeNull();
 
     const disabled = await api()
       .patch(`/admin/ads/${created.id}/status`)
@@ -95,11 +98,15 @@ describe('Advertisements', () => {
 
   it('serves one ad per interval and records impressions/clicks', async () => {
     const admin = await createAdmin();
-    const ad = await createAd(admin.token, { displayIntervalMinutes: 60 });
+    const ad = await createAd(admin.token, {
+      displayIntervalMinutes: 60,
+      discountCode: 'WELCOME10',
+    });
 
     const first = await api().get('/ads/next?viewer=guest_test_device_1');
     expect(first.status).toBe(200);
     expect(first.body.data.ad.id).toBe(ad.id);
+    expect(first.body.data.ad.discountCode).toBe('WELCOME10');
 
     const claim = await api()
       .post(`/ads/${ad.id}/impression`)

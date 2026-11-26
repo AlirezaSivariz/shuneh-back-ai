@@ -29,6 +29,7 @@ const baseFields = {
   image: z.string().trim().min(1, 'تصویر تبلیغ لازم است').max(500),
   destinationUrl,
   ctaText: z.string().trim().max(40).nullable().optional(),
+  discountCode: z.string().trim().max(32).nullable().optional(),
   audience: z.enum(AD_AUDIENCES as [string, ...string[]]),
   startDate: dateStr.nullable().optional(),
   endDate: dateStr.nullable().optional(),

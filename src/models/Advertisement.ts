@@ -20,6 +20,8 @@ export interface IAdvertisement extends Document {
   /** Where the image/CTA navigates (http(s) URL or an internal "/path"). */
   destinationUrl: string;
   ctaText: string;
+  /** Optional promo code shown in the public modal with a copy button. */
+  discountCode: string | null;
   audience: AdAudience;
   /** Schedule window (null = unbounded). Stored as Iran start/end of day. */
   startsAt: Date | null;
@@ -45,6 +47,7 @@ const advertisementSchema = new Schema<IAdvertisement>(
     image: { type: String, required: true },
     destinationUrl: { type: String, required: true, trim: true },
     ctaText: { type: String, trim: true, default: 'مشاهده' },
+    discountCode: { type: String, trim: true, default: null },
     audience: { type: String, enum: AD_AUDIENCES, default: 'all', index: true },
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },

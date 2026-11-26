@@ -33,6 +33,7 @@ export interface AdvertisementInput {
   image?: string;
   destinationUrl?: string;
   ctaText?: string | null;
+  discountCode?: string | null;
   audience?: AdAudience;
   startDate?: string | null;
   endDate?: string | null;
@@ -122,6 +123,7 @@ function toAdmin(ad: IAdvertisement) {
     imageUrl: storageProvider.getUrl(ad.image),
     destinationUrl: ad.destinationUrl,
     ctaText: ad.ctaText,
+    discountCode: ad.discountCode,
     audience: ad.audience,
     startDate: iranDateOnly(ad.startsAt),
     endDate: iranDateOnly(ad.endsAt),
@@ -145,6 +147,7 @@ export function toPublic(ad: IAdvertisement) {
     imageUrl: storageProvider.getUrl(ad.image),
     destinationUrl: ad.destinationUrl,
     ctaText: ad.ctaText,
+    discountCode: ad.discountCode,
     audience: ad.audience,
     displayIntervalMinutes: ad.displayIntervalMinutes,
   };
@@ -166,7 +169,12 @@ export async function listAdvertisements(params: {
   const filter: Record<string, unknown> = {};
   if (params.search?.trim()) {
     const rx = new RegExp(escapeRegex(params.search.trim()), 'i');
-    filter.$or = [{ title: rx }, { description: rx }, { destinationUrl: rx }];
+    filter.$or = [
+      { title: rx },
+      { description: rx },
+      { destinationUrl: rx },
+      { discountCode: rx },
+    ];
   }
   if (params.audience) filter.audience = params.audience;
   if (params.isActive !== undefined) filter.isActive = params.isActive;
@@ -218,6 +226,7 @@ export async function createAdvertisement(adminId: string, data: AdvertisementIn
     image: data.image,
     destinationUrl: data.destinationUrl,
     ctaText: data.ctaText?.trim() || 'مشاهده',
+    discountCode: data.discountCode?.trim() || null,
     audience: data.audience ?? 'all',
     startsAt: data.startDate ? startOfIranDay(data.startDate) : null,
     endsAt: data.endDate ? endOfIranDay(data.endDate) : null,
@@ -248,6 +257,7 @@ export async function updateAdvertisement(
   if (data.description !== undefined) ad.description = data.description?.trim() || null;
   if (data.destinationUrl !== undefined) ad.destinationUrl = data.destinationUrl;
   if (data.ctaText !== undefined) ad.ctaText = data.ctaText?.trim() || 'مشاهده';
+  if (data.discountCode !== undefined) ad.discountCode = data.discountCode?.trim() || null;
   if (data.audience !== undefined) ad.audience = data.audience;
   if (data.isActive !== undefined) ad.isActive = data.isActive;
   if (data.displayIntervalMinutes !== undefined) {
